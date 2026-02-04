@@ -33,7 +33,6 @@ pub enum FileEventKind {
 ///
 /// Production: FSEvents via `notify` crate
 /// Testing: Manual event emission
-#[cfg_attr(test, mockall::automock)]
 pub trait FileWatcher: Send + Sync {
     /// Start watching a path
     fn watch(&self, path: PathBuf) -> Result<(), FileWatcherError>;
@@ -43,4 +42,7 @@ pub trait FileWatcher: Send + Sync {
 
     /// Get the list of currently watched paths
     fn watched_paths(&self) -> Vec<PathBuf>;
+
+    /// Set a callback for file events. Called when watched files change.
+    fn set_event_handler(&self, handler: std::sync::Arc<dyn Fn(FileEvent) + Send + Sync>);
 }

@@ -25,9 +25,11 @@ LocalPush is a macOS menu bar app that watches local files and delivers them to 
 - [x] Production implementations started (Keychain, FSEvents)
 
 ### Remaining
-- [ ] Git initialization
 - [ ] npm install and cargo build verification
 - [ ] Install Rust toolchain (cargo not found on this machine)
+
+### Recently Completed (2026-02-04 - Session 2 continued)
+- [x] Git initialization - Initial commit with 53 files
 
 ### Recently Completed (2026-02-04 - Session 2)
 - [x] TransparencyPreview component - `src/components/TransparencyPreview.tsx`

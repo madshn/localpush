@@ -124,6 +124,13 @@ impl ClaudeStatsSource {
         Ok(Self { stats_path })
     }
 
+    /// Constructor with custom path (for testing)
+    pub fn new_with_path(path: impl Into<PathBuf>) -> Self {
+        Self {
+            stats_path: path.into(),
+        }
+    }
+
     /// Helper to parse the raw stats file
     fn load_stats(&self) -> Result<ClaudeStatsRaw, SourceError> {
         debug!("Loading Claude stats from: {}", self.stats_path.display());

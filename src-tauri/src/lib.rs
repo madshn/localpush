@@ -8,9 +8,12 @@ pub mod traits;
 pub mod mocks;
 pub mod production;
 pub mod sources;
+pub mod source_manager;
 
+mod config;
 mod ledger;
 mod state;
+pub mod delivery_worker;
 
 use std::sync::Arc;
 use tauri::{App, Manager};
@@ -33,12 +36,36 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize app state with production implementations
     let state = AppState::new_production(app.handle())?;
-    app.manage(Arc::new(state));
+
+    // Recover orphaned in-flight entries from previous crash
+    let recovered = state.ledger.recover_orphans().unwrap_or(0);
+    if recovered > 0 {
+        tracing::warn!("Recovered {} orphaned deliveries from previous session", recovered);
+    }
+
+    // Connect file watcher events to source manager
+    let source_manager_for_events = state.source_manager.clone();
+    state.file_watcher.set_event_handler(Arc::new(move |event| {
+        tracing::debug!("File event: {:?}", event.path);
+        if let Err(e) = source_manager_for_events.handle_file_event(&event.path) {
+            tracing::warn!("Failed to process file event {:?}: {}", event.path, e);
+        }
+    }));
+
+    // Spawn background delivery worker
+    let _worker = delivery_worker::spawn_worker(
+        state.ledger.clone(),
+        state.webhook_client.clone(),
+        state.config.clone(),
+    );
+
+    let state = Arc::new(state);
+    app.manage(state);
 
     // Set up system tray
     setup_tray(app)?;
 
-    tracing::info!("LocalPush initialized");
+    tracing::info!("LocalPush initialized — delivery pipeline active");
     Ok(())
 }
 

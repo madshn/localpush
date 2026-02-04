@@ -6,16 +6,19 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, Debouncer, FileIdMap};
 use std::time::Duration;
 
-use crate::traits::{FileWatcher, FileWatcherError};
+use crate::traits::{FileWatcher, FileWatcherError, FileEvent, FileEventKind};
 
 pub struct FsEventsWatcher {
     debouncer: Arc<Mutex<Debouncer<RecommendedWatcher, FileIdMap>>>,
     watched_paths: Arc<Mutex<Vec<PathBuf>>>,
+    event_handler: Arc<Mutex<Option<Arc<dyn Fn(FileEvent) + Send + Sync>>>>,
 }
 
 impl FsEventsWatcher {
     pub fn new() -> Result<Self, FileWatcherError> {
         let (tx, rx) = std::sync::mpsc::channel();
+        let event_handler = Arc::new(Mutex::new(None));
+        let event_handler_clone = Arc::clone(&event_handler);
 
         // Spawn event handler thread
         std::thread::spawn(move || {
@@ -24,7 +27,18 @@ impl FsEventsWatcher {
                     Ok(events) => {
                         for event in events {
                             tracing::debug!("File event: {:?}", event);
-                            // TODO: Send to event processor
+                            // Forward to handler if set
+                            if let Some(handler) = event_handler_clone.lock().unwrap().as_ref() {
+                                // Convert notify event paths to FileEvent
+                                for path in &event.paths {
+                                    let file_event = FileEvent {
+                                        path: path.clone(),
+                                        kind: FileEventKind::Modified, // Simplified for MVP
+                                        timestamp: chrono::Utc::now(),
+                                    };
+                                    handler(file_event);
+                                }
+                            }
                         }
                     }
                     Err(errors) => {
@@ -45,6 +59,7 @@ impl FsEventsWatcher {
         Ok(Self {
             debouncer: Arc::new(Mutex::new(debouncer)),
             watched_paths: Arc::new(Mutex::new(Vec::new())),
+            event_handler,
         })
     }
 }
@@ -80,5 +95,10 @@ impl FileWatcher for FsEventsWatcher {
 
     fn watched_paths(&self) -> Vec<PathBuf> {
         self.watched_paths.lock().unwrap().clone()
+    }
+
+    fn set_event_handler(&self, handler: Arc<dyn Fn(FileEvent) + Send + Sync>) {
+        *self.event_handler.lock().unwrap() = Some(handler);
+        tracing::debug!("File event handler set");
     }
 }

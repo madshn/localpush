@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::traits::{
     CredentialStore, CredentialError,
-    FileWatcher, FileWatcherError,
+    FileWatcher, FileWatcherError, FileEvent, FileEventKind,
     WebhookClient, WebhookError, WebhookResponse, WebhookAuth,
 };
 
@@ -94,12 +94,14 @@ impl CredentialStore for InMemoryCredentialStore {
 #[derive(Clone)]
 pub struct ManualFileWatcher {
     watched: Arc<Mutex<Vec<PathBuf>>>,
+    event_handler: Arc<Mutex<Option<Arc<dyn Fn(FileEvent) + Send + Sync>>>>,
 }
 
 impl ManualFileWatcher {
     pub fn new() -> Self {
         Self {
             watched: Arc::new(Mutex::new(Vec::new())),
+            event_handler: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -111,6 +113,17 @@ impl ManualFileWatcher {
     /// Clear all watched paths
     pub fn clear(&self) {
         self.watched.lock().unwrap().clear();
+    }
+
+    /// Simulate a file event (for testing)
+    pub fn simulate_event(&self, path: PathBuf) {
+        if let Some(handler) = self.event_handler.lock().unwrap().as_ref() {
+            handler(FileEvent {
+                path,
+                kind: FileEventKind::Modified,
+                timestamp: chrono::Utc::now(),
+            });
+        }
     }
 }
 
@@ -137,6 +150,10 @@ impl FileWatcher for ManualFileWatcher {
 
     fn watched_paths(&self) -> Vec<PathBuf> {
         self.watched.lock().unwrap().clone()
+    }
+
+    fn set_event_handler(&self, handler: Arc<dyn Fn(FileEvent) + Send + Sync>) {
+        *self.event_handler.lock().unwrap() = Some(handler);
     }
 }
 
@@ -353,6 +370,61 @@ mod tests {
         watcher.unwatch(path1.clone()).unwrap();
         assert!(!watcher.is_watching(&path1));
         assert_eq!(watcher.watched_paths().len(), 0);
+    }
+
+    #[test]
+    fn test_file_watcher_event_handler() {
+        let watcher = ManualFileWatcher::new();
+        let path = PathBuf::from("/test/path");
+
+        // Set up event handler to capture events
+        let received_events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = Arc::clone(&received_events);
+
+        watcher.set_event_handler(Arc::new(move |event: FileEvent| {
+            events_clone.lock().unwrap().push(event.path.clone());
+        }));
+
+        // Simulate event
+        watcher.simulate_event(path.clone());
+
+        // Verify event was received
+        let events = received_events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], path);
+    }
+
+    #[test]
+    fn test_file_watcher_event_handler_multiple_events() {
+        let watcher = ManualFileWatcher::new();
+        let path1 = PathBuf::from("/test/path1");
+        let path2 = PathBuf::from("/test/path2");
+
+        let received_events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = Arc::clone(&received_events);
+
+        watcher.set_event_handler(Arc::new(move |event: FileEvent| {
+            events_clone.lock().unwrap().push(event.path.clone());
+        }));
+
+        // Simulate multiple events
+        watcher.simulate_event(path1.clone());
+        watcher.simulate_event(path2.clone());
+
+        // Verify all events were received
+        let events = received_events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], path1);
+        assert_eq!(events[1], path2);
+    }
+
+    #[test]
+    fn test_file_watcher_no_handler() {
+        let watcher = ManualFileWatcher::new();
+        let path = PathBuf::from("/test/path");
+
+        // Simulate event without handler (should not panic)
+        watcher.simulate_event(path);
     }
 
     #[tokio::test]

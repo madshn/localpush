@@ -4,6 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::source_manager::SourceInfo;
 use crate::state::AppState;
 use crate::traits::{DeliveryStatus, WebhookAuth};
 
@@ -64,17 +65,15 @@ pub fn get_delivery_status(state: State<'_, Arc<AppState>>) -> Result<DeliverySt
 
 /// Get available data sources
 #[tauri::command]
-pub fn get_sources(_state: State<'_, Arc<AppState>>) -> Result<Vec<SourceResponse>, String> {
-    // For MVP, only Claude Code Stats
-    Ok(vec![
-        SourceResponse {
-            id: "claude-stats".to_string(),
-            name: "Claude Code Stats".to_string(),
-            description: "Token usage, sessions, messages from Claude Code".to_string(),
-            enabled: false, // TODO: Track enabled state
-            last_sync: None,
-        },
-    ])
+pub fn get_sources(state: State<'_, Arc<AppState>>) -> Result<Vec<SourceResponse>, String> {
+    let sources = state.source_manager.list_sources();
+    Ok(sources.into_iter().map(|s| SourceResponse {
+        id: s.id,
+        name: s.name,
+        description: format!("Data from {}", s.name),
+        enabled: s.enabled,
+        last_sync: None, // TODO: track last sync time
+    }).collect())
 }
 
 /// Get the delivery queue
@@ -107,23 +106,19 @@ pub fn get_delivery_queue(state: State<'_, Arc<AppState>>) -> Result<Vec<Deliver
 /// Enable a data source
 #[tauri::command]
 pub fn enable_source(
-    _state: State<'_, Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
     source_id: String,
 ) -> Result<(), String> {
-    tracing::info!("Enabling source: {}", source_id);
-    // TODO: Implement source enabling
-    Ok(())
+    state.source_manager.enable(&source_id).map_err(|e| e.to_string())
 }
 
 /// Disable a data source
 #[tauri::command]
 pub fn disable_source(
-    _state: State<'_, Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
     source_id: String,
 ) -> Result<(), String> {
-    tracing::info!("Disabling source: {}", source_id);
-    // TODO: Implement source disabling
-    Ok(())
+    state.source_manager.disable(&source_id).map_err(|e| e.to_string())
 }
 
 /// Add a webhook target
@@ -132,13 +127,19 @@ pub async fn add_webhook_target(
     state: State<'_, Arc<AppState>>,
     config: WebhookConfig,
 ) -> Result<(), String> {
-    // Store credentials securely
-    let cred_key = format!("webhook:{}", uuid::Uuid::new_v4());
+    // Store URL in config
+    state.config.set("webhook_url", &config.url).map_err(|e| e.to_string())?;
+
+    // Store auth as JSON in config
+    let auth_json = serde_json::to_string(&config.auth).map_err(|e| e.to_string())?;
+    state.config.set("webhook_auth_json", &auth_json).map_err(|e| e.to_string())?;
+
+    // Also store in keychain for security
+    let cred_key = "webhook:default";
     let cred_value = serde_json::to_string(&config.auth).map_err(|e| e.to_string())?;
+    state.credentials.store(cred_key, &cred_value).map_err(|e| e.to_string())?;
 
-    state.credentials.store(&cred_key, &cred_value).map_err(|e| e.to_string())?;
-
-    tracing::info!("Added webhook target: {}", config.url);
+    tracing::info!("Configured webhook target: {}", config.url);
     Ok(())
 }
 
@@ -159,35 +160,11 @@ pub async fn test_webhook(
 /// Get a preview of data from a source (Radical Transparency)
 #[tauri::command]
 pub fn get_source_preview(
-    _state: State<'_, Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
     source_id: String,
 ) -> Result<serde_json::Value, String> {
-    match source_id.as_str() {
-        "claude-stats" => {
-            // TODO: Read actual Claude Code stats
-            Ok(serde_json::json!({
-                "preview": {
-                    "tokens_today": 0,
-                    "sessions_today": 0,
-                    "messages_today": 0,
-                },
-                "fields": [
-                    {"name": "token.total", "description": "Total tokens used", "type": "number"},
-                    {"name": "token.sessions", "description": "Number of coding sessions", "type": "number"},
-                    {"name": "token.messages", "description": "Messages sent", "type": "number"},
-                ],
-                "collects": [
-                    "Daily token counts",
-                    "Session counts",
-                    "Message and tool counts"
-                ],
-                "does_not_collect": [
-                    "Conversation content",
-                    "Code or file contents",
-                    "Anything you typed"
-                ]
-            }))
-        }
-        _ => Err(format!("Unknown source: {}", source_id)),
-    }
+    let source = state.source_manager.get_source(&source_id)
+        .ok_or_else(|| format!("Unknown source: {}", source_id))?;
+    let preview = source.preview().map_err(|e| e.to_string())?;
+    serde_json::to_value(preview).map_err(|e| e.to_string())
 }

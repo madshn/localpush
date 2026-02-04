@@ -3,6 +3,8 @@
 use std::sync::Arc;
 use tauri::AppHandle;
 
+use crate::config::AppConfig;
+use crate::source_manager::SourceManager;
 use crate::traits::{CredentialStore, FileWatcher, WebhookClient, DeliveryLedgerTrait};
 use crate::production::{KeychainCredentialStore, FsEventsWatcher, ReqwestWebhookClient};
 use crate::ledger::DeliveryLedger;
@@ -13,6 +15,8 @@ pub struct AppState {
     pub file_watcher: Arc<dyn FileWatcher>,
     pub webhook_client: Arc<dyn WebhookClient>,
     pub ledger: Arc<dyn DeliveryLedgerTrait>,
+    pub source_manager: Arc<SourceManager>,
+    pub config: Arc<AppConfig>,
 }
 
 impl AppState {
@@ -22,13 +26,37 @@ impl AppState {
         std::fs::create_dir_all(&app_data_dir)?;
 
         let db_path = app_data_dir.join("ledger.sqlite");
-        let ledger = DeliveryLedger::open(&db_path)?;
+        let ledger = Arc::new(DeliveryLedger::open(&db_path)?);
+
+        let config_path = app_data_dir.join("config.sqlite");
+        let config_conn = rusqlite::Connection::open(&config_path)?;
+        AppConfig::init_table(&config_conn)?;
+        let config = Arc::new(AppConfig::from_connection(config_conn));
+
+        let credentials = Arc::new(KeychainCredentialStore::new());
+        let file_watcher = Arc::new(FsEventsWatcher::new()?);
+        let webhook_client = Arc::new(ReqwestWebhookClient::new()?);
+
+        let source_manager = Arc::new(SourceManager::new(
+            ledger.clone(),
+            file_watcher.clone(),
+            config.clone(),
+        ));
+
+        // Register ClaudeStatsSource
+        use crate::sources::ClaudeStatsSource;
+        source_manager.register(Arc::new(ClaudeStatsSource::new()));
+
+        // Restore enabled sources from config
+        source_manager.restore_enabled();
 
         Ok(Self {
-            credentials: Arc::new(KeychainCredentialStore::new()),
-            file_watcher: Arc::new(FsEventsWatcher::new()?),
-            webhook_client: Arc::new(ReqwestWebhookClient::new()?),
-            ledger: Arc::new(ledger),
+            credentials,
+            file_watcher,
+            webhook_client,
+            ledger,
+            source_manager,
+            config,
         })
     }
 
@@ -37,12 +65,30 @@ impl AppState {
     pub fn new_test() -> Self {
         use crate::mocks::{InMemoryCredentialStore, ManualFileWatcher, RecordedWebhookClient};
         use crate::DeliveryLedger;
+        use crate::sources::ClaudeStatsSource;
+
+        let credentials = Arc::new(InMemoryCredentialStore::new());
+        let file_watcher = Arc::new(ManualFileWatcher::new());
+        let webhook_client = Arc::new(RecordedWebhookClient::new());
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+
+        let source_manager = Arc::new(SourceManager::new(
+            ledger.clone(),
+            file_watcher.clone(),
+            config.clone(),
+        ));
+
+        // Register test source
+        source_manager.register(Arc::new(ClaudeStatsSource::new()));
 
         Self {
-            credentials: Arc::new(InMemoryCredentialStore::new()),
-            file_watcher: Arc::new(ManualFileWatcher::new()),
-            webhook_client: Arc::new(RecordedWebhookClient::new()),
-            ledger: Arc::new(DeliveryLedger::open_in_memory().unwrap()),
+            credentials,
+            file_watcher,
+            webhook_client,
+            ledger,
+            source_manager,
+            config,
         }
     }
 }
