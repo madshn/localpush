@@ -125,17 +125,17 @@ mod tests {
 
         // Test true value
         config.set("enabled", "true").unwrap();
-        assert_eq!(config.get_bool("enabled").unwrap(), true);
+        assert!(config.get_bool("enabled").unwrap());
 
         // Test false value
         config.set("enabled", "false").unwrap();
-        assert_eq!(config.get_bool("enabled").unwrap(), false);
+        assert!(!config.get_bool("enabled").unwrap());
 
         // Test missing key (defaults to false)
-        assert_eq!(config.get_bool("missing").unwrap(), false);
+        assert!(!config.get_bool("missing").unwrap());
 
         // Test non-boolean value (defaults to false)
         config.set("enabled", "not_a_bool").unwrap();
-        assert_eq!(config.get_bool("enabled").unwrap(), false);
+        assert!(!config.get_bool("enabled").unwrap());
     }
 }
