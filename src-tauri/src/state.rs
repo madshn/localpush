@@ -27,7 +27,7 @@ impl AppState {
         Ok(Self {
             credentials: Arc::new(KeychainCredentialStore::new()),
             file_watcher: Arc::new(FsEventsWatcher::new()?),
-            webhook_client: Arc::new(ReqwestWebhookClient::new()),
+            webhook_client: Arc::new(ReqwestWebhookClient::new()?),
             ledger: Arc::new(ledger),
         })
     }
@@ -35,13 +35,14 @@ impl AppState {
     /// Create a new AppState with test implementations
     #[cfg(test)]
     pub fn new_test() -> Self {
-        use crate::mocks::{MockCredentialStore, MockFileWatcher, MockWebhookClient, InMemoryLedger};
+        use crate::mocks::{InMemoryCredentialStore, ManualFileWatcher, RecordedWebhookClient};
+        use crate::DeliveryLedger;
 
         Self {
-            credentials: Arc::new(MockCredentialStore::new()),
-            file_watcher: Arc::new(MockFileWatcher::new()),
-            webhook_client: Arc::new(MockWebhookClient::new()),
-            ledger: Arc::new(InMemoryLedger::new()),
+            credentials: Arc::new(InMemoryCredentialStore::new()),
+            file_watcher: Arc::new(ManualFileWatcher::new()),
+            webhook_client: Arc::new(RecordedWebhookClient::new()),
+            ledger: Arc::new(DeliveryLedger::open_in_memory().unwrap()),
         }
     }
 }
