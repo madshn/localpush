@@ -155,7 +155,7 @@ mod tests {
         ledger.enqueue("event.b", serde_json::json!({"b": 2})).unwrap();
         ledger.enqueue("event.c", serde_json::json!({"c": 3})).unwrap();
 
-        let (delivered, failed) = process_batch(&ledger, &webhook, &test_config(), 10).await;
+        let (delivered, _failed) = process_batch(&ledger, &webhook, &test_config(), 10).await;
 
         assert_eq!(delivered, 3);
         assert_eq!(webhook.call_count(), 3);

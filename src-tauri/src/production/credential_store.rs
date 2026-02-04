@@ -13,6 +13,12 @@ impl KeychainCredentialStore {
     }
 }
 
+impl Default for KeychainCredentialStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CredentialStore for KeychainCredentialStore {
     fn store(&self, key: &str, value: &str) -> Result<(), CredentialError> {
         let entry = Entry::new(SERVICE_NAME, key)

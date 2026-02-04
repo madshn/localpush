@@ -10,7 +10,7 @@ pub mod production;
 pub mod sources;
 pub mod source_manager;
 
-mod config;
+pub mod config;
 mod ledger;
 mod state;
 pub mod delivery_worker;
@@ -59,7 +59,6 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         state.config.clone(),
     );
 
-    let state = Arc::new(state);
     app.manage(state);
 
     // Set up system tray
@@ -78,7 +77,7 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     let _tray = TrayIconBuilder::new()
         .menu(&menu)
-        .menu_on_left_click(false)
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             if event.id.as_ref() == "quit" {
                 app.exit(0);

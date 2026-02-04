@@ -1,10 +1,11 @@
 //! SQLite-based application configuration store
 
 use rusqlite::{Connection, params};
+use std::sync::Mutex;
 use crate::traits::LedgerError;
 
 pub struct AppConfig {
-    conn: Connection,
+    conn: Mutex<Connection>,
 }
 
 impl AppConfig {
@@ -24,16 +25,17 @@ impl AppConfig {
         let conn = Connection::open_in_memory()
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
         Self::init_table(&conn)?;
-        Ok(Self { conn })
+        Ok(Self { conn: Mutex::new(conn) })
     }
 
     /// Wrap an existing connection (config table must already be initialized)
     pub fn from_connection(conn: Connection) -> Self {
-        Self { conn }
+        Self { conn: Mutex::new(conn) }
     }
 
     pub fn get(&self, key: &str) -> Result<Option<String>, LedgerError> {
-        let result = self.conn.query_row(
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
             "SELECT value FROM app_config WHERE key = ?1",
             params![key],
             |row| row.get(0),
@@ -47,7 +49,8 @@ impl AppConfig {
 
     pub fn set(&self, key: &str, value: &str) -> Result<(), LedgerError> {
         let now = chrono::Utc::now().timestamp();
-        self.conn.execute(
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
             "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?1, ?2, ?3)",
             params![key, value, now],
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
@@ -55,7 +58,8 @@ impl AppConfig {
     }
 
     pub fn delete(&self, key: &str) -> Result<(), LedgerError> {
-        self.conn.execute(
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
             "DELETE FROM app_config WHERE key = ?1",
             params![key],
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;

@@ -1,7 +1,7 @@
 //! Application state management
 
 use std::sync::Arc;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::config::AppConfig;
 use crate::source_manager::SourceManager;
@@ -45,7 +45,10 @@ impl AppState {
 
         // Register ClaudeStatsSource
         use crate::sources::ClaudeStatsSource;
-        source_manager.register(Arc::new(ClaudeStatsSource::new()));
+        match ClaudeStatsSource::new() {
+            Ok(source) => source_manager.register(Arc::new(source)),
+            Err(e) => tracing::warn!("Could not initialize Claude stats source: {}", e),
+        }
 
         // Restore enabled sources from config
         source_manager.restore_enabled();
@@ -80,7 +83,13 @@ impl AppState {
         ));
 
         // Register test source
-        source_manager.register(Arc::new(ClaudeStatsSource::new()));
+        match ClaudeStatsSource::new() {
+            Ok(source) => source_manager.register(Arc::new(source)),
+            Err(_) => {
+                // In tests, use a custom path
+                source_manager.register(Arc::new(ClaudeStatsSource::new_with_path("/tmp/fake-stats.json")))
+            }
+        }
 
         Self {
             credentials,

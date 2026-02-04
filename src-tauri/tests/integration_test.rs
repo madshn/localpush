@@ -12,7 +12,7 @@ use localpush_lib::source_manager::SourceManager;
 use localpush_lib::sources::ClaudeStatsSource;
 use localpush_lib::mocks::{ManualFileWatcher, RecordedWebhookClient};
 use localpush_lib::DeliveryLedger;
-use localpush_lib::traits::{DeliveryLedgerTrait, DeliveryStatus, WebhookAuth};
+use localpush_lib::traits::{DeliveryLedgerTrait, DeliveryStatus, WebhookAuth, FileWatcher};
 
 /// Create a temporary stats file with valid JSON
 fn create_stats_file() -> NamedTempFile {

@@ -21,7 +21,7 @@ impl ReqwestWebhookClient {
         Ok(Self { client })
     }
 
-    fn apply_auth(&self, mut request: reqwest::RequestBuilder, auth: &WebhookAuth) -> reqwest::RequestBuilder {
+    fn apply_auth(&self, request: reqwest::RequestBuilder, auth: &WebhookAuth) -> reqwest::RequestBuilder {
         match auth {
             WebhookAuth::None => request,
             WebhookAuth::Header { name, value } => {

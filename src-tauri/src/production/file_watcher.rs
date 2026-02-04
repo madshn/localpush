@@ -2,22 +2,22 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{new_debouncer, Debouncer, FileIdMap};
 use std::time::Duration;
 
-use crate::traits::{FileWatcher, FileWatcherError, FileEvent, FileEventKind};
+use crate::traits::{FileWatcher, FileWatcherError, FileEvent, FileEventKind, EventHandler};
 
 pub struct FsEventsWatcher {
     debouncer: Arc<Mutex<Debouncer<RecommendedWatcher, FileIdMap>>>,
     watched_paths: Arc<Mutex<Vec<PathBuf>>>,
-    event_handler: Arc<Mutex<Option<Arc<dyn Fn(FileEvent) + Send + Sync>>>>,
+    event_handler: EventHandler,
 }
 
 impl FsEventsWatcher {
     pub fn new() -> Result<Self, FileWatcherError> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let event_handler = Arc::new(Mutex::new(None));
+        let (tx, rx) = std::sync::mpsc::channel::<notify_debouncer_full::DebounceEventResult>();
+        let event_handler: EventHandler = Arc::new(Mutex::new(None));
         let event_handler_clone = Arc::clone(&event_handler);
 
         // Spawn event handler thread
@@ -71,7 +71,7 @@ impl FileWatcher for FsEventsWatcher {
         }
 
         let mut debouncer = self.debouncer.lock().unwrap();
-        debouncer.watcher()
+        debouncer
             .watch(&path, RecursiveMode::NonRecursive)
             .map_err(|e| FileWatcherError::WatchError(e.to_string()))?;
 
@@ -83,7 +83,7 @@ impl FileWatcher for FsEventsWatcher {
 
     fn unwatch(&self, path: PathBuf) -> Result<(), FileWatcherError> {
         let mut debouncer = self.debouncer.lock().unwrap();
-        debouncer.watcher()
+        debouncer
             .unwatch(&path)
             .map_err(|e| FileWatcherError::WatchError(e.to_string()))?;
 

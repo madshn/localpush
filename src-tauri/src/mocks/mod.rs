@@ -12,6 +12,7 @@ use crate::traits::{
     CredentialStore, CredentialError,
     FileWatcher, FileWatcherError, FileEvent, FileEventKind,
     WebhookClient, WebhookError, WebhookResponse, WebhookAuth,
+    EventHandler,
 };
 
 // Re-export ledger's in-memory implementation
@@ -94,7 +95,7 @@ impl CredentialStore for InMemoryCredentialStore {
 #[derive(Clone)]
 pub struct ManualFileWatcher {
     watched: Arc<Mutex<Vec<PathBuf>>>,
-    event_handler: Arc<Mutex<Option<Arc<dyn Fn(FileEvent) + Send + Sync>>>>,
+    event_handler: EventHandler,
 }
 
 impl ManualFileWatcher {
@@ -169,7 +170,7 @@ pub struct WebhookRequest {
 }
 
 /// Failure configuration for webhook client
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum WebhookBehavior {
     /// Always succeed with given status code
     AlwaysSucceed(u16),
@@ -178,7 +179,19 @@ pub enum WebhookBehavior {
     /// Always fail with given error
     AlwaysFail(WebhookError),
     /// Custom response based on request
+    #[allow(clippy::type_complexity)]
     Custom(Arc<dyn Fn(&WebhookRequest) -> Result<WebhookResponse, WebhookError> + Send + Sync>),
+}
+
+impl std::fmt::Debug for WebhookBehavior {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlwaysSucceed(s) => write!(f, "AlwaysSucceed({})", s),
+            Self::FailThenSucceed { fail_count, .. } => write!(f, "FailThenSucceed({})", fail_count),
+            Self::AlwaysFail(e) => write!(f, "AlwaysFail({:?})", e),
+            Self::Custom(_) => write!(f, "Custom(fn)"),
+        }
+    }
 }
 
 /// Recorded webhook client for testing

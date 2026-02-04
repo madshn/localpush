@@ -1,11 +1,12 @@
 //! SQLite-based delivery ledger with WAL for guaranteed delivery
 
 use std::path::Path;
+use std::sync::Mutex;
 use rusqlite::{Connection, params};
 use crate::traits::{DeliveryLedgerTrait, DeliveryEntry, DeliveryStatus, LedgerError, LedgerStats};
 
 pub struct DeliveryLedger {
-    conn: Connection,
+    conn: Mutex<Connection>,
 }
 
 impl DeliveryLedger {
@@ -46,11 +47,10 @@ impl DeliveryLedger {
                 WHERE status = 'delivered';"
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        Ok(Self { conn })
+        Ok(Self { conn: Mutex::new(conn) })
     }
 
     /// Open an in-memory database (for testing)
-    #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, LedgerError> {
         let conn = Connection::open_in_memory()
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
@@ -71,7 +71,7 @@ impl DeliveryLedger {
             );"
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        Ok(Self { conn })
+        Ok(Self { conn: Mutex::new(conn) })
     }
 }
 
@@ -83,7 +83,8 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        self.conn.execute(
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
             "INSERT INTO delivery_ledger (id, event_id, event_type, payload, available_at, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
             params![id, event_id, event_type, payload_str, now],
@@ -96,7 +97,8 @@ impl DeliveryLedgerTrait for DeliveryLedger {
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
             "SELECT id, event_id, event_type, payload, status, retry_count, max_retries,
                     last_error, available_at, created_at, delivered_at
              FROM delivery_ledger
@@ -139,19 +141,24 @@ impl DeliveryLedgerTrait for DeliveryLedger {
 
         // Mark claimed entries as in_flight
         for entry in &entries {
-            self.conn.execute(
+            conn.execute(
                 "UPDATE delivery_ledger SET status = 'in_flight' WHERE id = ?1",
                 params![entry.id],
             ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
         }
 
-        Ok(entries)
+        // Return entries with updated status
+        Ok(entries.into_iter().map(|mut e| {
+            e.status = DeliveryStatus::InFlight;
+            e
+        }).collect())
     }
 
     fn mark_delivered(&self, event_id: &str) -> Result<(), LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
-        let rows = self.conn.execute(
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
             "UPDATE delivery_ledger
              SET status = 'delivered', delivered_at = ?1
              WHERE event_id = ?2 AND status = 'in_flight'",
@@ -169,8 +176,9 @@ impl DeliveryLedgerTrait for DeliveryLedger {
     fn mark_failed(&self, event_id: &str, error: &str) -> Result<DeliveryStatus, LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
+        let conn = self.conn.lock().unwrap();
         // Get current retry count and max
-        let (retry_count, max_retries): (u32, u32) = self.conn.query_row(
+        let (retry_count, max_retries): (u32, u32) = conn.query_row(
             "SELECT retry_count, max_retries FROM delivery_ledger WHERE event_id = ?1",
             params![event_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -186,7 +194,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             (DeliveryStatus::Failed, now + delay as i64)
         };
 
-        self.conn.execute(
+        conn.execute(
             "UPDATE delivery_ledger
              SET status = ?1, retry_count = ?2, last_error = ?3, available_at = ?4
              WHERE event_id = ?5",
@@ -200,7 +208,8 @@ impl DeliveryLedgerTrait for DeliveryLedger {
     }
 
     fn get_by_status(&self, status: DeliveryStatus) -> Result<Vec<DeliveryEntry>, LedgerError> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
             "SELECT id, event_id, event_type, payload, status, retry_count, max_retries,
                     last_error, available_at, created_at, delivered_at
              FROM delivery_ledger
@@ -242,7 +251,8 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             .and_utc()
             .timestamp();
 
-        let stats: LedgerStats = self.conn.query_row(
+        let conn = self.conn.lock().unwrap();
+        let stats: LedgerStats = conn.query_row(
             "SELECT
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
                 SUM(CASE WHEN status = 'in_flight' THEN 1 ELSE 0 END) as in_flight,
@@ -269,7 +279,8 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let now = chrono::Utc::now().timestamp();
         let stale_threshold = now - 300; // 5 minutes
 
-        let rows = self.conn.execute(
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
             "UPDATE delivery_ledger
              SET status = 'failed',
                  last_error = 'Recovered from crash - previous attempt status unknown',

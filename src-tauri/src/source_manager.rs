@@ -180,10 +180,8 @@ impl SourceManager {
         let mut restored = Vec::new();
         for id in source_ids {
             let key = format!("source.{}.enabled", id);
-            if self.config.get_bool(&key).unwrap_or(false) {
-                if self.enable(&id).is_ok() {
-                    restored.push(id);
-                }
+            if self.config.get_bool(&key).unwrap_or(false) && self.enable(&id).is_ok() {
+                restored.push(id);
             }
         }
         restored
@@ -193,7 +191,7 @@ impl SourceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mocks::{ManualFileWatcher, RecordedWebhookClient};
+    use crate::mocks::ManualFileWatcher;
     use crate::sources::ClaudeStatsSource;
     use crate::DeliveryLedger;
     use std::io::Write;

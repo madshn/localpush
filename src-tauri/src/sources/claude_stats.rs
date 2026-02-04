@@ -1,13 +1,14 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Raw structure of Claude Code stats-cache.json
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 #[serde(rename_all = "camelCase")]
 struct ClaudeStatsRaw {
     version: u32,
@@ -22,7 +23,7 @@ struct ClaudeStatsRaw {
     hour_counts: HashMap<String, u64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DailyActivity {
     date: String,
@@ -39,6 +40,7 @@ struct DailyModelTokens {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 #[serde(rename_all = "camelCase")]
 struct ModelUsage {
     input_tokens: u64,
@@ -50,6 +52,7 @@ struct ModelUsage {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 #[serde(rename_all = "camelCase")]
 struct LongestSession {
     session_id: String,
@@ -319,12 +322,12 @@ impl Source for ClaudeStatsSource {
         let yesterday_data = Self::find_daily_activity(&stats, &yesterday_date);
 
         // Build summary line
-        let summary = if let Some((today_activity, today_tokens)) = &today_data {
+        let summary = if let Some((_today_activity, today_tokens)) = &today_data {
             let total_tokens = Self::total_tokens(today_tokens);
             let formatted_tokens = Self::format_number(total_tokens);
 
             // Calculate trend if we have yesterday's data
-            let trend = if let Some((yesterday_activity, yesterday_tokens)) = &yesterday_data {
+            let trend = if let Some((_yesterday_activity, yesterday_tokens)) = &yesterday_data {
                 let yesterday_total = Self::total_tokens(yesterday_tokens);
                 if let Some(change) = Self::percentage_change(total_tokens, yesterday_total) {
                     if change > 0.0 {

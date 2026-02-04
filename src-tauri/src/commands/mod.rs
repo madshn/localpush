@@ -1,10 +1,8 @@
 //! Tauri commands exposed to the frontend
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::source_manager::SourceInfo;
 use crate::state::AppState;
 use crate::traits::{DeliveryStatus, WebhookAuth};
 
@@ -44,7 +42,7 @@ pub struct WebhookConfig {
 
 /// Get the current delivery status
 #[tauri::command]
-pub fn get_delivery_status(state: State<'_, Arc<AppState>>) -> Result<DeliveryStatusResponse, String> {
+pub fn get_delivery_status(state: State<'_, AppState>) -> Result<DeliveryStatusResponse, String> {
     let stats = state.ledger.get_stats().map_err(|e| e.to_string())?;
 
     let overall = if stats.failed > 0 {
@@ -65,12 +63,12 @@ pub fn get_delivery_status(state: State<'_, Arc<AppState>>) -> Result<DeliverySt
 
 /// Get available data sources
 #[tauri::command]
-pub fn get_sources(state: State<'_, Arc<AppState>>) -> Result<Vec<SourceResponse>, String> {
+pub fn get_sources(state: State<'_, AppState>) -> Result<Vec<SourceResponse>, String> {
     let sources = state.source_manager.list_sources();
     Ok(sources.into_iter().map(|s| SourceResponse {
         id: s.id,
-        name: s.name,
         description: format!("Data from {}", s.name),
+        name: s.name,
         enabled: s.enabled,
         last_sync: None, // TODO: track last sync time
     }).collect())
@@ -78,7 +76,7 @@ pub fn get_sources(state: State<'_, Arc<AppState>>) -> Result<Vec<SourceResponse
 
 /// Get the delivery queue
 #[tauri::command]
-pub fn get_delivery_queue(state: State<'_, Arc<AppState>>) -> Result<Vec<DeliveryQueueItem>, String> {
+pub fn get_delivery_queue(state: State<'_, AppState>) -> Result<Vec<DeliveryQueueItem>, String> {
     let mut items = Vec::new();
 
     for status in [DeliveryStatus::Pending, DeliveryStatus::InFlight, DeliveryStatus::Failed, DeliveryStatus::Delivered] {
@@ -106,7 +104,7 @@ pub fn get_delivery_queue(state: State<'_, Arc<AppState>>) -> Result<Vec<Deliver
 /// Enable a data source
 #[tauri::command]
 pub fn enable_source(
-    state: State<'_, Arc<AppState>>,
+    state: State<'_, AppState>,
     source_id: String,
 ) -> Result<(), String> {
     state.source_manager.enable(&source_id).map_err(|e| e.to_string())
@@ -115,7 +113,7 @@ pub fn enable_source(
 /// Disable a data source
 #[tauri::command]
 pub fn disable_source(
-    state: State<'_, Arc<AppState>>,
+    state: State<'_, AppState>,
     source_id: String,
 ) -> Result<(), String> {
     state.source_manager.disable(&source_id).map_err(|e| e.to_string())
@@ -124,7 +122,7 @@ pub fn disable_source(
 /// Add a webhook target
 #[tauri::command]
 pub async fn add_webhook_target(
-    state: State<'_, Arc<AppState>>,
+    state: State<'_, AppState>,
     config: WebhookConfig,
 ) -> Result<(), String> {
     // Store URL in config
@@ -146,7 +144,7 @@ pub async fn add_webhook_target(
 /// Test a webhook connection
 #[tauri::command]
 pub async fn test_webhook(
-    state: State<'_, Arc<AppState>>,
+    state: State<'_, AppState>,
     config: WebhookConfig,
 ) -> Result<String, String> {
     let response = state.webhook_client
@@ -160,7 +158,7 @@ pub async fn test_webhook(
 /// Get a preview of data from a source (Radical Transparency)
 #[tauri::command]
 pub fn get_source_preview(
-    state: State<'_, Arc<AppState>>,
+    state: State<'_, AppState>,
     source_id: String,
 ) -> Result<serde_json::Value, String> {
     let source = state.source_manager.get_source(&source_id)
