@@ -141,7 +141,7 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let quit = MenuItem::with_id(app, "quit", "Quit LocalPush", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&quit])?;
 
-    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
+    let icon = tauri::include_image!("icons/tray-icon.png");
 
     let _tray = TrayIconBuilder::new()
         .icon(icon)
