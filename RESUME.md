@@ -1,8 +1,10 @@
 # LocalPush Resume Prompt
 
-**Last Updated:** 2026-02-04
+**Last Updated:** 2026-02-05
 **Project Path:** `~/dev/localpush`
-**Status:** Scaffolding ~60% complete
+**GitHub:** https://github.com/madshn/localpush
+**Vision Doc:** https://www.notion.so/ownbrain/LocalPush-Open-Source-File-Webhook-Bridge-2fbc84e67cc481b69522f87f17b9aed7
+**Status:** v0.1.3 released — core infrastructure complete, ready for feature development
 
 ---
 
@@ -11,274 +13,112 @@
 Copy and paste this to continue work:
 
 ```
-I'm resuming work on LocalPush, a macOS menu bar app for guaranteed file→webhook delivery.
+Resume LocalPush build at ~/dev/localpush. Read RESUME.md for context.
 
-**Project:** ~/dev/localpush
-**Plan:** Read PLAN.md for full context, architecture, and remaining tasks.
+STATUS: v0.1.3 released and working. Menu bar app with arrow icon, popover UI, delivery pipeline verified end-to-end.
 
-**Current State:**
-- Trait-based architecture complete (CredentialStore, FileWatcher, WebhookClient, DeliveryLedger)
-- SQLite ledger with WAL mode implemented and tested
-- Production Keychain and FSEvents implementations started
-- Frontend shell scaffolded (React + Tauri commands)
+WHAT'S BUILT:
+- Tauri 2.0 macOS menu bar app (Rust + React)
+- SQLite WAL delivery ledger with guaranteed delivery (5-state machine)
+- Claude Code Stats source (watches ~/.claude/stats-cache.json)
+- Webhook delivery to n8n (tested, working)
+- 42 tests passing (37 Rust + 5 integration)
+- Homebrew Cask distribution (brew tap madshn/localpush)
+- Auto-update via GitHub Releases
 
-**Remaining Work (Priority Order):**
-1. Production webhook client (reqwest) - src-tauri/src/production/webhook_client.rs
-2. Mock implementations for testing - src-tauri/src/mocks/
-3. Sources module (Claude Code stats parser) - src-tauri/src/sources/
-4. CLAUDE.md files (root, src, src-tauri)
-5. Test infrastructure (vitest.config.ts, mockIPC)
-6. CI/CD pipeline (.github/workflows/)
-7. Git init and verification builds
+WHAT'S NEXT (from vision doc):
+1. More northbound targets: ntfy (mobile push), Make, Zapier, Home Assistant
+2. More southbound sources: Apple Podcasts, Apple Finance, Screen Time, Browser History
+3. Push resolution options: Streaming (<5s), Near-real-time (30-60s), Hourly, Daily, Weekly
+4. Radical transparency: Pre-enable preview showing YOUR real data before connecting
+5. Future: Local AI privacy guardian (Apple Intelligence/Ollama)
 
-**Key Principle:** Use sub-agents extensively. This project is designed for 98% AI construction with parallel work streams.
+ARCHITECTURE:
+- src-tauri/src/traits/ — All abstractions (CredentialStore, FileWatcher, WebhookClient, DeliveryLedger)
+- src-tauri/src/production/ — Real implementations (Keychain, FSEvents, Reqwest)
+- src-tauri/src/sources/ — Data source plugins (claude_stats.rs is the template)
+- src-tauri/src/source_manager.rs — Source registry + file event routing
+- src/components/ — React UI (StatusIndicator, SourceList, DeliveryQueue, SettingsPanel)
 
-Please read PLAN.md and RESUME.md, then continue with the next priority task using appropriate sub-agents.
+KEY DECISIONS:
+- Trait-based DI for 100% testable Rust
+- SQLite WAL for crash-safe guaranteed delivery
+- tauri::async_runtime::spawn (NOT tokio::spawn) for Tauri context
+- 22x22 PNG template icon for macOS menu bar
+- Mutex<Connection> for rusqlite thread safety
+
+LEARNINGS: See learnings/ directory for patterns discovered during development.
 ```
 
 ---
 
-## Sub-Agent Strategy
+## Current State (2026-02-05)
 
-LocalPush is designed for maximum agentic velocity through parallel sub-agents. All external dependencies are abstracted behind traits, enabling isolated testing.
+### What Works
+- Full trait-based architecture (CredentialStore, FileWatcher, WebhookClient, DeliveryLedger)
+- SQLite WAL ledger with 5-state machine (Pending → InFlight → Delivered/Failed/DLQ)
+- Production implementations: Keychain, FSEvents, Reqwest webhook client
+- Claude Code Stats source plugin (parses ~/.claude/stats-cache.json)
+- Source manager with enable/disable and file event routing
+- All Tauri commands wired (12 commands registered)
+- Frontend: StatusIndicator, SourceList, DeliveryQueue, SettingsPanel
+- Logging: tracing with daily file rotation + stdout
+- Auto-update: tauri-plugin-updater configured with GitHub Releases
+- n8n test endpoint: https://flow.rightaim.ai/webhook/localpush-ingest
+- Homebrew tap: https://github.com/madshn/homebrew-localpush
+- Menu bar popover: positions below tray icon, toggles on click, dismisses on blur
 
-### Recommended Agent Types
+### Release History
+| Version | Date | Changes |
+|---------|------|---------|
+| v0.1.0 | 2026-02-05 | Initial release — crash fixes, signing key |
+| v0.1.1 | 2026-02-05 | Tray positioning, blur dismiss, toggle |
+| v0.1.2 | 2026-02-05 | PNG decode fix (include_image macro) |
+| v0.1.3 | 2026-02-05 | 22x22 icon size for menu bar compatibility |
 
-| Agent | Model | Purpose | Tools |
-|-------|-------|---------|-------|
-| **rust-backend** | sonnet | Implement Rust backend code | Edit, Write, Bash (cargo) |
-| **react-frontend** | sonnet | Implement React frontend code | Edit, Write |
-| **rust-tester** | haiku | Write and run Rust tests | Edit, Bash (cargo test) |
-| **frontend-tester** | haiku | Write and run Vitest tests | Edit, Bash (npm test) |
-| **ci-builder** | haiku | Create/update CI workflows | Write, Bash (gh) |
-| **doc-writer** | haiku | CLAUDE.md and documentation | Write |
+---
 
-### Model Selection Rationale
+## Vision Summary
 
-- **sonnet** for implementation: Needs code comprehension, creative problem-solving
-- **haiku** for testing/docs: I/O-bound, template-driven, can run in parallel
+**Core Principles:**
+1. **Guaranteed Delivery** — WAL pattern ensures no data loss (survives crashes, reboots, network outages)
+2. **Radical Transparency** — See YOUR real data before enabling any source
 
-### Parallel Work Streams
+**Northbound Targets (7):**
+- n8n (MVP ✓), ntfy, Make, Zapier, Pipedream, Home Assistant, Custom
 
-```
-Stream A: Backend                Stream B: Frontend              Stream C: Infra
-─────────────────               ─────────────────               ─────────────────
-rust-backend: webhook_client    react-frontend: TransparencyPreview  ci-builder: verify.yml
-rust-tester: webhook tests      frontend-tester: component tests     doc-writer: CLAUDE.md
-rust-backend: sources/claude    react-frontend: SettingsPanel        ci-builder: release.yml
-```
+**Southbound Sources (30+ planned, 6 tiers):**
+- Tier 1 MVP: Claude Code Stats ✓, Claude Sessions, Apple Podcasts, Apple Finance
+- Tier 2: Browser History, Screen Time, Notion Local Cache, Git Repos
+- Tier 3: Arc Browser, Safari Reading List, Downloads, Notes, Reminders, Calendar, Screenshots
+- Tier 4-6: Dev tools, Relationships (metadata), Media consumption
 
-### Agent Dispatch Patterns
+**Push Resolutions:**
+- Streaming (<5s), Near-real-time (30-60s), Hourly, Daily, Weekly
 
-#### Pattern 1: Sequential Implementation + Test
+**Future:** Local AI privacy guardian using Apple Intelligence/Ollama for intelligent data triage
 
-```typescript
-// First: Implement
-Task({
-  subagent_type: "general-purpose",
-  model: "sonnet",
-  prompt: `
-    Implement ReqwestWebhookClient in src-tauri/src/production/webhook_client.rs
+---
 
-    Requirements:
-    1. Implement WebhookClient trait from traits/webhook_client.rs
-    2. Use reqwest with async/await
-    3. Support all WebhookAuth variants (None, Header, Bearer, Basic)
-    4. 25 second timeout
-    5. Return WebhookResponse with status, body, duration_ms
+## Key Files
 
-    Read the trait file first, then implement. Do not run tests yet.
-  `
-})
+| File | Purpose |
+|------|---------|
+| `src-tauri/src/lib.rs` | App setup, tray, auto-update |
+| `src-tauri/src/traits/` | All trait abstractions |
+| `src-tauri/src/production/` | Real implementations |
+| `src-tauri/src/sources/claude_stats.rs` | Template for new sources |
+| `src-tauri/src/source_manager.rs` | Source registry |
+| `src-tauri/src/ledger.rs` | SQLite WAL delivery ledger |
+| `src/App.tsx` | React frontend entry |
+| `src/components/` | UI components |
 
-// Then: Test
-Task({
-  subagent_type: "general-purpose",
-  model: "haiku",
-  prompt: `
-    Write tests for ReqwestWebhookClient in src-tauri/src/production/webhook_client.rs
+---
 
-    Test scenarios:
-    1. Successful POST with JSON payload
-    2. Each auth type (None, Header, Bearer, Basic)
-    3. Timeout handling
-    4. Network error handling
-    5. Non-2xx response handling
-
-    Run: cargo test -p localpush webhook
-    Return: Test results summary
-  `
-})
-```
-
-#### Pattern 2: Parallel Independent Tasks
-
-```typescript
-// Launch all three in parallel (single message, multiple Task calls)
-Task({
-  subagent_type: "general-purpose",
-  model: "haiku",
-  prompt: "Create .github/workflows/verify.yml for LocalPush..."
-})
-
-Task({
-  subagent_type: "general-purpose",
-  model: "haiku",
-  prompt: "Create root CLAUDE.md for LocalPush..."
-})
-
-Task({
-  subagent_type: "general-purpose",
-  model: "haiku",
-  prompt: "Create src/CLAUDE.md for LocalPush frontend..."
-})
-```
-
-#### Pattern 3: Research Then Implement
-
-```typescript
-// First: Research existing patterns
-Task({
-  subagent_type: "Explore",
-  prompt: `
-    Explore the existing trait implementations in src-tauri/src/production/
-    Understand the patterns used for:
-    - Error handling
-    - Logging (tracing)
-    - Constructor patterns
-    Return: Summary of patterns to follow
-  `
-})
-
-// Then: Implement following patterns
-Task({
-  subagent_type: "general-purpose",
-  model: "sonnet",
-  prompt: `
-    Implement sources/claude_stats.rs following the patterns from production/
-
-    [Include pattern summary from research agent]
-
-    Parse ~/.claude/stats-cache.json and emit delivery events.
-  `
-})
-```
-
-### Verification Gates
-
-Every implementation must pass verification. Run after completing a work stream:
+## Verification
 
 ```bash
-# Rust verification
-cargo test                    # Unit + integration tests
-cargo clippy -- -D warnings   # Linting
-
-# Frontend verification
-npm run test                  # Vitest tests
-npm run lint                  # ESLint
-npm run typecheck             # TypeScript strict
-
-# Full build
-cargo build --release         # Release build verification
-```
-
-### Agent Prompt Best Practices
-
-1. **Focused scope**: One file or one feature per agent
-2. **Clear requirements**: Numbered list of what to implement
-3. **Context provided**: Reference existing files to read first
-4. **Explicit output**: What should the agent return?
-5. **No guessing**: If unclear, agent should ask or return partial
-
-### When NOT to Use Sub-Agents
-
-- Quick single-file edits (do directly)
-- Exploratory debugging (needs full context)
-- Decisions requiring human input (ask first)
-- Sequential dependencies (wait for previous result)
-
----
-
-## File Structure Reference
-
-```
-~/dev/localpush/
-├── PLAN.md                       # Full implementation plan
-├── RESUME.md                     # This file
-├── package.json                  ✓
-├── tsconfig.json                 ✓
-├── vite.config.ts                ✓
-├── index.html                    ✓
-├── src/
-│   ├── CLAUDE.md                 [ ] TODO
-│   ├── main.tsx                  ✓
-│   ├── App.tsx                   ✓
-│   ├── components/
-│   │   ├── StatusIndicator.tsx   ✓
-│   │   ├── SourceList.tsx        ✓
-│   │   ├── DeliveryQueue.tsx     ✓
-│   │   └── TransparencyPreview.tsx  [ ] TODO
-│   └── api/hooks/                ✓
-├── src-tauri/
-│   ├── CLAUDE.md                 [ ] TODO
-│   ├── Cargo.toml                ✓
-│   ├── tauri.conf.json           ✓
-│   └── src/
-│       ├── main.rs               ✓
-│       ├── lib.rs                ✓
-│       ├── state.rs              ✓
-│       ├── ledger.rs             ✓ (with tests)
-│       ├── commands/mod.rs       ✓
-│       ├── traits/               ✓ (all 4 traits)
-│       ├── production/
-│       │   ├── credential_store.rs ✓
-│       │   ├── file_watcher.rs   ✓
-│       │   └── webhook_client.rs [ ] TODO
-│       ├── mocks/                [ ] TODO
-│       └── sources/              [ ] TODO
-└── .github/workflows/            [ ] TODO
-```
-
----
-
-## Key Architecture Decisions
-
-1. **Trait-based DI**: All external dependencies behind protocols → 100% testable
-2. **WAL delivery**: SQLite WAL mode ensures crash-safe delivery
-3. **5-state machine**: PENDING → IN_FLIGHT → DELIVERED/FAILED/DLQ
-4. **Exponential backoff**: 1s, 2s, 4s, 8s... up to 1 hour max
-5. **Layered testing**: Unit → Integration → Behavioral → Smoke
-
----
-
-## Quick Commands
-
-```bash
-# Development
 cd ~/dev/localpush
-npm run tauri dev              # Run dev server
-
-# Rust only
-cd src-tauri
-cargo test                     # Run tests
-cargo clippy -- -D warnings    # Lint
-
-# Frontend only
-npm run test                   # Vitest
-npm run lint                   # ESLint
-npm run typecheck              # TypeScript
-
-# Full verification
-npm run check                  # Runs all checks
+./scripts/verify.sh        # Full verification
+npm run tauri dev          # Launch dev build
 ```
-
----
-
-## Next Session Checklist
-
-1. [ ] Read PLAN.md for full context
-2. [ ] Check git status (not yet initialized)
-3. [ ] Pick next priority from remaining work
-4. [ ] Dispatch appropriate sub-agents
-5. [ ] Run verification gates after each completion
-6. [ ] Update PLAN.md status as work completes
