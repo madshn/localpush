@@ -141,7 +141,11 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let quit = MenuItem::with_id(app, "quit", "Quit LocalPush", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&quit])?;
 
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
+
     let _tray = TrayIconBuilder::new()
+        .icon(icon)
+        .icon_as_template(true)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
@@ -153,17 +157,57 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
             if let tauri::tray::TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
+                rect,
                 ..
             } = event
             {
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("main") {
+                    // Toggle: hide if visible, show if hidden
+                    if window.is_visible().unwrap_or(false) {
+                        let _ = window.hide();
+                        return;
+                    }
+
+                    // Extract tray icon position (may be physical or logical)
+                    let scale = window.scale_factor().unwrap_or(2.0);
+                    let (icon_x, icon_y) = match rect.position {
+                        tauri::Position::Physical(p) => (p.x as f64 / scale, p.y as f64 / scale),
+                        tauri::Position::Logical(p) => (p.x, p.y),
+                    };
+                    let (icon_w, icon_h) = match rect.size {
+                        tauri::Size::Physical(s) => (s.width as f64 / scale, s.height as f64 / scale),
+                        tauri::Size::Logical(s) => (s.width, s.height),
+                    };
+
+                    // Position window centered below the tray icon
+                    let window_width = 400.0_f64;
+                    let window_height = 500.0_f64;
+                    let x = icon_x + (icon_w / 2.0) - (window_width / 2.0);
+                    let y = icon_y + icon_h + 4.0;
+
+                    let _ = window.set_position(tauri::Position::Logical(
+                        tauri::LogicalPosition::new(x, y),
+                    ));
+                    let _ = window.set_size(tauri::Size::Logical(
+                        tauri::LogicalSize::new(window_width, window_height),
+                    ));
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
             }
         })
         .build(app)?;
+
+    // Hide window when it loses focus (click outside to dismiss)
+    if let Some(window) = app.get_webview_window("main") {
+        let win = window.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::Focused(false) = event {
+                let _ = win.hide();
+            }
+        });
+    }
 
     Ok(())
 }
