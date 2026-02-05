@@ -78,8 +78,8 @@ pub fn spawn_worker(
     ledger: Arc<dyn DeliveryLedgerTrait>,
     webhook: Arc<dyn WebhookClient>,
     config: Arc<AppConfig>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
         tracing::info!("Delivery worker started (5s interval)");
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         loop {

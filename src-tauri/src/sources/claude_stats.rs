@@ -47,7 +47,9 @@ struct ModelUsage {
     output_tokens: u64,
     cache_read_input_tokens: u64,
     cache_creation_input_tokens: u64,
+    #[serde(default)]
     web_search_requests: u64,
+    #[serde(alias = "costUSD", default)]
     cost_usd: f64,
 }
 
