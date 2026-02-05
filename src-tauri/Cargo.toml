@@ -1,6 +1,6 @@
 [package]
 name = "localpush"
-version = "0.1.2"
+version = "0.1.3"
 description = "Push local file changes to webhooks with guaranteed delivery"
 authors = ["LocalPush Contributors"]
 edition = "2021"
