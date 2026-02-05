@@ -6,6 +6,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
@@ -21,6 +22,10 @@ fn main() {
             commands::add_webhook_target,
             commands::test_webhook,
             commands::get_source_preview,
+            commands::get_webhook_config,
+            commands::get_setting,
+            commands::set_setting,
+            commands::retry_delivery,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

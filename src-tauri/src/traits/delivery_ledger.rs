@@ -82,6 +82,9 @@ pub trait DeliveryLedgerTrait: Send + Sync {
 
     /// Recover orphaned in-flight entries on startup
     fn recover_orphans(&self) -> Result<usize, LedgerError>;
+
+    /// Reset a failed/dlq entry back to pending for manual retry
+    fn reset_to_pending(&self, event_id: &str) -> Result<(), LedgerError>;
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

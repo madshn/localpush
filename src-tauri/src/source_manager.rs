@@ -92,9 +92,12 @@ impl SourceManager {
             .lock()
             .unwrap()
             .insert(source_id.to_string());
-        self.config
-            .set(&format!("source.{}.enabled", source_id), "true")
-            .ok();
+
+        let config_key = format!("source.{}.enabled", source_id);
+        if let Err(e) = self.config.set(&config_key, "true") {
+            tracing::warn!(key = %config_key, error = %e, "Failed to persist source enabled state");
+        }
+
         tracing::info!("Enabled source: {}", source_id);
         Ok(())
     }
@@ -113,9 +116,12 @@ impl SourceManager {
         drop(sources);
 
         self.enabled.lock().unwrap().remove(source_id);
-        self.config
-            .set(&format!("source.{}.enabled", source_id), "false")
-            .ok();
+
+        let config_key = format!("source.{}.enabled", source_id);
+        if let Err(e) = self.config.set(&config_key, "false") {
+            tracing::warn!(key = %config_key, error = %e, "Failed to persist source disabled state");
+        }
+
         tracing::info!("Disabled source: {}", source_id);
         Ok(())
     }

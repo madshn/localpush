@@ -3,6 +3,12 @@ import { useDeliveryQueue } from "../api/hooks/useDeliveryQueue";
 export function DeliveryQueue() {
   const { data: queue, isLoading } = useDeliveryQueue();
 
+  const handleRetry = async (eventId: string) => {
+    // TODO: Implement retry_delivery command in Rust backend
+    alert("Retry functionality not yet implemented in backend");
+    console.log("Would retry event:", eventId);
+  };
+
   if (isLoading) {
     return <div>Loading queue...</div>;
   }
@@ -44,7 +50,9 @@ export function DeliveryQueue() {
                 <p>{item.lastError}</p>
                 <p>Attempts: {item.retryCount}</p>
               </div>
-              <button className="btn">Retry</button>
+              <button className="btn" onClick={() => handleRetry(item.id)}>
+                Retry
+              </button>
             </div>
           ))}
         </div>

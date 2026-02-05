@@ -295,6 +295,25 @@ impl DeliveryLedgerTrait for DeliveryLedger {
 
         Ok(rows)
     }
+
+    fn reset_to_pending(&self, event_id: &str) -> Result<(), LedgerError> {
+        let now = chrono::Utc::now().timestamp();
+
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE delivery_ledger
+             SET status = 'pending', available_at = ?1, last_error = NULL
+             WHERE event_id = ?2 AND status IN ('failed', 'dlq')",
+            params![now, event_id],
+        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        if rows == 0 {
+            return Err(LedgerError::NotFound(event_id.to_string()));
+        }
+
+        tracing::info!("Delivery reset to pending: {}", event_id);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

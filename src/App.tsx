@@ -3,9 +3,10 @@ import { useDeliveryStatus } from "./api/hooks/useDeliveryStatus";
 import { StatusIndicator } from "./components/StatusIndicator";
 import { SourceList } from "./components/SourceList";
 import { DeliveryQueue } from "./components/DeliveryQueue";
+import { SettingsPanel } from "./components/SettingsPanel";
 
 function App() {
-  const [view, setView] = useState<"status" | "sources" | "history">("status");
+  const [view, setView] = useState<"status" | "sources" | "settings">("status");
   const { data: status } = useDeliveryStatus();
 
   return (
@@ -29,17 +30,17 @@ function App() {
           Sources
         </button>
         <button
-          className={view === "history" ? "active" : ""}
-          onClick={() => setView("history")}
+          className={view === "settings" ? "active" : ""}
+          onClick={() => setView("settings")}
         >
-          History
+          Settings
         </button>
       </nav>
 
       <main className="app-main">
         {view === "status" && <DeliveryQueue />}
         {view === "sources" && <SourceList />}
-        {view === "history" && <div>Delivery history coming soon</div>}
+        {view === "settings" && <SettingsPanel />}
       </main>
     </div>
   );

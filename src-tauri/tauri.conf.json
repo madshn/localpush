@@ -52,7 +52,9 @@
   "plugins": {
     "updater": {
       "pubkey": "",
-      "endpoints": []
+      "endpoints": [
+        "https://github.com/madshn/localpush/releases/latest/download/latest.json"
+      ]
     }
   }
 }

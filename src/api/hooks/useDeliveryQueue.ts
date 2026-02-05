@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { logger } from "../../utils/logger";
 
 export interface DeliveryItem {
   id: string;
@@ -12,7 +13,15 @@ export interface DeliveryItem {
 }
 
 async function getDeliveryQueue(): Promise<DeliveryItem[]> {
-  return invoke("get_delivery_queue");
+  logger.debug("Fetching delivery queue");
+  try {
+    const result = await invoke<DeliveryItem[]>("get_delivery_queue");
+    logger.debug("Delivery queue fetched", { count: result.length });
+    return result;
+  } catch (error) {
+    logger.error("Failed to fetch delivery queue", { error });
+    throw error;
+  }
 }
 
 export function useDeliveryQueue() {

@@ -40,14 +40,17 @@ impl AppConfig {
             params![key],
             |row| row.get(0),
         );
-        match result {
+        let ret = match result {
             Ok(value) => Ok(Some(value)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(LedgerError::DatabaseError(e.to_string())),
-        }
+        };
+        tracing::debug!(key = %key, found = ret.as_ref().ok().and_then(|v| v.as_ref()).is_some(), "Config get");
+        ret
     }
 
     pub fn set(&self, key: &str, value: &str) -> Result<(), LedgerError> {
+        tracing::debug!(key = %key, "Config set");
         let now = chrono::Utc::now().timestamp();
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -58,6 +61,7 @@ impl AppConfig {
     }
 
     pub fn delete(&self, key: &str) -> Result<(), LedgerError> {
+        tracing::debug!(key = %key, "Config delete");
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "DELETE FROM app_config WHERE key = ?1",

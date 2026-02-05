@@ -18,19 +18,30 @@ pub mod delivery_worker;
 use std::sync::Arc;
 use tauri::{App, Manager};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_appender::rolling;
 
 pub use ledger::DeliveryLedger;
 pub use state::AppState;
 
 /// Initialize the application
 pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logging
+    // Initialize logging to both stdout and file
+    let log_dir = app.path().app_log_dir()?;
+    std::fs::create_dir_all(&log_dir)?;
+    let file_appender = rolling::daily(&log_dir, "localpush.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "localpush=info".into()),
         ))
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer()) // stdout
+        .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false)) // file
         .init();
+
+    // Keep guard alive for application lifetime
+    // Store in static to prevent drop
+    std::mem::forget(_guard);
 
     tracing::info!("LocalPush starting up");
 
@@ -63,6 +74,61 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up system tray
     setup_tray(app)?;
+
+    // Check for auto-update (in background, after a delay)
+    let app_handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        // Wait 5 seconds after startup
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+        // Check if auto-update is enabled (default: true)
+        let auto_update_enabled = match app_handle.state::<AppState>()
+            .config
+            .get("auto_update")
+        {
+            Ok(Some(value)) => value != "false",
+            _ => true, // Default to enabled
+        };
+
+        if !auto_update_enabled {
+            tracing::info!("Auto-update is disabled");
+            return;
+        }
+
+        tracing::info!("Checking for updates...");
+        // Use the updater plugin API from tauri-plugin-updater
+        match tauri_plugin_updater::UpdaterExt::updater(&app_handle) {
+            Ok(updater_builder) => {
+                match updater_builder.check().await {
+                    Ok(Some(update)) => {
+                        tracing::info!(
+                            current = %update.current_version,
+                            latest = %update.version,
+                            "Update available, downloading and installing"
+                        );
+
+                        match update.download_and_install(|_, _| {}, || {}).await {
+                            Ok(()) => {
+                                tracing::info!("Update installed successfully, restart required");
+                            }
+                            Err(e) => {
+                                tracing::error!(error = %e, "Failed to install update");
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        tracing::info!("App is up to date");
+                    }
+                    Err(e) => {
+                        tracing::debug!(error = %e, "Update check failed (expected in dev mode)");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "Failed to build updater (expected in dev mode)");
+            }
+        }
+    });
 
     tracing::info!("LocalPush initialized — delivery pipeline active");
     Ok(())

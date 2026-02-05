@@ -22,19 +22,35 @@ pub struct AppState {
 impl AppState {
     /// Create a new AppState with production implementations
     pub fn new_production(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
+        tracing::info!("Initializing AppState");
+
         let app_data_dir = app.path().app_data_dir()?;
         std::fs::create_dir_all(&app_data_dir)?;
 
         let db_path = app_data_dir.join("ledger.sqlite");
+        tracing::info!(path = %db_path.display(), "Opening delivery ledger");
         let ledger = Arc::new(DeliveryLedger::open(&db_path)?);
 
         let config_path = app_data_dir.join("config.sqlite");
+        tracing::info!(path = %config_path.display(), "Opening config database");
         let config_conn = rusqlite::Connection::open(&config_path)?;
         AppConfig::init_table(&config_conn)?;
         let config = Arc::new(AppConfig::from_connection(config_conn));
 
+        // Set default webhook if not configured
+        if config.get("webhook_url").ok().flatten().is_none() {
+            tracing::info!("Setting default webhook URL");
+            let _ = config.set("webhook_url", "https://flow.rightaim.ai/webhook/localpush-ingest");
+            let _ = config.set("webhook_auth_json", r#"{"type":"none"}"#);
+        }
+
+        tracing::info!("Keychain credential store initialized");
         let credentials = Arc::new(KeychainCredentialStore::new());
+
+        tracing::info!("FSEvents file watcher initialized");
         let file_watcher = Arc::new(FsEventsWatcher::new()?);
+
+        tracing::info!("Webhook client initialized");
         let webhook_client = Arc::new(ReqwestWebhookClient::new()?);
 
         let source_manager = Arc::new(SourceManager::new(
@@ -46,12 +62,24 @@ impl AppState {
         // Register ClaudeStatsSource
         use crate::sources::ClaudeStatsSource;
         match ClaudeStatsSource::new() {
-            Ok(source) => source_manager.register(Arc::new(source)),
+            Ok(source) => {
+                tracing::info!("Registered ClaudeStatsSource");
+                source_manager.register(Arc::new(source));
+            }
             Err(e) => tracing::warn!("Could not initialize Claude stats source: {}", e),
         }
 
         // Restore enabled sources from config
-        source_manager.restore_enabled();
+        let restored = source_manager.restore_enabled();
+        tracing::info!(restored_count = restored.len(), "Restored enabled sources");
+
+        // Auto-enable Claude stats on first launch
+        if restored.is_empty() && config.get("source.claude-stats.enabled").ok().flatten().is_none() {
+            tracing::info!("First launch: auto-enabling Claude Code stats source");
+            let _ = source_manager.enable("claude-stats");
+        }
+
+        tracing::info!("AppState initialization complete");
 
         Ok(Self {
             credentials,

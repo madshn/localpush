@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { logger } from "../../utils/logger";
 
 export interface DeliveryStatus {
   overall: "active" | "pending" | "error" | "unknown";
@@ -9,7 +10,19 @@ export interface DeliveryStatus {
 }
 
 async function getDeliveryStatus(): Promise<DeliveryStatus> {
-  return invoke("get_delivery_status");
+  logger.debug("Fetching delivery status");
+  try {
+    const result = await invoke<DeliveryStatus>("get_delivery_status");
+    logger.debug("Delivery status fetched", {
+      overall: result.overall,
+      pendingCount: result.pendingCount,
+      failedCount: result.failedCount,
+    });
+    return result;
+  } catch (error) {
+    logger.error("Failed to fetch delivery status", { error });
+    throw error;
+  }
 }
 
 export function useDeliveryStatus() {
