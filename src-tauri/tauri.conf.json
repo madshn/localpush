@@ -51,7 +51,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMwRkQzQzAzNjE5MkEyOTYKUldTV29wSmhBeno5d0FUL3p3VldoQjkxY2dwLzlsU2psbmxRNHNJZUlJYjlBTG43VTNsbkE0dnAK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY1Q0E0RENENjlGQkI5M0IKUldRN3VmdHB6VTNLOVFCSjZndHlxVnlrWnZ2ekFFTGhRQW01clBwQ2JzVDQ5ZWtDbSt5aXo5TFMK",
       "endpoints": [
         "https://github.com/madshn/localpush/releases/latest/download/latest.json"
       ]
