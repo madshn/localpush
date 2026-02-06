@@ -26,6 +26,15 @@ fn main() {
             commands::get_setting,
             commands::set_setting,
             commands::retry_delivery,
+            commands::connect_n8n_target,
+            commands::connect_ntfy_target,
+            commands::list_targets,
+            commands::test_target_connection,
+            commands::list_target_endpoints,
+            commands::create_binding,
+            commands::remove_binding,
+            commands::get_source_bindings,
+            commands::list_all_bindings,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
+use crate::bindings::BindingStore;
 use crate::config::AppConfig;
 use crate::source_manager::SourceManager;
 use crate::target_manager::TargetManager;
@@ -18,6 +19,7 @@ pub struct AppState {
     pub ledger: Arc<dyn DeliveryLedgerTrait>,
     pub source_manager: Arc<SourceManager>,
     pub target_manager: Arc<TargetManager>,
+    pub binding_store: Arc<BindingStore>,
     pub config: Arc<AppConfig>,
 }
 
@@ -61,8 +63,9 @@ impl AppState {
             config.clone(),
         ));
 
-        // Initialize target manager
+        // Initialize target manager and binding store
         let target_manager = Arc::new(TargetManager::new(config.clone()));
+        let binding_store = Arc::new(BindingStore::new(config.clone()));
 
         // Register sources
         use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource};
@@ -126,6 +129,7 @@ impl AppState {
             ledger,
             source_manager,
             target_manager,
+            binding_store,
             config,
         })
     }
@@ -150,6 +154,7 @@ impl AppState {
         ));
 
         let target_manager = Arc::new(TargetManager::new(config.clone()));
+        let binding_store = Arc::new(BindingStore::new(config.clone()));
 
         // Register test source
         match ClaudeStatsSource::new() {
@@ -167,6 +172,7 @@ impl AppState {
             ledger,
             source_manager,
             target_manager,
+            binding_store,
             config,
         }
     }

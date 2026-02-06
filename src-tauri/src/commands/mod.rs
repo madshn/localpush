@@ -3,8 +3,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::bindings::SourceBinding;
 use crate::state::AppState;
-use crate::traits::{DeliveryStatus, WebhookAuth};
+use crate::traits::{DeliveryStatus, Target, WebhookAuth};
 
 #[derive(Debug, Serialize)]
 pub struct DeliveryStatusResponse {
@@ -332,3 +333,228 @@ pub fn retry_delivery(state: State<'_, AppState>, event_id: String) -> Result<()
         }
     }
 }
+
+/// Connect an n8n target (instance URL + API key)
+#[tauri::command]
+pub async fn connect_n8n_target(
+    state: State<'_, AppState>,
+    instance_url: String,
+    api_key: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "connect_n8n_target", url = %instance_url, "Command invoked");
+
+    let target_id = format!(
+        "n8n-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("0")
+    );
+    let target =
+        crate::targets::N8nTarget::new(target_id.clone(), instance_url.clone(), api_key.clone());
+
+    // Test connection before persisting
+    let info = target.test_connection().await.map_err(|e| {
+        tracing::error!(error = %e, "n8n connection test failed");
+        e.to_string()
+    })?;
+
+    // Store API key in keychain
+    let cred_key = format!("n8n:{}", target_id);
+    if let Err(e) = state.credentials.store(&cred_key, &api_key) {
+        tracing::warn!(error = %e, "Failed to store n8n API key in keychain");
+    }
+
+    // Store URL and type in config
+    let _ = state
+        .config
+        .set(&format!("target.{}.url", target_id), &instance_url);
+    let _ = state
+        .config
+        .set(&format!("target.{}.type", target_id), "n8n");
+
+    // Register target
+    state
+        .target_manager
+        .register(std::sync::Arc::new(target));
+
+    tracing::info!(target_id = %target_id, "n8n target connected successfully");
+    serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
+/// Connect an ntfy target (server URL + optional topic + auth)
+#[tauri::command]
+pub async fn connect_ntfy_target(
+    state: State<'_, AppState>,
+    server_url: String,
+    topic: Option<String>,
+    auth_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "connect_ntfy_target", url = %server_url, "Command invoked");
+
+    let target_id = format!(
+        "ntfy-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("0")
+    );
+    let mut target = crate::targets::NtfyTarget::new(target_id.clone(), server_url.clone());
+    if let Some(ref t) = topic {
+        target = target.with_topic(t.clone());
+    }
+    if let Some(ref token) = auth_token {
+        target = target.with_auth(token.clone());
+    }
+
+    let info = target.test_connection().await.map_err(|e| {
+        tracing::error!(error = %e, "ntfy connection test failed");
+        e.to_string()
+    })?;
+
+    // Store in config
+    let _ = state
+        .config
+        .set(&format!("target.{}.url", target_id), &server_url);
+    let _ = state
+        .config
+        .set(&format!("target.{}.type", target_id), "ntfy");
+    if let Some(ref t) = topic {
+        let _ = state
+            .config
+            .set(&format!("target.{}.topic", target_id), t);
+    }
+    if let Some(ref token) = auth_token {
+        let cred_key = format!("ntfy:{}", target_id);
+        if let Err(e) = state.credentials.store(&cred_key, token) {
+            tracing::warn!(error = %e, "Failed to store ntfy auth in keychain");
+        }
+    }
+
+    state
+        .target_manager
+        .register(std::sync::Arc::new(target));
+
+    tracing::info!(target_id = %target_id, "ntfy target connected successfully");
+    serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
+/// List all registered targets
+#[tauri::command]
+pub async fn list_targets(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    tracing::info!(command = "list_targets", "Command invoked");
+    let targets = state.target_manager.list();
+    Ok(targets
+        .into_iter()
+        .map(|(id, name, target_type)| {
+            serde_json::json!({ "id": id, "name": name, "target_type": target_type })
+        })
+        .collect())
+}
+
+/// Test connection to a specific target
+#[tauri::command]
+pub async fn test_target_connection(
+    state: State<'_, AppState>,
+    target_id: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "test_target_connection", target_id = %target_id, "Command invoked");
+    let info = state
+        .target_manager
+        .test_connection(&target_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
+/// List endpoints for a specific target
+#[tauri::command]
+pub async fn list_target_endpoints(
+    state: State<'_, AppState>,
+    target_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    tracing::info!(command = "list_target_endpoints", target_id = %target_id, "Command invoked");
+    let endpoints = state
+        .target_manager
+        .list_endpoints(&target_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    endpoints
+        .into_iter()
+        .map(|e| serde_json::to_value(e).map_err(|e| e.to_string()))
+        .collect()
+}
+
+/// Create a binding from a source to a target endpoint
+#[tauri::command]
+pub fn create_binding(
+    state: State<'_, AppState>,
+    source_id: String,
+    target_id: String,
+    endpoint_id: String,
+    endpoint_url: String,
+    endpoint_name: String,
+) -> Result<(), String> {
+    tracing::info!(
+        command = "create_binding",
+        source_id = %source_id,
+        endpoint_id = %endpoint_id,
+        "Command invoked"
+    );
+    let binding = SourceBinding {
+        source_id,
+        target_id,
+        endpoint_id,
+        endpoint_url,
+        endpoint_name,
+        created_at: chrono::Utc::now().timestamp(),
+        active: true,
+    };
+    state.binding_store.save(&binding)
+}
+
+/// Remove a binding
+#[tauri::command]
+pub fn remove_binding(
+    state: State<'_, AppState>,
+    source_id: String,
+    endpoint_id: String,
+) -> Result<(), String> {
+    tracing::info!(
+        command = "remove_binding",
+        source_id = %source_id,
+        endpoint_id = %endpoint_id,
+        "Command invoked"
+    );
+    state.binding_store.remove(&source_id, &endpoint_id)
+}
+
+/// Get all bindings for a source
+#[tauri::command]
+pub fn get_source_bindings(
+    state: State<'_, AppState>,
+    source_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    tracing::info!(command = "get_source_bindings", source_id = %source_id, "Command invoked");
+    let bindings = state.binding_store.get_for_source(&source_id);
+    bindings
+        .into_iter()
+        .map(|b| serde_json::to_value(b).map_err(|e| e.to_string()))
+        .collect()
+}
+
+/// List all bindings across all sources
+#[tauri::command]
+pub fn list_all_bindings(
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    tracing::info!(command = "list_all_bindings", "Command invoked");
+    let bindings = state.binding_store.list_all();
+    bindings
+        .into_iter()
+        .map(|b| serde_json::to_value(b).map_err(|e| e.to_string()))
+        .collect()
+}
+

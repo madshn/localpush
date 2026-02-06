@@ -3,6 +3,7 @@
 //! This library provides the core functionality for LocalPush, organized around
 //! trait-based dependency injection for testability.
 
+pub mod bindings;
 pub mod commands;
 pub mod traits;
 pub mod mocks;
