@@ -2,11 +2,14 @@ import { useState } from "react";
 import { useDeliveryStatus } from "./api/hooks/useDeliveryStatus";
 import { StatusIndicator } from "./components/StatusIndicator";
 import { SourceList } from "./components/SourceList";
+import { ActivityLog } from "./components/ActivityLog";
 import { DeliveryQueue } from "./components/DeliveryQueue";
 import { SettingsPanel } from "./components/SettingsPanel";
 
+type View = "status" | "sources" | "activity" | "settings";
+
 function App() {
-  const [view, setView] = useState<"status" | "sources" | "settings">("status");
+  const [view, setView] = useState<View>("status");
   const { data: status } = useDeliveryStatus();
 
   return (
@@ -30,6 +33,12 @@ function App() {
           Sources
         </button>
         <button
+          className={view === "activity" ? "active" : ""}
+          onClick={() => setView("activity")}
+        >
+          Activity
+        </button>
+        <button
           className={view === "settings" ? "active" : ""}
           onClick={() => setView("settings")}
         >
@@ -40,6 +49,7 @@ function App() {
       <main className="app-main">
         {view === "status" && <DeliveryQueue />}
         {view === "sources" && <SourceList />}
+        {view === "activity" && <ActivityLog />}
         {view === "settings" && <SettingsPanel />}
       </main>
     </div>

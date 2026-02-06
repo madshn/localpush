@@ -5,8 +5,12 @@
   --text-secondary: #a0a0a0;
   --accent: #4f9eff;
   --success: #4ade80;
+  --success-bg: rgba(74, 222, 128, 0.1);
+  --success-text: #4ade80;
   --warning: #fbbf24;
   --error: #f87171;
+  --error-bg: rgba(248, 113, 113, 0.1);
+  --error-text: #f87171;
   --border: #3a3a3a;
 }
 
@@ -419,3 +423,16 @@ select.input {
   align-items: center;
   gap: 8px;
 }
+
+/* Traffic Light */
+.traffic-light {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.traffic-green { background: var(--success); }
+.traffic-yellow { background: var(--warning); }
+.traffic-red { background: var(--error); }
+.traffic-grey { background: var(--text-secondary); }
