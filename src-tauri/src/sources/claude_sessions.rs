@@ -165,7 +165,7 @@ impl ClaudeSessionsSource {
                     .and_then(|m| DateTime::parse_from_rfc3339(m).ok())
                     .map(|dt| dt.with_timezone(&Utc));
 
-                let is_recent = modified_dt.map_or(false, |dt| dt >= cutoff);
+                let is_recent = modified_dt.is_some_and(|dt| dt >= cutoff);
                 if !is_recent {
                     continue;
                 }

@@ -67,6 +67,48 @@ impl AppState {
         let target_manager = Arc::new(TargetManager::new(config.clone()));
         let binding_store = Arc::new(BindingStore::new(config.clone()));
 
+        // Restore persisted targets from config
+        let target_entries = config.get_by_prefix("target.").unwrap_or_default();
+        let mut target_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (key, _) in &target_entries {
+            // Keys are like "target.n8n-abc123.url" — extract the target ID
+            let parts: Vec<&str> = key.splitn(3, '.').collect();
+            if parts.len() >= 2 {
+                target_ids.insert(parts[1].to_string());
+            }
+        }
+        for tid in &target_ids {
+            let target_type = config.get(&format!("target.{}.type", tid)).ok().flatten();
+            let target_url = config.get(&format!("target.{}.url", tid)).ok().flatten();
+            if let (Some(ttype), Some(url)) = (target_type, target_url) {
+                match ttype.as_str() {
+                    "n8n" => {
+                        if let Ok(Some(api_key)) = credentials.retrieve(&format!("n8n:{}", tid)) {
+                            if !api_key.is_empty() {
+                                let target = crate::targets::N8nTarget::new(tid.clone(), url, api_key);
+                                target_manager.register(Arc::new(target));
+                                tracing::info!(target_id = %tid, "Restored n8n target");
+                            }
+                        }
+                    }
+                    "ntfy" => {
+                        let mut target = crate::targets::NtfyTarget::new(tid.clone(), url);
+                        if let Some(topic) = config.get(&format!("target.{}.topic", tid)).ok().flatten() {
+                            target = target.with_topic(topic);
+                        }
+                        if let Ok(Some(token)) = credentials.retrieve(&format!("ntfy:{}", tid)) {
+                            if !token.is_empty() {
+                                target = target.with_auth(token);
+                            }
+                        }
+                        target_manager.register(Arc::new(target));
+                        tracing::info!(target_id = %tid, "Restored ntfy target");
+                    }
+                    _ => tracing::warn!(target_id = %tid, target_type = %ttype, "Unknown target type"),
+                }
+            }
+        }
+
         // Register sources
         use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource};
 
