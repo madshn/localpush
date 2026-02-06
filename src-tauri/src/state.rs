@@ -5,6 +5,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::config::AppConfig;
 use crate::source_manager::SourceManager;
+use crate::target_manager::TargetManager;
 use crate::traits::{CredentialStore, FileWatcher, WebhookClient, DeliveryLedgerTrait};
 use crate::production::{KeychainCredentialStore, FsEventsWatcher, ReqwestWebhookClient};
 use crate::ledger::DeliveryLedger;
@@ -16,6 +17,7 @@ pub struct AppState {
     pub webhook_client: Arc<dyn WebhookClient>,
     pub ledger: Arc<dyn DeliveryLedgerTrait>,
     pub source_manager: Arc<SourceManager>,
+    pub target_manager: Arc<TargetManager>,
     pub config: Arc<AppConfig>,
 }
 
@@ -59,14 +61,50 @@ impl AppState {
             config.clone(),
         ));
 
-        // Register ClaudeStatsSource
-        use crate::sources::ClaudeStatsSource;
+        // Initialize target manager
+        let target_manager = Arc::new(TargetManager::new(config.clone()));
+
+        // Register sources
+        use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource};
+
         match ClaudeStatsSource::new() {
             Ok(source) => {
                 tracing::info!("Registered ClaudeStatsSource");
                 source_manager.register(Arc::new(source));
             }
             Err(e) => tracing::warn!("Could not initialize Claude stats source: {}", e),
+        }
+
+        // Register Claude Sessions source
+        match ClaudeSessionsSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered ClaudeSessionsSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Could not initialize Claude sessions source: {}", e),
+        }
+
+        // Register Apple sources (graceful — may fail due to permissions)
+        match ApplePodcastsSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered ApplePodcastsSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Apple Podcasts source unavailable: {}", e),
+        }
+        match AppleNotesSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered AppleNotesSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Apple Notes source unavailable: {}", e),
+        }
+        match ApplePhotosSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered ApplePhotosSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Apple Photos source unavailable: {}", e),
         }
 
         // Restore enabled sources from config
@@ -87,6 +125,7 @@ impl AppState {
             webhook_client,
             ledger,
             source_manager,
+            target_manager,
             config,
         })
     }
@@ -110,6 +149,8 @@ impl AppState {
             config.clone(),
         ));
 
+        let target_manager = Arc::new(TargetManager::new(config.clone()));
+
         // Register test source
         match ClaudeStatsSource::new() {
             Ok(source) => source_manager.register(Arc::new(source)),
@@ -125,6 +166,7 @@ impl AppState {
             webhook_client,
             ledger,
             source_manager,
+            target_manager,
             config,
         }
     }
