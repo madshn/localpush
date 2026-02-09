@@ -6,6 +6,7 @@ import { useBindings, useCreateBinding, useRemoveBinding } from "../api/hooks/us
 import { TransparencyPreview } from "./TransparencyPreview";
 import { EndpointPicker } from "./EndpointPicker";
 import { SecurityCoaching } from "./SecurityCoaching";
+import { DeliveryConfig } from "./DeliveryConfig";
 import { TrafficLight } from "./TrafficLight";
 import { logger } from "../utils/logger";
 
@@ -23,7 +24,7 @@ interface DeliveryStatus {
   last_delivery: string | null;
 }
 
-type FlowStep = "idle" | "preview" | "pick_endpoint" | "security_check";
+type FlowStep = "idle" | "preview" | "pick_endpoint" | "configure_delivery" | "security_check";
 
 interface FlowState {
   sourceId: string;
@@ -35,6 +36,9 @@ interface FlowState {
   selectedEndpointName: string | null;
   selectedAuthenticated: boolean;
   selectedAuthType: string | null;
+  customHeaders: [string, string][];
+  authHeaderName: string;
+  authHeaderValue: string;
 }
 
 export function SourceList() {
@@ -79,6 +83,9 @@ export function SourceList() {
         selectedEndpointName: null,
         selectedAuthenticated: false,
         selectedAuthType: null,
+        customHeaders: [],
+        authHeaderName: "",
+        authHeaderValue: "",
       }
     );
   };
@@ -95,6 +102,9 @@ export function SourceList() {
         selectedEndpointName: null,
         selectedAuthenticated: false,
         selectedAuthType: null,
+        customHeaders: [] as [string, string][],
+        authHeaderName: "",
+        authHeaderValue: "",
       };
       return {
         ...prev,
@@ -173,7 +183,7 @@ export function SourceList() {
       authenticated,
     });
     updateFlowState(sourceId, {
-      step: "security_check",
+      step: "configure_delivery",
       selectedTarget: targetId,
       selectedEndpoint: endpointId,
       selectedEndpointUrl: endpointUrl,
@@ -181,6 +191,24 @@ export function SourceList() {
       selectedAuthenticated: authenticated,
       selectedAuthType: authType || null,
     });
+  };
+
+  const handleDeliveryConfigConfirm = (
+    sourceId: string,
+    customHeaders: [string, string][],
+    authHeaderName: string,
+    authHeaderValue: string
+  ) => {
+    updateFlowState(sourceId, {
+      step: "security_check",
+      customHeaders,
+      authHeaderName,
+      authHeaderValue,
+    });
+  };
+
+  const handleBackToDeliveryConfig = (sourceId: string) => {
+    updateFlowState(sourceId, { step: "configure_delivery" });
   };
 
   const handleSecurityConfirm = async (sourceId: string) => {
@@ -203,6 +231,9 @@ export function SourceList() {
         endpointId: state.selectedEndpoint,
         endpointUrl: state.selectedEndpointUrl,
         endpointName: state.selectedEndpointName,
+        customHeaders: state.customHeaders.length > 0 ? state.customHeaders : undefined,
+        authHeaderName: state.authHeaderName || undefined,
+        authHeaderValue: state.authHeaderValue || undefined,
       });
       await invoke("enable_source", { sourceId });
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
@@ -288,9 +319,11 @@ export function SourceList() {
           onPreviewEnable={handlePreviewEnable}
           onPreviewRefresh={handlePreviewRefresh}
           onEndpointSelect={handleEndpointSelect}
+          onDeliveryConfigConfirm={handleDeliveryConfigConfirm}
           onSecurityConfirm={handleSecurityConfirm}
           onCancelFlow={handleCancelFlow}
           onBackToEndpointPicker={handleBackToEndpointPicker}
+          onBackToDeliveryConfig={handleBackToDeliveryConfig}
           onUnbind={handleUnbind}
           onPushNow={handlePushNow}
           isPushing={pushingSource === source.id}
@@ -323,9 +356,16 @@ interface SourceCardProps {
     authenticated: boolean,
     authType?: string
   ) => void;
+  onDeliveryConfigConfirm: (
+    sourceId: string,
+    customHeaders: [string, string][],
+    authHeaderName: string,
+    authHeaderValue: string
+  ) => void;
   onSecurityConfirm: (sourceId: string) => void;
   onCancelFlow: (sourceId: string) => void;
   onBackToEndpointPicker: (sourceId: string) => void;
+  onBackToDeliveryConfig: (sourceId: string) => void;
   onUnbind: (sourceId: string, endpointId: string) => void;
   onPushNow: (sourceId: string) => void;
   isPushing: boolean;
@@ -340,9 +380,11 @@ function SourceCard({
   onPreviewEnable,
   onPreviewRefresh,
   onEndpointSelect,
+  onDeliveryConfigConfirm,
   onSecurityConfirm,
   onCancelFlow,
   onBackToEndpointPicker,
+  onBackToDeliveryConfig,
   onUnbind,
   onPushNow,
   isPushing,
@@ -410,6 +452,22 @@ function SourceCard({
         </div>
       )}
 
+      {flowState.step === "configure_delivery" &&
+        flowState.selectedEndpointUrl &&
+        flowState.selectedEndpointName && (
+          <div style={{ marginTop: "16px" }}>
+            <DeliveryConfig
+              endpointName={flowState.selectedEndpointName}
+              endpointUrl={flowState.selectedEndpointUrl}
+              authenticated={flowState.selectedAuthenticated}
+              onConfirm={(customHeaders, authHeaderName, authHeaderValue) =>
+                onDeliveryConfigConfirm(source.id, customHeaders, authHeaderName, authHeaderValue)
+              }
+              onBack={() => onBackToEndpointPicker(source.id)}
+            />
+          </div>
+        )}
+
       {flowState.step === "security_check" &&
         flowState.selectedEndpointUrl &&
         flowState.selectedEndpointName && (
@@ -419,7 +477,7 @@ function SourceCard({
               authenticated={flowState.selectedAuthenticated}
               authType={flowState.selectedAuthType || undefined}
               onConfirm={() => onSecurityConfirm(source.id)}
-              onBack={() => onBackToEndpointPicker(source.id)}
+              onBack={() => onBackToDeliveryConfig(source.id)}
             />
           </div>
         )}

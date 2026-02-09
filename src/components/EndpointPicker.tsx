@@ -36,6 +36,7 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
   const [selectedTarget, setSelectedTarget] = useState<Target | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [endpointFilter, setEndpointFilter] = useState("");
 
   useEffect(() => {
     loadTargets();
@@ -190,7 +191,58 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
               No endpoints available for this target.
             </p>
           ) : (
-            endpoints.map((endpoint) => (
+            <>
+              <div style={{ position: "relative" }}>
+                <input
+                  type="text"
+                  placeholder="Filter endpoints..."
+                  value={endpointFilter}
+                  onChange={(e) => setEndpointFilter(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 28px 8px 10px",
+                    fontSize: "12px",
+                    border: "1px solid var(--border)",
+                    borderRadius: "6px",
+                    background: "var(--bg-primary)",
+                    color: "var(--text-primary)",
+                    boxSizing: "border-box",
+                  }}
+                />
+                {endpointFilter && (
+                  <button
+                    onClick={() => setEndpointFilter("")}
+                    style={{
+                      position: "absolute",
+                      right: "6px",
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "var(--text-secondary)",
+                      fontSize: "14px",
+                      padding: "2px 4px",
+                    }}
+                  >
+                    x
+                  </button>
+                )}
+              </div>
+              {(() => {
+                const filtered = endpoints.filter((ep) => {
+                  if (!endpointFilter) return true;
+                  const q = endpointFilter.toLowerCase();
+                  return ep.name.toLowerCase().includes(q) || ep.url.toLowerCase().includes(q);
+                });
+                return (
+                  <>
+                    {endpointFilter && (
+                      <p style={{ fontSize: "11px", color: "var(--text-secondary)", margin: 0 }}>
+                        {filtered.length} of {endpoints.length} endpoints
+                      </p>
+                    )}
+                    {filtered.map((endpoint) => (
               <div
                 key={endpoint.id}
                 className="source-item"
@@ -217,7 +269,11 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
                   <span style={{ fontSize: "18px", color: "var(--text-secondary)" }}>→</span>
                 </div>
               </div>
-            ))
+            ))}
+                  </>
+                );
+              })()}
+            </>
           )}
         </div>
       )}

@@ -489,6 +489,7 @@ pub async fn list_target_endpoints(
 
 /// Create a binding from a source to a target endpoint
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn create_binding(
     state: State<'_, AppState>,
     source_id: String,
@@ -496,13 +497,44 @@ pub fn create_binding(
     endpoint_id: String,
     endpoint_url: String,
     endpoint_name: String,
+    custom_headers: Option<Vec<(String, String)>>,
+    auth_header_name: Option<String>,
+    auth_header_value: Option<String>,
 ) -> Result<(), String> {
     tracing::info!(
         command = "create_binding",
         source_id = %source_id,
         endpoint_id = %endpoint_id,
+        has_custom_headers = custom_headers.is_some(),
+        has_auth = auth_header_name.is_some(),
         "Command invoked"
     );
+
+    // Build headers_json: combine custom headers + auth header name (placeholder for secret)
+    let mut all_headers: Vec<(String, String)> = custom_headers.unwrap_or_default();
+    let mut auth_credential_key = None;
+
+    if let Some(ref auth_name) = auth_header_name {
+        // Add auth header with empty value as placeholder (secret stored separately)
+        all_headers.push((auth_name.clone(), String::new()));
+
+        // Store secret in credential store
+        if let Some(ref auth_value) = auth_header_value {
+            let cred_key = format!("binding:{}:{}", source_id, endpoint_id);
+            state.credentials.store(&cred_key, auth_value).map_err(|e| {
+                tracing::error!(error = %e, "Failed to store binding credential");
+                e.to_string()
+            })?;
+            auth_credential_key = Some(cred_key);
+        }
+    }
+
+    let headers_json = if all_headers.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(&all_headers).map_err(|e| e.to_string())?)
+    };
+
     let binding = SourceBinding {
         source_id,
         target_id,
@@ -511,6 +543,8 @@ pub fn create_binding(
         endpoint_name,
         created_at: chrono::Utc::now().timestamp(),
         active: true,
+        headers_json,
+        auth_credential_key,
     };
     state.binding_store.save(&binding)
 }

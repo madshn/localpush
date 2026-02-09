@@ -36,6 +36,14 @@ impl ReqwestWebhookClient {
                 tracing::debug!("Adding Basic auth for user: {}", username);
                 request.basic_auth(username, Some(password))
             }
+            WebhookAuth::Custom { headers } => {
+                tracing::debug!("Adding {} custom headers", headers.len());
+                let mut req = request;
+                for (name, value) in headers {
+                    req = req.header(name, value);
+                }
+                req
+            }
         }
     }
 }
@@ -163,6 +171,14 @@ mod tests {
         let _ = client.apply_auth(request, &WebhookAuth::Basic {
             username: "user".to_string(),
             password: "pass".to_string(),
+        });
+
+        let request = client.client.post("https://example.com");
+        let _ = client.apply_auth(request, &WebhookAuth::Custom {
+            headers: vec![
+                ("Authorization".to_string(), "Bearer test-token".to_string()),
+                ("X-Custom".to_string(), "value".to_string()),
+            ],
         });
     }
 }

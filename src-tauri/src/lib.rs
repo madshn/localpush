@@ -72,6 +72,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         state.webhook_client.clone(),
         state.config.clone(),
         state.binding_store.clone(),
+        state.credentials.clone(),
     );
 
     app.manage(state);

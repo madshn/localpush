@@ -52,6 +52,8 @@ pub enum WebhookAuth {
     Bearer { token: String },
     #[serde(rename = "basic")]
     Basic { username: String, password: String },
+    #[serde(rename = "custom")]
+    Custom { headers: Vec<(String, String)> },
 }
 
 /// Trait for webhook HTTP delivery

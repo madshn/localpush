@@ -42,6 +42,9 @@ async function createBinding(params: {
   endpointId: string;
   endpointUrl: string;
   endpointName: string;
+  customHeaders?: [string, string][];
+  authHeaderName?: string;
+  authHeaderValue?: string;
 }): Promise<void> {
   logger.debug("Creating binding", params);
   try {
@@ -51,8 +54,15 @@ async function createBinding(params: {
       endpointId: params.endpointId,
       endpointUrl: params.endpointUrl,
       endpointName: params.endpointName,
+      customHeaders: params.customHeaders,
+      authHeaderName: params.authHeaderName,
+      authHeaderValue: params.authHeaderValue,
     });
-    logger.info("Binding created", params);
+    logger.info("Binding created", {
+      sourceId: params.sourceId,
+      endpointId: params.endpointId,
+      hasAuth: !!params.authHeaderName,
+    });
   } catch (error) {
     logger.error("Failed to create binding", { ...params, error });
     throw error;
