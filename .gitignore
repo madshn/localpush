@@ -15,7 +15,6 @@ target/
 
 # IDE
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -41,6 +40,9 @@ src-tauri/icons/
 *.db
 *.db-shm
 *.db-wal
+
+# Worktrees
+.trees/
 
 # Temporary
 tmp/

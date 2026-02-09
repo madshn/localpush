@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Write(./**)",
+      "Edit(./**)",
+      "Glob(**)",
+      "Grep(**)",
+      "Bash",
+      "Task(*)",
+      "Skill(*)",
+      "WebFetch",
+      "WebSearch",
+      "AskUserQuestion",
+      "NotebookEdit(./**)",
+      "mcp__*",
+      "mcp__kiosk__*",
+      "mcp__plugin_Notion_notion__*",
+      "mcp__plugin_context7_context7__*",
+      "mcp__n8n-mcp__*",
+      "mcp__claude-in-chrome__*"
+    ],
+    "deny": [
+      "Bash(sudo:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(mkfs:*)",
+      "Bash(dd if=:*)"
+    ]
+  }
+}
