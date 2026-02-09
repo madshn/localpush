@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Search, X, ChevronRight } from "lucide-react";
 import { logger } from "../utils/logger";
 
 interface Target {
@@ -46,10 +47,8 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
     setLoading(true);
     setError(null);
     try {
-      logger.debug("Loading targets for endpoint picker");
       const result = await invoke<Target[]>("list_targets");
       setTargets(result);
-      logger.debug("Targets loaded", { count: result.length });
     } catch (err) {
       logger.error("Failed to load targets", { error: err });
       setError(`Failed to load targets: ${err}`);
@@ -64,12 +63,10 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
     setLoading(true);
     setError(null);
     try {
-      logger.debug("Loading endpoints for target", { targetId: target.id });
       const result = await invoke<Endpoint[]>("list_target_endpoints", {
         targetId: target.id,
       });
       setEndpoints(result);
-      logger.debug("Endpoints loaded", { targetId: target.id, count: result.length });
     } catch (err) {
       logger.error("Failed to load endpoints", { targetId: target.id, error: err });
       setError(`Failed to load endpoints: ${err}`);
@@ -80,11 +77,6 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
 
   const handleEndpointSelect = (endpoint: Endpoint) => {
     if (!selectedTarget) return;
-    logger.debug("Endpoint selected", {
-      targetId: selectedTarget.id,
-      endpointId: endpoint.id,
-      endpointUrl: endpoint.url,
-    });
     onSelect(
       selectedTarget.id,
       endpoint.id,
@@ -107,24 +99,25 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
 
   if (loading && targets.length === 0) {
     return (
-      <div className="card">
-        <h3 className="card-title">Select Endpoint</h3>
-        <p style={{ color: "var(--text-secondary)", textAlign: "center", padding: "20px" }}>
-          Loading...
-        </p>
+      <div className="bg-bg-secondary border border-border rounded-lg p-4">
+        <h3 className="text-sm font-semibold mb-3">Select Endpoint</h3>
+        <p className="text-xs text-text-secondary text-center py-5">Loading...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="card">
-        <h3 className="card-title">Select Endpoint</h3>
-        <div className="status-message status-error" style={{ marginBottom: "12px" }}>
+      <div className="bg-bg-secondary border border-border rounded-lg p-4">
+        <h3 className="text-sm font-semibold mb-3">Select Endpoint</h3>
+        <div className="text-xs text-error bg-error-bg border border-error rounded-md p-3 mb-3">
           {error}
         </div>
-        <div className="preview-actions">
-          <button className="btn btn-secondary" onClick={onCancel}>
+        <div className="flex justify-end">
+          <button
+            className="text-xs font-medium px-3 py-1.5 rounded-md bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
+            onClick={onCancel}
+          >
             Cancel
           </button>
         </div>
@@ -134,18 +127,21 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
 
   if (targets.length === 0) {
     return (
-      <div className="card">
-        <h3 className="card-title">Select Endpoint</h3>
-        <div style={{ padding: "20px", textAlign: "center" }}>
-          <p style={{ color: "var(--text-secondary)", marginBottom: "12px" }}>
+      <div className="bg-bg-secondary border border-border rounded-lg p-4">
+        <h3 className="text-sm font-semibold mb-3">Select Endpoint</h3>
+        <div className="py-5 text-center">
+          <p className="text-xs text-text-secondary mb-2">
             No targets connected yet.
           </p>
-          <p style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+          <p className="text-[11px] text-text-secondary">
             Go to Settings to add webhook targets.
           </p>
         </div>
-        <div className="preview-actions">
-          <button className="btn btn-secondary" onClick={onCancel}>
+        <div className="flex justify-end">
+          <button
+            className="text-xs font-medium px-3 py-1.5 rounded-md bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
+            onClick={onCancel}
+          >
             Cancel
           </button>
         </div>
@@ -154,78 +150,59 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
   }
 
   return (
-    <div className="card">
-      <h3 className="card-title">
+    <div className="bg-bg-secondary border border-border rounded-lg p-4">
+      <h3 className="text-sm font-semibold mb-3">
         {step === "target" ? "Select Target System" : "Select Endpoint"}
       </h3>
 
       {step === "target" ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <div className="flex flex-col gap-2">
           {targets.map((target) => (
             <div
               key={target.id}
-              className="source-item"
-              style={{ cursor: "pointer" }}
+              className="flex items-center justify-between p-3 bg-bg-primary rounded-md cursor-pointer hover:bg-bg-tertiary transition-colors"
               onClick={() => handleTargetSelect(target)}
             >
-              <div className="source-info">
-                <h3>{target.name}</h3>
-                <p>{target.target_type}</p>
+              <div>
+                <div className="text-xs font-medium">{target.name}</div>
+                <div className="text-[11px] text-text-secondary">
+                  {target.target_type}
+                </div>
               </div>
-              <span style={{ fontSize: "18px", color: "var(--text-secondary)" }}>→</span>
+              <ChevronRight size={14} className="text-text-secondary" />
             </div>
           ))}
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <div className="flex flex-col gap-2">
           {loading ? (
-            <p
-              style={{ color: "var(--text-secondary)", textAlign: "center", padding: "20px" }}
-            >
+            <p className="text-xs text-text-secondary text-center py-5">
               Loading endpoints...
             </p>
           ) : endpoints.length === 0 ? (
-            <p
-              style={{ color: "var(--text-secondary)", textAlign: "center", padding: "20px" }}
-            >
+            <p className="text-xs text-text-secondary text-center py-5">
               No endpoints available for this target.
             </p>
           ) : (
             <>
-              <div style={{ position: "relative" }}>
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary"
+                />
                 <input
                   type="text"
                   placeholder="Filter endpoints..."
                   value={endpointFilter}
                   onChange={(e) => setEndpointFilter(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "8px 28px 8px 10px",
-                    fontSize: "12px",
-                    border: "1px solid var(--border)",
-                    borderRadius: "6px",
-                    background: "var(--bg-primary)",
-                    color: "var(--text-primary)",
-                    boxSizing: "border-box",
-                  }}
+                  className="w-full pl-8 pr-8 py-2 text-xs border border-border rounded-md bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
                 />
                 {endpointFilter && (
                   <button
                     onClick={() => setEndpointFilter("")}
-                    style={{
-                      position: "absolute",
-                      right: "6px",
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: "var(--text-secondary)",
-                      fontSize: "14px",
-                      padding: "2px 4px",
-                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
                   >
-                    x
+                    <X size={14} />
                   </button>
                 )}
               </div>
@@ -233,43 +210,40 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
                 const filtered = endpoints.filter((ep) => {
                   if (!endpointFilter) return true;
                   const q = endpointFilter.toLowerCase();
-                  return ep.name.toLowerCase().includes(q) || ep.url.toLowerCase().includes(q);
+                  return (
+                    ep.name.toLowerCase().includes(q) ||
+                    ep.url.toLowerCase().includes(q)
+                  );
                 });
                 return (
                   <>
                     {endpointFilter && (
-                      <p style={{ fontSize: "11px", color: "var(--text-secondary)", margin: 0 }}>
+                      <p className="text-[11px] text-text-secondary">
                         {filtered.length} of {endpoints.length} endpoints
                       </p>
                     )}
                     {filtered.map((endpoint) => (
-              <div
-                key={endpoint.id}
-                className="source-item"
-                style={{ cursor: "pointer" }}
-                onClick={() => handleEndpointSelect(endpoint)}
-              >
-                <div className="source-info">
-                  <h3>{endpoint.name}</h3>
-                  <p
-                    style={{
-                      fontFamily: "'SF Mono', Monaco, 'Cascadia Code', monospace",
-                      fontSize: "11px",
-                    }}
-                  >
-                    {endpoint.url}
-                  </p>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  {endpoint.authenticated && (
-                    <span className="badge" style={{ fontSize: "10px" }}>
-                      AUTH
-                    </span>
-                  )}
-                  <span style={{ fontSize: "18px", color: "var(--text-secondary)" }}>→</span>
-                </div>
-              </div>
-            ))}
+                      <div
+                        key={endpoint.id}
+                        className="flex items-center justify-between p-3 bg-bg-primary rounded-md cursor-pointer hover:bg-bg-tertiary transition-colors"
+                        onClick={() => handleEndpointSelect(endpoint)}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-medium">{endpoint.name}</div>
+                          <div className="text-[10px] font-mono text-text-secondary truncate">
+                            {endpoint.url}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 ml-2">
+                          {endpoint.authenticated && (
+                            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-accent-muted text-accent">
+                              AUTH
+                            </span>
+                          )}
+                          <ChevronRight size={14} className="text-text-secondary" />
+                        </div>
+                      </div>
+                    ))}
                   </>
                 );
               })()}
@@ -278,8 +252,11 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
         </div>
       )}
 
-      <div className="preview-actions" style={{ marginTop: "12px" }}>
-        <button className="btn btn-secondary" onClick={handleBack}>
+      <div className="flex justify-end mt-3">
+        <button
+          className="text-xs font-medium px-3 py-1.5 rounded-md bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
+          onClick={handleBack}
+        >
           {step === "target" ? "Cancel" : "Back"}
         </button>
       </div>

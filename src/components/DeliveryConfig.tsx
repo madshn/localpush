@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Plus, X } from "lucide-react";
 
 interface DeliveryConfigProps {
   endpointName: string;
@@ -51,172 +52,120 @@ export function DeliveryConfig({
   const authRequired = authenticated;
   const canContinue = !authRequired || authValue.trim() !== "";
 
+  const inputClass =
+    "w-full px-2 py-1.5 text-xs border border-border rounded bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent";
+
   return (
-    <div className="card">
-      <h3 className="card-title">Configure Delivery</h3>
+    <div className="bg-bg-secondary border border-border rounded-lg p-4">
+      <h3 className="text-sm font-semibold mb-3">Configure Delivery</h3>
 
       {/* Endpoint info */}
-      <div
-        style={{
-          padding: "8px 10px",
-          background: "var(--bg-primary)",
-          borderRadius: "6px",
-          marginBottom: "12px",
-        }}
-      >
-        <div style={{ fontSize: "12px", fontWeight: 500 }}>{endpointName}</div>
-        <div
-          style={{
-            fontSize: "10px",
-            color: "var(--text-secondary)",
-            fontFamily: "'SF Mono', Monaco, 'Cascadia Code', monospace",
-          }}
-        >
+      <div className="px-3 py-2 bg-bg-primary rounded-md mb-3">
+        <div className="text-xs font-medium">{endpointName}</div>
+        <div className="text-[10px] text-text-secondary font-mono">
           {endpointUrl}
         </div>
       </div>
 
       {/* Auth section */}
       {authRequired && (
-        <div
-          className="status-message status-error"
-          style={{ marginBottom: "12px", fontSize: "12px" }}
-        >
+        <div className="text-xs text-error bg-error-bg border border-error rounded-md p-2.5 mb-3">
           This endpoint requires authentication.
         </div>
       )}
 
-      <div style={{ marginBottom: "12px" }}>
-        <label style={{ fontSize: "12px", fontWeight: 500, display: "block", marginBottom: "4px" }}>
+      <div className="mb-3">
+        <label className="block text-xs font-medium mb-1.5">
           {authRequired ? "Auth Header (required)" : "Auth Header (optional)"}
         </label>
-        <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+        <div className="flex gap-1.5 mb-1.5">
           <input
             type="text"
             value={authName}
             onChange={(e) => setAuthName(e.target.value)}
             placeholder="Header name"
-            style={{
-              flex: "0 0 140px",
-              padding: "6px 8px",
-              fontSize: "12px",
-              border: "1px solid var(--border)",
-              borderRadius: "4px",
-              background: "var(--bg-primary)",
-              color: "var(--text-primary)",
-            }}
+            className={`${inputClass} !w-[140px] shrink-0`}
           />
           <input
             type="password"
             value={authValue}
             onChange={(e) => setAuthValue(e.target.value)}
             placeholder="Secret value (e.g. Bearer token...)"
-            style={{
-              flex: 1,
-              padding: "6px 8px",
-              fontSize: "12px",
-              border: "1px solid var(--border)",
-              borderRadius: "4px",
-              background: "var(--bg-primary)",
-              color: "var(--text-primary)",
-            }}
+            className={inputClass}
           />
         </div>
       </div>
 
       {/* Custom headers */}
-      <div style={{ marginBottom: "12px" }}>
+      <div className="mb-3">
         <button
           onClick={() => {
             setShowHeaders(!showHeaders);
             if (!showHeaders && headers.length === 0) addHeader();
           }}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--accent)",
-            fontSize: "12px",
-            padding: 0,
-            textDecoration: "underline",
-          }}
+          className="text-xs text-accent hover:underline"
         >
           {showHeaders ? "Hide custom headers" : "Add custom headers"}
         </button>
 
         {showHeaders && (
-          <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
+          <div className="mt-2 flex flex-col gap-1.5">
             {headers.map((header, i) => (
-              <div key={i} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <div key={i} className="flex gap-1.5 items-center">
                 <input
                   type="text"
                   value={header[0]}
                   onChange={(e) => updateHeader(i, 0, e.target.value)}
                   placeholder="Header name"
-                  style={{
-                    flex: "0 0 140px",
-                    padding: "6px 8px",
-                    fontSize: "12px",
-                    border: "1px solid var(--border)",
-                    borderRadius: "4px",
-                    background: "var(--bg-primary)",
-                    color: "var(--text-primary)",
-                  }}
+                  className={`${inputClass} !w-[140px] shrink-0`}
                 />
                 <input
                   type="text"
                   value={header[1]}
                   onChange={(e) => updateHeader(i, 1, e.target.value)}
                   placeholder="Value"
-                  style={{
-                    flex: 1,
-                    padding: "6px 8px",
-                    fontSize: "12px",
-                    border: "1px solid var(--border)",
-                    borderRadius: "4px",
-                    background: "var(--bg-primary)",
-                    color: "var(--text-primary)",
-                  }}
+                  className={inputClass}
                 />
                 <button
                   onClick={() => removeHeader(i)}
-                  className="btn btn-secondary"
-                  style={{ fontSize: "11px", padding: "4px 8px" }}
+                  className="shrink-0 p-1 text-text-secondary hover:text-error transition-colors"
                 >
-                  x
+                  <X size={14} />
                 </button>
               </div>
             ))}
             <button
               onClick={addHeader}
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "var(--accent)",
-                fontSize: "11px",
-                padding: 0,
-                textAlign: "left",
-              }}
+              className="flex items-center gap-1 text-[11px] text-accent hover:underline"
             >
-              + Add another header
+              <Plus size={12} /> Add another header
             </button>
           </div>
         )}
       </div>
 
       {/* Actions */}
-      <div className="preview-actions">
-        <button className="btn btn-secondary" onClick={onBack}>
+      <div className="flex items-center justify-between">
+        <button
+          className="text-xs font-medium px-3 py-1.5 rounded-md bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
+          onClick={onBack}
+        >
           Back
         </button>
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div className="flex gap-2">
           {!authRequired && (
-            <button className="btn btn-secondary" onClick={handleSkip}>
+            <button
+              className="text-xs font-medium px-3 py-1.5 rounded-md bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
+              onClick={handleSkip}
+            >
               Skip
             </button>
           )}
-          <button className="btn" onClick={handleConfirm} disabled={!canContinue}>
+          <button
+            className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
+            onClick={handleConfirm}
+            disabled={!canContinue}
+          >
             Continue
           </button>
         </div>
