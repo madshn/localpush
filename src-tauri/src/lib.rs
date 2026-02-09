@@ -66,11 +66,12 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         }
     }));
 
-    // Spawn background delivery worker
+    // Spawn background delivery worker (binding-aware routing)
     let _worker = delivery_worker::spawn_worker(
         state.ledger.clone(),
         state.webhook_client.clone(),
         state.config.clone(),
+        state.binding_store.clone(),
     );
 
     app.manage(state);
@@ -184,8 +185,8 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     // Position window centered below the tray icon
-                    let window_width = 400.0_f64;
-                    let window_height = 500.0_f64;
+                    let window_width = 420.0_f64;
+                    let window_height = 680.0_f64;
                     let x = icon_x + (icon_w / 2.0) - (window_width / 2.0);
                     let y = icon_y + icon_h + 4.0;
 
@@ -202,15 +203,17 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         })
         .build(app)?;
 
-    // Hide window when it loses focus (click outside to dismiss)
-    if let Some(window) = app.get_webview_window("main") {
-        let win = window.clone();
-        window.on_window_event(move |event| {
-            if let tauri::WindowEvent::Focused(false) = event {
-                let _ = win.hide();
-            }
-        });
-    }
+    // TODO: Re-enable auto-hide once settings flows are more compact.
+    // Currently disabled because focus-loss hides the window mid-interaction
+    // (e.g., during enable flow, alert dialogs, or permission prompts).
+    // if let Some(window) = app.get_webview_window("main") {
+    //     let win = window.clone();
+    //     window.on_window_event(move |event| {
+    //         if let tauri::WindowEvent::Focused(false) = event {
+    //             let _ = win.hide();
+    //         }
+    //     });
+    // }
 
     Ok(())
 }

@@ -204,13 +204,23 @@ impl Target for N8nTarget {
 
     async fn list_endpoints(&self) -> Result<Vec<TargetEndpoint>, TargetError> {
         let workflows = self.fetch_workflows().await?;
-        let mut endpoints = Vec::new();
+        tracing::debug!(count = workflows.len(), "Fetching workflow details in parallel");
 
-        for wf in &workflows {
-            let full = self.fetch_workflow_details(&wf.id).await?;
-            endpoints.extend(self.extract_webhook_endpoints(&full));
+        let futures: Vec<_> = workflows
+            .iter()
+            .map(|wf| self.fetch_workflow_details(&wf.id))
+            .collect();
+        let results = futures::future::join_all(futures).await;
+
+        let mut endpoints = Vec::new();
+        for result in results {
+            match result {
+                Ok(full) => endpoints.extend(self.extract_webhook_endpoints(&full)),
+                Err(e) => tracing::warn!(error = %e, "Failed to fetch workflow details, skipping"),
+            }
         }
 
+        tracing::info!(endpoint_count = endpoints.len(), "Discovered webhook endpoints");
         Ok(endpoints)
     }
 }

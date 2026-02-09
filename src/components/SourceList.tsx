@@ -84,10 +84,23 @@ export function SourceList() {
   };
 
   const updateFlowState = (sourceId: string, updates: Partial<FlowState>) => {
-    setFlowStates((prev) => ({
-      ...prev,
-      [sourceId]: { ...getFlowState(sourceId), ...updates },
-    }));
+    setFlowStates((prev) => {
+      const current = prev[sourceId] || {
+        sourceId,
+        step: "idle" as FlowStep,
+        preview: null,
+        selectedTarget: null,
+        selectedEndpoint: null,
+        selectedEndpointUrl: null,
+        selectedEndpointName: null,
+        selectedAuthenticated: false,
+        selectedAuthType: null,
+      };
+      return {
+        ...prev,
+        [sourceId]: { ...current, ...updates },
+      };
+    });
   };
 
   const resetFlowState = (sourceId: string) => {
@@ -219,6 +232,24 @@ export function SourceList() {
     }
   };
 
+  const [pushingSource, setPushingSource] = useState<string | null>(null);
+
+  const handlePushNow = async (sourceId: string) => {
+    setPushingSource(sourceId);
+    try {
+      logger.debug("Manual push triggered", { sourceId });
+      await invoke<string>("trigger_source_push", { sourceId });
+      logger.info("Manual push enqueued, delivery worker will send within 5s", { sourceId });
+      // Refresh delivery status after a short delay to show the pending entry
+      setTimeout(() => loadDeliveryStatus(), 1000);
+    } catch (error) {
+      logger.error("Manual push failed", { sourceId, error });
+      alert(`Push failed: ${error}`);
+    } finally {
+      setPushingSource(null);
+    }
+  };
+
   const getTrafficLightStatus = (
     sourceId: string,
     enabled: boolean
@@ -261,6 +292,8 @@ export function SourceList() {
           onCancelFlow={handleCancelFlow}
           onBackToEndpointPicker={handleBackToEndpointPicker}
           onUnbind={handleUnbind}
+          onPushNow={handlePushNow}
+          isPushing={pushingSource === source.id}
         />
       ))}
     </div>
@@ -294,6 +327,8 @@ interface SourceCardProps {
   onCancelFlow: (sourceId: string) => void;
   onBackToEndpointPicker: (sourceId: string) => void;
   onUnbind: (sourceId: string, endpointId: string) => void;
+  onPushNow: (sourceId: string) => void;
+  isPushing: boolean;
 }
 
 function SourceCard({
@@ -309,6 +344,8 @@ function SourceCard({
   onCancelFlow,
   onBackToEndpointPicker,
   onUnbind,
+  onPushNow,
+  isPushing,
 }: SourceCardProps) {
   const { data: bindings } = useBindings(source.id);
 
@@ -390,9 +427,19 @@ function SourceCard({
       {/* Bindings List (when enabled) */}
       {source.enabled && bindings && bindings.length > 0 && flowState.step === "idle" && (
         <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid var(--border)" }}>
-          <h4 style={{ fontSize: "12px", fontWeight: 600, marginBottom: "8px", color: "var(--text-secondary)" }}>
-            Bound Endpoints
-          </h4>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+            <h4 style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-secondary)", margin: 0 }}>
+              Bound Endpoints
+            </h4>
+            <button
+              className="btn"
+              style={{ fontSize: "11px", padding: "4px 10px" }}
+              onClick={() => onPushNow(source.id)}
+              disabled={isPushing}
+            >
+              {isPushing ? "Pushing..." : "Push Now"}
+            </button>
+          </div>
           {bindings.map((binding) => (
             <div
               key={binding.endpoint_id}

@@ -1,10 +1,11 @@
 # LocalPush Resume Prompt
 
-**Last Updated:** 2026-02-05
-**Project Path:** `~/dev/localpush`
+**Last Updated:** 2026-02-08
+**Project Path:** `~/dev/localpush/.trees/v0.2`
+**Branch:** `feature/v0.2-multi-source`
 **GitHub:** https://github.com/madshn/localpush
 **Vision Doc:** https://www.notion.so/ownbrain/LocalPush-Open-Source-File-Webhook-Bridge-2fbc84e67cc481b69522f87f17b9aed7
-**Status:** v0.1.3 released — core infrastructure complete, ready for feature development
+**Status:** v0.2 end-to-end delivery verified — sources push real data to n8n endpoints
 
 ---
 
@@ -13,90 +14,78 @@
 Copy and paste this to continue work:
 
 ```
-Resume LocalPush build at ~/dev/localpush. Read RESUME.md for context.
+Resume LocalPush v0.2 build at ~/dev/localpush/.trees/v0.2 (branch: feature/v0.2-multi-source). Read CLAUDE.md for full architecture.
 
-STATUS: v0.1.3 released and working. Menu bar app with arrow icon, popover UI, delivery pipeline verified end-to-end.
+STATUS: Full delivery pipeline verified end-to-end. Sources push real data to n8n endpoints. 80 unit tests + 5 integration tests passing.
 
-WHAT'S BUILT:
-- Tauri 2.0 macOS menu bar app (Rust + React)
-- SQLite WAL delivery ledger with guaranteed delivery (5-state machine)
-- Claude Code Stats source (watches ~/.claude/stats-cache.json)
-- Webhook delivery to n8n (tested, working)
-- 42 tests passing (37 Rust + 5 integration)
-- Homebrew Cask distribution (brew tap madshn/localpush)
-- Auto-update via GitHub Releases
+WHAT'S WORKING:
+- Multi-source, multi-target architecture with per-binding routing
+- Claude Code Statistics source: enabled, bound to n8n endpoint
+- n8n target restored on restart (credentials in dev-credentials.json)
+- Binding: claude-stats → n8n webhook "LocalPush Ingestion Test" at flow.rightaim.ai
+- "Push Now" button triggers source parse + enqueue (delivery worker picks up ≤5s)
+- Delivery worker: per-binding routing (v0.2) with legacy global webhook fallback (v0.1)
+- Window: 420x680, resizable, min 360x400
+- Dev credential store (file-based, no Keychain prompts)
 
-WHAT'S NEXT (from vision doc):
-1. More northbound targets: ntfy (mobile push), Make, Zapier, Home Assistant
-2. More southbound sources: Apple Podcasts, Apple Finance, Screen Time, Browser History
-3. Push resolution options: Streaming (<5s), Near-real-time (30-60s), Hourly, Daily, Weekly
-4. Radical transparency: Pre-enable preview showing YOUR real data before connecting
-5. Future: Local AI privacy guardian (Apple Intelligence/Ollama)
+SOURCES AVAILABLE:
+- Claude Code Statistics (claude-stats) — enabled, bound, tested
+- Claude Code Sessions (claude-sessions) — registered, not enabled
+- Apple Podcasts, Apple Notes, Apple Photos — registered, not enabled
 
-ARCHITECTURE:
-- src-tauri/src/traits/ — All abstractions (CredentialStore, FileWatcher, WebhookClient, DeliveryLedger)
-- src-tauri/src/production/ — Real implementations (Keychain, FSEvents, Reqwest)
-- src-tauri/src/sources/ — Data source plugins (claude_stats.rs is the template)
-- src-tauri/src/source_manager.rs — Source registry + file event routing
-- src/components/ — React UI (StatusIndicator, SourceList, DeliveryQueue, SettingsPanel)
+KNOWN ISSUES:
+- UX: Enable flow checkbox not recognizable as checkbox. Defer to Google Stitch redesign.
+- Old production LocalPush.app may conflict — kill before dev testing
+- Port 1420 may need freeing: lsof -ti:1420 | xargs kill -9
 
-KEY DECISIONS:
-- Trait-based DI for 100% testable Rust
-- SQLite WAL for crash-safe guaranteed delivery
-- tauri::async_runtime::spawn (NOT tokio::spawn) for Tauri context
-- 22x22 PNG template icon for macOS menu bar
-- Mutex<Connection> for rusqlite thread safety
+UNCOMMITTED CHANGES:
+- 14 modified files + 1 new file (dev_credential_store.rs)
+- Includes target restoration on startup, clippy cleanup, delivery worker routing
 
-LEARNINGS: See learnings/ directory for patterns discovered during development.
+WHAT'S NEXT:
+- Commit and stabilize v0.2 branch
+- Enable and test remaining sources (claude-sessions, apple-podcasts, etc.)
+- UX improvements (checkbox discoverability, onboarding flow)
+- PR to main when stable
 ```
 
 ---
 
-## Current State (2026-02-05)
+## Current State (2026-02-08)
 
-### What Works
-- Full trait-based architecture (CredentialStore, FileWatcher, WebhookClient, DeliveryLedger)
-- SQLite WAL ledger with 5-state machine (Pending → InFlight → Delivered/Failed/DLQ)
-- Production implementations: Keychain, FSEvents, Reqwest webhook client
-- Claude Code Stats source plugin (parses ~/.claude/stats-cache.json)
-- Source manager with enable/disable and file event routing
-- All Tauri commands wired (12 commands registered)
-- Frontend: StatusIndicator, SourceList, DeliveryQueue, SettingsPanel
-- Logging: tracing with daily file rotation + stdout
-- Auto-update: tauri-plugin-updater configured with GitHub Releases
-- n8n test endpoint: https://flow.rightaim.ai/webhook/localpush-ingest
-- Homebrew tap: https://github.com/madshn/homebrew-localpush
-- Menu bar popover: positions below tray icon, toggles on click, dismisses on blur
+### What Works (Verified E2E)
 
-### Release History
-| Version | Date | Changes |
-|---------|------|---------|
-| v0.1.0 | 2026-02-05 | Initial release — crash fixes, signing key |
-| v0.1.1 | 2026-02-05 | Tray positioning, blur dismiss, toggle |
-| v0.1.2 | 2026-02-05 | PNG decode fix (include_image macro) |
-| v0.1.3 | 2026-02-05 | 22x22 icon size for menu bar compatibility |
+- **Full delivery pipeline:** Source → Parse → Ledger → DeliveryWorker → Binding Lookup → HTTP POST
+- **n8n target:** Connected (n8n-e2480372), credentials persisted in dev-credentials.json
+- **Binding:** claude-stats → W9fgsdFjC3Fo4dvR ("LocalPush Ingestion Test") at https://flow.rightaim.ai/webhook/localpush-ingest
+- **Push Now:** Manual trigger works — parse + enqueue → delivery worker picks up within 5s
+- **Target restoration:** n8n targets restore from config on app restart
+- **Tests:** 80 unit + 5 integration all passing
 
----
+### Sources
 
-## Vision Summary
+| Source | Status | Notes |
+|--------|--------|-------|
+| Claude Code Statistics (`claude-stats`) | Enabled, bound | Pushing real data to n8n |
+| Claude Code Sessions (`claude-sessions`) | Registered | Not enabled |
+| Apple Podcasts (`apple-podcasts`) | Registered | Not enabled |
+| Apple Notes (`apple-notes`) | Registered | Not enabled |
+| Apple Photos (`apple-photos`) | Registered | Not enabled |
 
-**Core Principles:**
-1. **Guaranteed Delivery** — WAL pattern ensures no data loss (survives crashes, reboots, network outages)
-2. **Radical Transparency** — See YOUR real data before enabling any source
+### Targets
 
-**Northbound Targets (7):**
-- n8n (MVP ✓), ntfy, Make, Zapier, Pipedream, Home Assistant, Custom
+| Target | Status | Notes |
+|--------|--------|-------|
+| n8n (`n8n-e2480372`) | Connected | flow.rightaim.ai, API key in dev-creds |
+| ntfy | Available | Not connected |
 
-**Southbound Sources (30+ planned, 6 tiers):**
-- Tier 1 MVP: Claude Code Stats ✓, Claude Sessions, Apple Podcasts, Apple Finance
-- Tier 2: Browser History, Screen Time, Notion Local Cache, Git Repos
-- Tier 3: Arc Browser, Safari Reading List, Downloads, Notes, Reminders, Calendar, Screenshots
-- Tier 4-6: Dev tools, Relationships (metadata), Media consumption
+### Uncommitted Work
 
-**Push Resolutions:**
-- Streaming (<5s), Near-real-time (30-60s), Hourly, Daily, Weekly
-
-**Future:** Local AI privacy guardian using Apple Intelligence/Ollama for intelligent data triage
+14 modified files + 1 new file in working tree:
+- Target restoration on startup
+- Clippy cleanup
+- Delivery worker binding-aware routing
+- Dev credential store (new file)
 
 ---
 
@@ -104,21 +93,39 @@ LEARNINGS: See learnings/ directory for patterns discovered during development.
 
 | File | Purpose |
 |------|---------|
-| `src-tauri/src/lib.rs` | App setup, tray, auto-update |
-| `src-tauri/src/traits/` | All trait abstractions |
-| `src-tauri/src/production/` | Real implementations |
-| `src-tauri/src/sources/claude_stats.rs` | Template for new sources |
-| `src-tauri/src/source_manager.rs` | Source registry |
-| `src-tauri/src/ledger.rs` | SQLite WAL delivery ledger |
-| `src/App.tsx` | React frontend entry |
-| `src/components/` | UI components |
+| `src-tauri/src/delivery_worker.rs` | Background worker with per-binding routing |
+| `src-tauri/src/bindings.rs` | Source-to-target binding persistence |
+| `src-tauri/src/config.rs` | SQLite config store |
+| `src-tauri/src/source_manager.rs` | Source registry + orchestration |
+| `src-tauri/src/target_manager.rs` | Target registry (in-memory) |
+| `src-tauri/src/targets/n8n.rs` | n8n target (API discovery of webhook endpoints) |
+| `src-tauri/src/state.rs` | AppState DI container + startup restoration |
+| `src-tauri/src/commands/mod.rs` | All Tauri commands (22 commands) |
+| `src/components/SourceList.tsx` | Main source interaction UI |
+| `src/components/EndpointPicker.tsx` | Target endpoint selection for binding |
 
 ---
 
 ## Verification
 
 ```bash
-cd ~/dev/localpush
-./scripts/verify.sh        # Full verification
-npm run tauri dev          # Launch dev build
+cd ~/dev/localpush/.trees/v0.2/src-tauri
+cargo test                    # 80 + 5 tests
+cargo clippy -- -D warnings   # Clean
+
+# Dev server
+cd ~/dev/localpush/.trees/v0.2
+npx tauri dev
 ```
+
+---
+
+## Release History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| v0.1.0 | 2026-02-05 | Initial release — crash fixes, signing key |
+| v0.1.1 | 2026-02-05 | Tray positioning, blur dismiss, toggle |
+| v0.1.2 | 2026-02-05 | PNG decode fix (include_image macro) |
+| v0.1.3 | 2026-02-05 | 22x22 icon size for menu bar compatibility |
+| v0.2.0 | WIP | Multi-source, multi-target, per-binding routing |

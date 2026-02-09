@@ -558,3 +558,32 @@ pub fn list_all_bindings(
         .collect()
 }
 
+/// Manually trigger a source to parse and enqueue for delivery.
+/// The delivery worker will pick it up on the next poll cycle (≤5s).
+#[tauri::command]
+pub fn trigger_source_push(
+    state: State<'_, AppState>,
+    source_id: String,
+) -> Result<String, String> {
+    tracing::info!(command = "trigger_source_push", source_id = %source_id, "Command invoked");
+
+    let source = state.source_manager.get_source(&source_id)
+        .ok_or_else(|| {
+            tracing::error!(source_id = %source_id, "Unknown source for manual push");
+            format!("Unknown source: {}", source_id)
+        })?;
+
+    let payload = source.parse().map_err(|e| {
+        tracing::error!(source_id = %source_id, error = %e, "Source parse failed");
+        e.to_string()
+    })?;
+
+    let event_id = state.ledger.enqueue(&source_id, payload).map_err(|e| {
+        tracing::error!(source_id = %source_id, error = %e, "Ledger enqueue failed");
+        e.to_string()
+    })?;
+
+    tracing::info!(source_id = %source_id, event_id = %event_id, "Manual push enqueued");
+    Ok(event_id)
+}
+

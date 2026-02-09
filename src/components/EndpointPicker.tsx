@@ -59,6 +59,7 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
 
   const handleTargetSelect = async (target: Target) => {
     setSelectedTarget(target);
+    setStep("endpoint");
     setLoading(true);
     setError(null);
     try {
@@ -68,7 +69,6 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
       });
       setEndpoints(result);
       logger.debug("Endpoints loaded", { targetId: target.id, count: result.length });
-      setStep("endpoint");
     } catch (err) {
       logger.error("Failed to load endpoints", { targetId: target.id, error: err });
       setError(`Failed to load endpoints: ${err}`);

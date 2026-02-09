@@ -5,6 +5,12 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
+/// Wrapper for the sessions-index.json file format
+#[derive(Debug, Deserialize)]
+struct SessionIndexFile {
+    entries: Vec<SessionIndexEntry>,
+}
+
 /// Entry in a project's sessions-index.json
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,7 +94,13 @@ impl ClaudeSessionsSource {
                 }
             };
 
-            match serde_json::from_str::<Vec<SessionIndexEntry>>(&content) {
+            // Try wrapped format first: { "version": N, "entries": [...] }
+            // Fall back to bare array: [...]
+            let entries = serde_json::from_str::<SessionIndexFile>(&content)
+                .map(|f| f.entries)
+                .or_else(|_| serde_json::from_str::<Vec<SessionIndexEntry>>(&content));
+
+            match entries {
                 Ok(entries) => {
                     let dir_name = entry.file_name().to_string_lossy().to_string();
                     debug!("Found {} sessions in {}", entries.len(), dir_name);
@@ -152,9 +164,11 @@ impl ClaudeSessionsSource {
         summary
     }
 
-    /// Collect sessions modified within the last 24 hours, sorted newest first
+    /// Collect sessions modified within the last 7 days, sorted newest first.
+    /// sessions-index.json is not updated in real-time by Claude Code,
+    /// so a 24h window often misses active sessions.
     fn recent_sessions(&self) -> Vec<(SessionIndexEntry, TokenSummary)> {
-        let cutoff = Utc::now() - chrono::Duration::hours(24);
+        let cutoff = Utc::now() - chrono::Duration::days(7);
         let mut results = Vec::new();
 
         for (_dir, entries) in self.scan_session_indices() {
@@ -183,7 +197,7 @@ impl ClaudeSessionsSource {
         // Most recently modified first
         results.sort_by(|a, b| b.0.modified.cmp(&a.0.modified));
 
-        info!("Found {} recent sessions (last 24h)", results.len());
+        info!("Found {} recent sessions (last 7d)", results.len());
         results
     }
 
@@ -276,9 +290,9 @@ impl Source for ClaudeSessionsSource {
             "timestamp": Utc::now().to_rfc3339(),
             "sessions": sessions,
             "summary": {
-                "sessions_today": recent.len(),
-                "total_tokens_today": total_tokens,
-                "total_duration_today_seconds": total_duration,
+                "sessions_7d": recent.len(),
+                "total_tokens_7d": total_tokens,
+                "total_duration_7d_seconds": total_duration,
             }
         }))
     }
@@ -288,7 +302,7 @@ impl Source for ClaudeSessionsSource {
         let total_tokens: u64 = recent.iter().map(|(_, t)| t.input + t.output).sum();
 
         let summary = if recent.is_empty() {
-            "No sessions in last 24h".to_string()
+            "No sessions in last 7 days".to_string()
         } else {
             format!(
                 "{} sessions, {} tokens",
@@ -299,7 +313,7 @@ impl Source for ClaudeSessionsSource {
 
         let mut fields = vec![
             PreviewField {
-                label: "Sessions (24h)".to_string(),
+                label: "Sessions (7d)".to_string(),
                 value: recent.len().to_string(),
                 sensitive: false,
             },
@@ -347,17 +361,21 @@ mod tests {
         fs::create_dir_all(&project_dir).unwrap();
 
         let now = Utc::now();
-        let index = serde_json::json!([{
-            "sessionId": "test-session-1",
-            "fullPath": project_dir.join("test-session-1.jsonl").to_str().unwrap(),
-            "firstPrompt": "test prompt",
-            "summary": "Test session",
-            "messageCount": 10,
-            "created": (now - chrono::Duration::hours(2)).to_rfc3339(),
-            "modified": now.to_rfc3339(),
-            "gitBranch": "main",
-            "projectPath": "/Users/test/project"
-        }]);
+        // Use the real wrapped format: { "version": 1, "entries": [...] }
+        let index = serde_json::json!({
+            "version": 1,
+            "entries": [{
+                "sessionId": "test-session-1",
+                "fullPath": project_dir.join("test-session-1.jsonl").to_str().unwrap(),
+                "firstPrompt": "test prompt",
+                "summary": "Test session",
+                "messageCount": 10,
+                "created": (now - chrono::Duration::hours(2)).to_rfc3339(),
+                "modified": now.to_rfc3339(),
+                "gitBranch": "main",
+                "projectPath": "/Users/test/project"
+            }]
+        });
         fs::write(
             project_dir.join("sessions-index.json"),
             serde_json::to_string(&index).unwrap(),
@@ -412,7 +430,7 @@ mod tests {
         assert!(sessions.is_empty());
 
         let preview = source.preview().unwrap();
-        assert_eq!(preview.summary, "No sessions in last 24h");
+        assert_eq!(preview.summary, "No sessions in last 7 days");
     }
 
     #[test]
@@ -459,14 +477,17 @@ mod tests {
         let project_dir = dir.path().join("-Users-test-old");
         fs::create_dir_all(&project_dir).unwrap();
 
-        let old_time = Utc::now() - chrono::Duration::hours(48);
-        let index = serde_json::json!([{
-            "sessionId": "old-session",
-            "firstPrompt": "old prompt",
-            "messageCount": 5,
-            "created": (old_time - chrono::Duration::hours(1)).to_rfc3339(),
-            "modified": old_time.to_rfc3339(),
-        }]);
+        let old_time = Utc::now() - chrono::Duration::days(14);
+        let index = serde_json::json!({
+            "version": 1,
+            "entries": [{
+                "sessionId": "old-session",
+                "firstPrompt": "old prompt",
+                "messageCount": 5,
+                "created": (old_time - chrono::Duration::hours(1)).to_rfc3339(),
+                "modified": old_time.to_rfc3339(),
+            }]
+        });
         fs::write(
             project_dir.join("sessions-index.json"),
             serde_json::to_string(&index).unwrap(),

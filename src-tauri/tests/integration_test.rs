@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
+use localpush_lib::bindings::BindingStore;
 use localpush_lib::config::AppConfig;
 use localpush_lib::delivery_worker::{self, WorkerConfig};
 use localpush_lib::source_manager::SourceManager;
@@ -88,10 +89,11 @@ fn test_full_pipeline_enable_event_deliver() {
     config.set("webhook_auth_json", r#"{"type":"none"}"#).unwrap();
 
     // 5. Run delivery worker tick
+    let binding_store = BindingStore::new(config.clone());
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let worker_config = delivery_worker::read_worker_config(&config).unwrap();
-        delivery_worker::process_batch(&*ledger, &*webhook, &worker_config, 10).await;
+        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&worker_config), 10).await;
     });
 
     // 6. Verify webhook was called
@@ -126,13 +128,14 @@ fn test_pipeline_retry_on_webhook_failure() {
     config.set("webhook_url", "https://example.com/hook").unwrap();
 
     // Run delivery → should fail
+    let binding_store = BindingStore::new(config.clone());
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let worker_config = WorkerConfig {
             webhook_url: "https://example.com/hook".to_string(),
             webhook_auth: WebhookAuth::None,
         };
-        delivery_worker::process_batch(&*ledger, &*webhook_fail, &worker_config, 10).await;
+        delivery_worker::process_batch(&*ledger, &*webhook_fail, &binding_store, Some(&worker_config), 10).await;
     });
 
     // Entry should be failed, not delivered
@@ -180,13 +183,14 @@ fn test_pipeline_multiple_events_batch_delivery() {
 
     // Deliver all in one batch
     config.set("webhook_url", "https://example.com/hook").unwrap();
+    let binding_store = BindingStore::new(config.clone());
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let worker_config = WorkerConfig {
             webhook_url: "https://example.com/hook".to_string(),
             webhook_auth: WebhookAuth::None,
         };
-        delivery_worker::process_batch(&*ledger, &*webhook, &worker_config, 10).await;
+        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&worker_config), 10).await;
     });
 
     assert_eq!(webhook.call_count(), 3);
@@ -210,6 +214,8 @@ fn test_orphan_recovery_then_redelivery() {
     let _ = ledger.mark_failed(&entries[0].event_id, "Simulated crash recovery");
 
     // Now re-deliver
+    let app_config = Arc::new(AppConfig::open_in_memory().unwrap());
+    let binding_store = BindingStore::new(app_config);
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let config = WorkerConfig {
@@ -217,7 +223,7 @@ fn test_orphan_recovery_then_redelivery() {
             webhook_auth: WebhookAuth::None,
         };
         // Claim the failed entry (it's now eligible for retry)
-        delivery_worker::process_batch(&*ledger, &*webhook, &config, 10).await;
+        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&config), 10).await;
     });
 
     // Note: The failed entry has available_at in the future due to backoff,

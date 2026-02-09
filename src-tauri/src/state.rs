@@ -8,7 +8,9 @@ use crate::config::AppConfig;
 use crate::source_manager::SourceManager;
 use crate::target_manager::TargetManager;
 use crate::traits::{CredentialStore, FileWatcher, WebhookClient, DeliveryLedgerTrait};
-use crate::production::{KeychainCredentialStore, FsEventsWatcher, ReqwestWebhookClient};
+#[cfg(not(debug_assertions))]
+use crate::production::KeychainCredentialStore;
+use crate::production::{FsEventsWatcher, ReqwestWebhookClient};
 use crate::ledger::DeliveryLedger;
 
 /// Application state containing all dependencies
@@ -48,8 +50,17 @@ impl AppState {
             let _ = config.set("webhook_auth_json", r#"{"type":"none"}"#);
         }
 
-        tracing::info!("Keychain credential store initialized");
-        let credentials = Arc::new(KeychainCredentialStore::new());
+        #[cfg(debug_assertions)]
+        let credentials: Arc<dyn CredentialStore> = {
+            let cred_path = app_data_dir.join("dev-credentials.json");
+            tracing::info!(path = %cred_path.display(), "DEV MODE: file-based credential store (no Keychain prompts)");
+            Arc::new(crate::production::DevFileCredentialStore::new(cred_path))
+        };
+        #[cfg(not(debug_assertions))]
+        let credentials: Arc<dyn CredentialStore> = {
+            tracing::info!("Keychain credential store initialized");
+            Arc::new(KeychainCredentialStore::new())
+        };
 
         tracing::info!("FSEvents file watcher initialized");
         let file_watcher = Arc::new(FsEventsWatcher::new()?);
@@ -83,12 +94,18 @@ impl AppState {
             if let (Some(ttype), Some(url)) = (target_type, target_url) {
                 match ttype.as_str() {
                     "n8n" => {
-                        if let Ok(Some(api_key)) = credentials.retrieve(&format!("n8n:{}", tid)) {
-                            if !api_key.is_empty() {
+                        let cred_key = format!("n8n:{}", tid);
+                        let cred_result = credentials.retrieve(&cred_key);
+                        tracing::debug!(target_id = %tid, cred_key = %cred_key, result = ?cred_result, "n8n credential lookup");
+                        match cred_result {
+                            Ok(Some(api_key)) if !api_key.is_empty() => {
                                 let target = crate::targets::N8nTarget::new(tid.clone(), url, api_key);
                                 target_manager.register(Arc::new(target));
                                 tracing::info!(target_id = %tid, "Restored n8n target");
                             }
+                            Ok(Some(_)) => tracing::warn!(target_id = %tid, "n8n API key is empty in keychain"),
+                            Ok(None) => tracing::warn!(target_id = %tid, "n8n API key not found in keychain — target skipped"),
+                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve n8n API key from keychain"),
                         }
                     }
                     "ntfy" => {

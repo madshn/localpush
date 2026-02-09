@@ -35,6 +35,7 @@ fn main() {
             commands::remove_binding,
             commands::get_source_bindings,
             commands::list_all_bindings,
+            commands::trigger_source_push,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
