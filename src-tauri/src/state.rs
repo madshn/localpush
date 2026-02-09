@@ -3,10 +3,14 @@
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
+use crate::bindings::BindingStore;
 use crate::config::AppConfig;
 use crate::source_manager::SourceManager;
+use crate::target_manager::TargetManager;
 use crate::traits::{CredentialStore, FileWatcher, WebhookClient, DeliveryLedgerTrait};
-use crate::production::{KeychainCredentialStore, FsEventsWatcher, ReqwestWebhookClient};
+#[cfg(not(debug_assertions))]
+use crate::production::KeychainCredentialStore;
+use crate::production::{FsEventsWatcher, ReqwestWebhookClient};
 use crate::ledger::DeliveryLedger;
 
 /// Application state containing all dependencies
@@ -16,6 +20,8 @@ pub struct AppState {
     pub webhook_client: Arc<dyn WebhookClient>,
     pub ledger: Arc<dyn DeliveryLedgerTrait>,
     pub source_manager: Arc<SourceManager>,
+    pub target_manager: Arc<TargetManager>,
+    pub binding_store: Arc<BindingStore>,
     pub config: Arc<AppConfig>,
 }
 
@@ -44,8 +50,17 @@ impl AppState {
             let _ = config.set("webhook_auth_json", r#"{"type":"none"}"#);
         }
 
-        tracing::info!("Keychain credential store initialized");
-        let credentials = Arc::new(KeychainCredentialStore::new());
+        #[cfg(debug_assertions)]
+        let credentials: Arc<dyn CredentialStore> = {
+            let cred_path = app_data_dir.join("dev-credentials.json");
+            tracing::info!(path = %cred_path.display(), "DEV MODE: file-based credential store (no Keychain prompts)");
+            Arc::new(crate::production::DevFileCredentialStore::new(cred_path))
+        };
+        #[cfg(not(debug_assertions))]
+        let credentials: Arc<dyn CredentialStore> = {
+            tracing::info!("Keychain credential store initialized");
+            Arc::new(KeychainCredentialStore::new())
+        };
 
         tracing::info!("FSEvents file watcher initialized");
         let file_watcher = Arc::new(FsEventsWatcher::new()?);
@@ -59,14 +74,99 @@ impl AppState {
             config.clone(),
         ));
 
-        // Register ClaudeStatsSource
-        use crate::sources::ClaudeStatsSource;
+        // Initialize target manager and binding store
+        let target_manager = Arc::new(TargetManager::new(config.clone()));
+        let binding_store = Arc::new(BindingStore::new(config.clone()));
+
+        // Restore persisted targets from config
+        let target_entries = config.get_by_prefix("target.").unwrap_or_default();
+        let mut target_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (key, _) in &target_entries {
+            // Keys are like "target.n8n-abc123.url" — extract the target ID
+            let parts: Vec<&str> = key.splitn(3, '.').collect();
+            if parts.len() >= 2 {
+                target_ids.insert(parts[1].to_string());
+            }
+        }
+        for tid in &target_ids {
+            let target_type = config.get(&format!("target.{}.type", tid)).ok().flatten();
+            let target_url = config.get(&format!("target.{}.url", tid)).ok().flatten();
+            if let (Some(ttype), Some(url)) = (target_type, target_url) {
+                match ttype.as_str() {
+                    "n8n" => {
+                        let cred_key = format!("n8n:{}", tid);
+                        let cred_result = credentials.retrieve(&cred_key);
+                        tracing::debug!(target_id = %tid, cred_key = %cred_key, result = ?cred_result, "n8n credential lookup");
+                        match cred_result {
+                            Ok(Some(api_key)) if !api_key.is_empty() => {
+                                let target = crate::targets::N8nTarget::new(tid.clone(), url, api_key);
+                                target_manager.register(Arc::new(target));
+                                tracing::info!(target_id = %tid, "Restored n8n target");
+                            }
+                            Ok(Some(_)) => tracing::warn!(target_id = %tid, "n8n API key is empty in keychain"),
+                            Ok(None) => tracing::warn!(target_id = %tid, "n8n API key not found in keychain — target skipped"),
+                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve n8n API key from keychain"),
+                        }
+                    }
+                    "ntfy" => {
+                        let mut target = crate::targets::NtfyTarget::new(tid.clone(), url);
+                        if let Some(topic) = config.get(&format!("target.{}.topic", tid)).ok().flatten() {
+                            target = target.with_topic(topic);
+                        }
+                        if let Ok(Some(token)) = credentials.retrieve(&format!("ntfy:{}", tid)) {
+                            if !token.is_empty() {
+                                target = target.with_auth(token);
+                            }
+                        }
+                        target_manager.register(Arc::new(target));
+                        tracing::info!(target_id = %tid, "Restored ntfy target");
+                    }
+                    _ => tracing::warn!(target_id = %tid, target_type = %ttype, "Unknown target type"),
+                }
+            }
+        }
+
+        // Register sources
+        use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource};
+
         match ClaudeStatsSource::new() {
             Ok(source) => {
                 tracing::info!("Registered ClaudeStatsSource");
                 source_manager.register(Arc::new(source));
             }
             Err(e) => tracing::warn!("Could not initialize Claude stats source: {}", e),
+        }
+
+        // Register Claude Sessions source
+        match ClaudeSessionsSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered ClaudeSessionsSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Could not initialize Claude sessions source: {}", e),
+        }
+
+        // Register Apple sources (graceful — may fail due to permissions)
+        match ApplePodcastsSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered ApplePodcastsSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Apple Podcasts source unavailable: {}", e),
+        }
+        match AppleNotesSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered AppleNotesSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Apple Notes source unavailable: {}", e),
+        }
+        match ApplePhotosSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered ApplePhotosSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Apple Photos source unavailable: {}", e),
         }
 
         // Restore enabled sources from config
@@ -87,6 +187,8 @@ impl AppState {
             webhook_client,
             ledger,
             source_manager,
+            target_manager,
+            binding_store,
             config,
         })
     }
@@ -110,6 +212,9 @@ impl AppState {
             config.clone(),
         ));
 
+        let target_manager = Arc::new(TargetManager::new(config.clone()));
+        let binding_store = Arc::new(BindingStore::new(config.clone()));
+
         // Register test source
         match ClaudeStatsSource::new() {
             Ok(source) => source_manager.register(Arc::new(source)),
@@ -125,6 +230,8 @@ impl AppState {
             webhook_client,
             ledger,
             source_manager,
+            target_manager,
+            binding_store,
             config,
         }
     }

@@ -73,6 +73,25 @@ impl AppConfig {
     pub fn get_bool(&self, key: &str) -> Result<bool, LedgerError> {
         Ok(self.get(key)?.map(|v| v == "true").unwrap_or(false))
     }
+
+    /// Get all key-value pairs where the key starts with the given prefix
+    pub fn get_by_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>, LedgerError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT key, value FROM app_config WHERE key LIKE ?1")
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        let rows = stmt
+            .query_map([format!("{}%", prefix)], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(|e| LedgerError::DatabaseError(e.to_string()))?);
+        }
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
@@ -121,6 +140,25 @@ mod tests {
         let value = config.get("key").unwrap();
 
         assert_eq!(value, Some("updated".to_string()));
+    }
+
+    #[test]
+    fn test_get_by_prefix() {
+        let config = AppConfig::open_in_memory().unwrap();
+
+        config.set("binding.src1.ep1", "value1").unwrap();
+        config.set("binding.src1.ep2", "value2").unwrap();
+        config.set("binding.src2.ep3", "value3").unwrap();
+        config.set("other.key", "unrelated").unwrap();
+
+        let results = config.get_by_prefix("binding.src1.").unwrap();
+        assert_eq!(results.len(), 2);
+
+        let all_bindings = config.get_by_prefix("binding.").unwrap();
+        assert_eq!(all_bindings.len(), 3);
+
+        let empty = config.get_by_prefix("nonexistent.").unwrap();
+        assert!(empty.is_empty());
     }
 
     #[test]

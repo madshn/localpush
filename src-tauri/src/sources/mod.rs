@@ -4,8 +4,16 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 pub mod claude_stats;
+pub mod claude_sessions;
+pub mod apple_podcasts;
+pub mod apple_notes;
+pub mod apple_photos;
 
 pub use claude_stats::ClaudeStatsSource;
+pub use claude_sessions::ClaudeSessionsSource;
+pub use apple_podcasts::ApplePodcastsSource;
+pub use apple_notes::AppleNotesSource;
+pub use apple_photos::ApplePhotosSource;
 
 /// Errors that can occur when parsing or accessing sources
 #[derive(Debug, Error)]
