@@ -31,10 +31,14 @@
 | REQ-004 | Per-binding routing (v0.2) | [x] | With v0.1 legacy fallback |
 | REQ-005 | Push Now manual trigger | [x] | Parse + enqueue, worker picks up ≤5s |
 | REQ-006 | Enable remaining sources | [ ] | claude-sessions, apple-podcasts, notes, photos |
-| REQ-007 | UX improvements | [ ] | Checkbox discoverability, onboarding |
+| REQ-007 | UX improvements | [x] | Tailwind v4, Radix tabs, pipeline cards, activity log |
 | REQ-008 | Homebrew Cask distribution | [x] | brew tap madshn/localpush |
 | REQ-009 | Auto-update via GitHub Releases | [x] | tauri-plugin-updater configured |
 | REQ-010 | Proof-of-life instrumentation | [ ] | Analytics for installs, source activations |
+| REQ-011 | Scheduled push cadence | [x] | Per-binding on_change/daily/weekly delivery modes |
+| REQ-012 | BUG: Apple Photos source broken | [ ] | Source does not work — needs investigation and fix |
+| REQ-013 | Dashboard kanban view | [ ] | 3-column kanban layout (see Stitch prototype) |
+| REQ-014 | Make.com + Zapier connectors | [ ] | Same pattern as n8n connector (endpoint discovery) |
 
 ### Scope Boundaries
 
@@ -47,10 +51,9 @@
 
 **Out of Scope (Phase 2+):**
 - Windows/Linux support
-- Additional targets (Make, Zapier, Home Assistant)
+- Home Assistant target
 - Local AI privacy guardian
 - Streaming push resolution (<5s)
-- Advanced scheduling (hourly, daily, weekly)
 
 ### Work Log
 
@@ -61,6 +64,7 @@
 | 2026-02-06 | v0.2 multi-source architecture | Targets, bindings, 5 sources |
 | 2026-02-08 | E2E verification | Real data flowing to n8n |
 | 2026-02-08 | Bob factory adoption | Factory standards applied |
+| 2026-02-10 | UX overhaul + scheduled push cadence | Tailwind v4, Radix UI, pipeline cards, per-binding delivery modes |
 
 ---
 <!-- PHASE_GATE: Do not proceed until Phase 1 exit criteria met -->
@@ -76,11 +80,10 @@
 
 | ID | Requirement | Status | Notes |
 |----|-------------|--------|-------|
-| REQ-011 | Additional targets (Make, Zapier) | [ ] | |
-| REQ-012 | Push resolution options | [ ] | Streaming, near-real-time, hourly, daily |
-| REQ-013 | Windows/Linux support | [ ] | |
-| REQ-014 | Local AI privacy guardian | [ ] | Apple Intelligence/Ollama |
-| REQ-015 | Performance optimization | [ ] | |
+| REQ-020 | Push resolution options | [ ] | Streaming, near-real-time |
+| REQ-021 | Windows/Linux support | [ ] | |
+| REQ-022 | Local AI privacy guardian | [ ] | Apple Intelligence/Ollama |
+| REQ-023 | Performance optimization | [ ] | |
 
 ---
 
@@ -126,3 +129,4 @@ Phase transition:
 |---------|------|--------|
 | 0.1 | 2026-02-04 | Initial roadmap |
 | 0.2 | 2026-02-08 | Updated with factory adoption, v0.2 status |
+| 0.3 | 2026-02-10 | Added REQ-011–014, pulled Make/Zapier into Phase 1 |
