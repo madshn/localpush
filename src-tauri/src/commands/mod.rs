@@ -484,6 +484,104 @@ pub async fn connect_ntfy_target(
     serde_json::to_value(info).map_err(|e| e.to_string())
 }
 
+/// Connect a Make.com target (zone URL + API key)
+#[tauri::command]
+pub async fn connect_make_target(
+    state: State<'_, AppState>,
+    zone_url: String,
+    api_key: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "connect_make_target", url = %zone_url, "Command invoked");
+
+    let target_id = format!(
+        "make-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("0")
+    );
+    let target =
+        crate::targets::MakeTarget::new(target_id.clone(), zone_url.clone(), api_key.clone());
+
+    // Test connection before persisting
+    let info = target.test_connection().await.map_err(|e| {
+        tracing::error!(error = %e, "Make.com connection test failed");
+        e.to_string()
+    })?;
+
+    // Store API key in keychain
+    let cred_key = format!("make:{}", target_id);
+    if let Err(e) = state.credentials.store(&cred_key, &api_key) {
+        tracing::warn!(error = %e, "Failed to store Make.com API key in keychain");
+    }
+
+    // Store URL and type in config
+    let _ = state
+        .config
+        .set(&format!("target.{}.url", target_id), &zone_url);
+    let _ = state
+        .config
+        .set(&format!("target.{}.type", target_id), "make");
+
+    // Register target
+    state
+        .target_manager
+        .register(std::sync::Arc::new(target));
+
+    tracing::info!(target_id = %target_id, "Make.com target connected successfully");
+    serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
+/// Connect a Zapier target (name + webhook URL)
+#[tauri::command]
+pub async fn connect_zapier_target(
+    state: State<'_, AppState>,
+    name: String,
+    webhook_url: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "connect_zapier_target", url = %webhook_url, "Command invoked");
+
+    let target_id = format!(
+        "zapier-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("0")
+    );
+    let target = crate::targets::ZapierTarget::new(target_id.clone(), name.clone(), webhook_url.clone())
+        .map_err(|e| {
+            tracing::error!(error = %e, "Invalid Zapier webhook URL");
+            e.to_string()
+        })?;
+
+    // Test connection before persisting
+    let info = target.test_connection().await.map_err(|e| {
+        tracing::error!(error = %e, "Zapier connection test failed");
+        e.to_string()
+    })?;
+
+    // Store URL, name, and type in config
+    let _ = state
+        .config
+        .set(&format!("target.{}.url", target_id), &webhook_url);
+    let _ = state
+        .config
+        .set(&format!("target.{}.name", target_id), &name);
+    let _ = state
+        .config
+        .set(&format!("target.{}.type", target_id), "zapier");
+
+    // Register target
+    state
+        .target_manager
+        .register(std::sync::Arc::new(target));
+
+    tracing::info!(target_id = %target_id, "Zapier target connected successfully");
+    serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
 /// List all registered targets
 #[tauri::command]
 pub async fn list_targets(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {

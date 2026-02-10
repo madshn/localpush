@@ -32,6 +32,8 @@ fn main() {
             commands::retry_delivery,
             commands::connect_n8n_target,
             commands::connect_ntfy_target,
+            commands::connect_make_target,
+            commands::connect_zapier_target,
             commands::list_targets,
             commands::test_target_connection,
             commands::list_target_endpoints,

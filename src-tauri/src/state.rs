@@ -121,6 +121,31 @@ impl AppState {
                         target_manager.register(Arc::new(target));
                         tracing::info!(target_id = %tid, "Restored ntfy target");
                     }
+                    "make" => {
+                        let cred_key = format!("make:{}", tid);
+                        let cred_result = credentials.retrieve(&cred_key);
+                        tracing::debug!(target_id = %tid, cred_key = %cred_key, result = ?cred_result, "Make.com credential lookup");
+                        match cred_result {
+                            Ok(Some(api_key)) if !api_key.is_empty() => {
+                                let target = crate::targets::MakeTarget::new(tid.clone(), url, api_key);
+                                target_manager.register(Arc::new(target));
+                                tracing::info!(target_id = %tid, "Restored Make.com target");
+                            }
+                            Ok(Some(_)) => tracing::warn!(target_id = %tid, "Make.com API key is empty in keychain"),
+                            Ok(None) => tracing::warn!(target_id = %tid, "Make.com API key not found in keychain — target skipped"),
+                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve Make.com API key from keychain"),
+                        }
+                    }
+                    "zapier" => {
+                        let name = config.get(&format!("target.{}.name", tid)).ok().flatten().unwrap_or_else(|| "Zapier Webhook".to_string());
+                        match crate::targets::ZapierTarget::new(tid.clone(), name, url) {
+                            Ok(target) => {
+                                target_manager.register(Arc::new(target));
+                                tracing::info!(target_id = %tid, "Restored Zapier target");
+                            }
+                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to restore Zapier target"),
+                        }
+                    }
                     _ => tracing::warn!(target_id = %tid, target_type = %ttype, "Unknown target type"),
                 }
             }
