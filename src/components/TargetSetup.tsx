@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Webhook, Bell } from "lucide-react";
+import { Webhook, Bell, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useTargets, useTestTargetConnection } from "../api/hooks/useTargets";
 import { N8nConnect } from "./N8nConnect";
@@ -14,6 +14,7 @@ interface TargetInfo {
 
 export function TargetSetup() {
   const [testingTargetId, setTestingTargetId] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
   const { data: targets, isLoading } = useTargets();
   const testMutation = useTestTargetConnection();
 
@@ -23,6 +24,7 @@ export function TargetSetup() {
       type: targetInfo.target_type,
     });
     toast.success("Target connected");
+    setShowAddForm(false);
   };
 
   const handleTestConnection = async (targetId: string) => {
@@ -88,27 +90,45 @@ export function TargetSetup() {
       )}
 
       {/* Add New Target */}
-      <div className="bg-bg-secondary border border-border rounded-lg p-4">
-        <h2 className="text-sm font-semibold mb-3">Add New Target</h2>
+      {showAddForm ? (
+        <div className="bg-bg-secondary border border-border rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold">Add New Target</h2>
+            <button
+              onClick={() => setShowAddForm(false)}
+              className="text-text-secondary hover:text-text-primary transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
 
-        <Tabs.Root defaultValue="n8n">
-          <Tabs.List className="flex gap-1 mb-4 bg-bg-primary rounded-lg p-1">
-            <Tabs.Trigger value="n8n" className="tab-trigger">
-              n8n
-            </Tabs.Trigger>
-            <Tabs.Trigger value="ntfy" className="tab-trigger">
-              ntfy
-            </Tabs.Trigger>
-          </Tabs.List>
+          <Tabs.Root defaultValue="n8n">
+            <Tabs.List className="flex gap-1 mb-4 bg-bg-primary rounded-lg p-1">
+              <Tabs.Trigger value="n8n" className="tab-trigger">
+                n8n
+              </Tabs.Trigger>
+              <Tabs.Trigger value="ntfy" className="tab-trigger">
+                ntfy
+              </Tabs.Trigger>
+            </Tabs.List>
 
-          <Tabs.Content value="n8n">
-            <N8nConnect onConnected={handleTargetConnected} />
-          </Tabs.Content>
-          <Tabs.Content value="ntfy">
-            <NtfyConnect onConnected={handleTargetConnected} />
-          </Tabs.Content>
-        </Tabs.Root>
-      </div>
+            <Tabs.Content value="n8n">
+              <N8nConnect onConnected={handleTargetConnected} />
+            </Tabs.Content>
+            <Tabs.Content value="ntfy">
+              <NtfyConnect onConnected={handleTargetConnected} />
+            </Tabs.Content>
+          </Tabs.Root>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowAddForm(true)}
+          className="flex items-center justify-center gap-2 w-full py-2.5 text-xs font-medium rounded-lg border border-dashed border-border text-text-secondary hover:text-accent hover:border-accent transition-colors"
+        >
+          <Plus size={14} />
+          Add New Target
+        </button>
+      )}
     </div>
   );
 }

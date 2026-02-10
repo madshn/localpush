@@ -18,6 +18,14 @@ export function N8nConnect({ onConnected }: N8nConnectProps) {
   const [apiKey, setApiKey] = useState("");
   const connectMutation = useConnectN8n();
 
+  const handleUrlChange = (value: string) => {
+    if (value && !value.startsWith("http://") && !value.startsWith("https://")) {
+      setInstanceUrl("https://" + value);
+    } else {
+      setInstanceUrl(value);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -69,7 +77,7 @@ export function N8nConnect({ onConnected }: N8nConnectProps) {
           className={inputClass}
           placeholder="https://your-n8n.example.com"
           value={instanceUrl}
-          onChange={(e) => setInstanceUrl(e.target.value)}
+          onChange={(e) => handleUrlChange(e.target.value)}
           disabled={connectMutation.isPending}
         />
         {apiKeyHelpUrl && (

@@ -40,6 +40,7 @@ pub struct SourceResponse {
     pub description: String,
     pub enabled: bool,
     pub last_sync: Option<String>,
+    pub watch_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +52,7 @@ pub struct DeliveryQueueItem {
     pub last_error: Option<String>,
     pub created_at: String,
     pub delivered_at: Option<String>,
+    pub payload: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,11 +104,12 @@ pub fn get_sources(state: State<'_, AppState>) -> Result<Vec<SourceResponse>, St
     let sources = state.source_manager.list_sources();
     tracing::debug!(source_count = sources.len(), "Sources retrieved");
     Ok(sources.into_iter().map(|s| SourceResponse {
-        id: s.id,
+        id: s.id.clone(),
         description: format!("Data from {}", s.name),
         name: s.name,
         enabled: s.enabled,
         last_sync: None, // TODO: track last sync time
+        watch_path: s.watch_path.map(|p| p.display().to_string()),
     }).collect())
 }
 
@@ -132,6 +135,7 @@ pub fn get_delivery_queue(state: State<'_, AppState>) -> Result<Vec<DeliveryQueu
                         delivered_at: entry.delivered_at
                             .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
                             .map(|dt| dt.to_rfc3339()),
+                        payload: entry.payload,
                     });
                 }
             }
@@ -272,6 +276,27 @@ pub fn get_source_preview(
             Err(e.to_string())
         }
     }
+}
+
+/// Get a sample payload from a source (for testing with recipients before enabling)
+///
+/// Calls source.parse() to produce the real payload JSON, but does NOT enqueue it.
+#[tauri::command]
+pub fn get_source_sample_payload(
+    state: State<'_, AppState>,
+    source_id: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "get_source_sample_payload", source_id = %source_id, "Command invoked");
+    let source = state.source_manager.get_source(&source_id)
+        .ok_or_else(|| {
+            tracing::error!(source_id = %source_id, "Unknown source for sample payload");
+            format!("Unknown source: {}", source_id)
+        })?;
+
+    source.parse().map_err(|e| {
+        tracing::error!(source_id = %source_id, error = %e, "Failed to generate sample payload");
+        e.to_string()
+    })
 }
 
 /// Get webhook configuration
@@ -518,6 +543,10 @@ pub fn create_binding(
     custom_headers: Option<Vec<(String, String)>>,
     auth_header_name: Option<String>,
     auth_header_value: Option<String>,
+    preserve_auth_credential_key: Option<String>,
+    delivery_mode: Option<String>,
+    schedule_time: Option<String>,
+    schedule_day: Option<String>,
 ) -> Result<(), String> {
     tracing::info!(
         command = "create_binding",
@@ -525,6 +554,7 @@ pub fn create_binding(
         endpoint_id = %endpoint_id,
         has_custom_headers = custom_headers.is_some(),
         has_auth = auth_header_name.is_some(),
+        preserve_existing_auth = preserve_auth_credential_key.is_some(),
         "Command invoked"
     );
 
@@ -536,14 +566,24 @@ pub fn create_binding(
         // Add auth header with empty value as placeholder (secret stored separately)
         all_headers.push((auth_name.clone(), String::new()));
 
-        // Store secret in credential store
         if let Some(ref auth_value) = auth_header_value {
-            let cred_key = format!("binding:{}:{}", source_id, endpoint_id);
-            state.credentials.store(&cred_key, auth_value).map_err(|e| {
-                tracing::error!(error = %e, "Failed to store binding credential");
-                e.to_string()
-            })?;
-            auth_credential_key = Some(cred_key);
+            if !auth_value.is_empty() {
+                // New auth value provided — store in credential store
+                let cred_key = format!("binding:{}:{}", source_id, endpoint_id);
+                state.credentials.store(&cred_key, auth_value).map_err(|e| {
+                    tracing::error!(error = %e, "Failed to store binding credential");
+                    e.to_string()
+                })?;
+                auth_credential_key = Some(cred_key);
+            } else if let Some(ref existing_key) = preserve_auth_credential_key {
+                // No new value but existing credential key — preserve it
+                tracing::debug!(key = %existing_key, "Preserving existing auth credential key");
+                auth_credential_key = Some(existing_key.clone());
+            }
+        } else if let Some(ref existing_key) = preserve_auth_credential_key {
+            // No auth value at all but existing credential key — preserve it
+            tracing::debug!(key = %existing_key, "Preserving existing auth credential key");
+            auth_credential_key = Some(existing_key.clone());
         }
     }
 
@@ -563,6 +603,10 @@ pub fn create_binding(
         active: true,
         headers_json,
         auth_credential_key,
+        delivery_mode: delivery_mode.unwrap_or_else(|| "on_change".to_string()),
+        schedule_time,
+        schedule_day,
+        last_scheduled_at: None,
     };
     state.binding_store.save(&binding)
 }
@@ -636,6 +680,24 @@ pub fn trigger_source_push(
     })?;
 
     tracing::info!(source_id = %source_id, event_id = %event_id, "Manual push enqueued");
+    Ok(event_id)
+}
+
+/// Replay a delivery: re-enqueue the exact same payload for redelivery
+#[tauri::command]
+pub fn replay_delivery(
+    state: State<'_, AppState>,
+    event_type: String,
+    payload: serde_json::Value,
+) -> Result<String, String> {
+    tracing::info!(command = "replay_delivery", event_type = %event_type, "Command invoked");
+
+    let event_id = state.ledger.enqueue(&event_type, payload).map_err(|e| {
+        tracing::error!(event_type = %event_type, error = %e, "Replay enqueue failed");
+        e.to_string()
+    })?;
+
+    tracing::info!(event_type = %event_type, event_id = %event_id, "Replay enqueued");
     Ok(event_id)
 }
 

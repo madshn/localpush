@@ -4,6 +4,7 @@ interface SecurityCoachingProps {
   endpointUrl: string;
   authenticated: boolean;
   authType?: string;
+  isEditing?: boolean;
   onConfirm: () => void;
   onBack: () => void;
 }
@@ -12,6 +13,7 @@ export function SecurityCoaching({
   endpointUrl,
   authenticated,
   authType,
+  isEditing = false,
   onConfirm,
   onBack,
 }: SecurityCoachingProps) {
@@ -104,7 +106,7 @@ export function SecurityCoaching({
           className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors"
           onClick={onConfirm}
         >
-          Confirm & Enable
+          {isEditing ? "Save Changes" : "Confirm & Enable"}
         </button>
       </div>
     </div>

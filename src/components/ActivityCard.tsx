@@ -7,10 +7,14 @@ import {
   ChevronDown,
   ChevronRight,
   RotateCcw,
+  Copy,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ActivityEntry } from "../api/hooks/useActivityLog";
+import { logger } from "../utils/logger";
 
 interface ActivityCardProps {
   entry: ActivityEntry;
@@ -54,6 +58,9 @@ const statusLabels: Record<string, string> = {
 
 export function ActivityCard({ entry }: ActivityCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [payloadExpanded, setPayloadExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const queryClient = useQueryClient();
   const config = statusConfig[entry.status];
   const Icon = config.icon;
 
@@ -78,12 +85,47 @@ export function ActivityCard({ entry }: ActivityCardProps) {
 
   const handleRetry = async () => {
     try {
-      await invoke("retry_delivery", { entryId: entry.id });
+      await invoke("retry_delivery", { eventId: entry.id });
       toast.success("Delivery queued for retry");
     } catch (error) {
       toast.error(`Retry failed: ${error}`);
     }
   };
+
+  const handleReplay = async () => {
+    try {
+      await invoke("replay_delivery", {
+        eventType: entry.sourceId,
+        payload: entry.payload,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["activityLog"] });
+      toast.success("Replay enqueued — will deliver within 5s");
+      logger.info("Delivery replayed", { id: entry.id, source: entry.sourceId });
+    } catch (error) {
+      toast.error(`Replay failed: ${error}`);
+      logger.error("Replay failed", { id: entry.id, error });
+    }
+  };
+
+  const copyPayload = () => {
+    const json = JSON.stringify(entry.payload, null, 2);
+    const textarea = document.createElement("textarea");
+    textarea.value = json;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const payloadJson = payloadExpanded
+    ? JSON.stringify(entry.payload, null, 2)
+    : "";
 
   return (
     <div className={`${config.borderColor}`}>
@@ -92,19 +134,22 @@ export function ActivityCard({ entry }: ActivityCardProps) {
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer hover:bg-bg-tertiary transition-colors"
       >
-        <Icon size={14} className={config.color} />
-        <span className="text-xs font-medium min-w-[80px] truncate">
-          {entry.source}
-        </span>
-        <span className={`text-xs ${config.color} flex-1 truncate`}>
-          {entry.error || statusLabels[entry.status]}
-          {(entry.status === "failed" || entry.status === "dlq") &&
-            entry.retryCount > 0 && (
-              <span className="text-text-secondary ml-1">
-                (retry {entry.retryCount}/5)
-              </span>
-            )}
-        </span>
+        <Icon size={14} className={`${config.color} shrink-0`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium truncate">
+              {entry.source}
+            </span>
+            <span className={`text-[10px] ${config.color}`}>
+              {statusLabels[entry.status]}
+            </span>
+          </div>
+          {entry.payloadSummary && (
+            <div className="text-[10px] text-text-secondary truncate mt-0.5">
+              {entry.payloadSummary}
+            </div>
+          )}
+        </div>
         <span className="text-[11px] font-mono text-text-secondary shrink-0">
           {formatTime(entry.timestamp)}
         </span>
@@ -117,49 +162,95 @@ export function ActivityCard({ entry }: ActivityCardProps) {
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="mx-3 mt-1 mb-2 p-3 bg-bg-primary rounded-md text-xs font-mono text-text-secondary leading-relaxed">
-          <div>
-            <strong className="text-text-primary">ID:</strong> {entry.id}
-          </div>
-          <div>
-            <strong className="text-text-primary">Source:</strong> {entry.source}
-          </div>
-          <div>
-            <strong className="text-text-primary">Status:</strong> {entry.status}
-          </div>
-          <div>
-            <strong className="text-text-primary">Created:</strong>{" "}
-            {formatFullTimestamp(entry.timestamp)}
-          </div>
-          {entry.deliveredAt && (
+        <div className="mx-3 mt-1 mb-2 p-3 bg-bg-primary rounded-md text-xs leading-relaxed">
+          <div className="flex flex-col gap-1 text-text-secondary font-mono mb-3">
             <div>
-              <strong className="text-text-primary">Delivered:</strong>{" "}
-              {formatFullTimestamp(entry.deliveredAt)}
+              <strong className="text-text-primary">Created:</strong>{" "}
+              {formatFullTimestamp(entry.timestamp)}
             </div>
-          )}
-          <div>
-            <strong className="text-text-primary">Retry count:</strong>{" "}
-            {entry.retryCount}
+            {entry.deliveredAt && (
+              <div>
+                <strong className="text-text-primary">Delivered:</strong>{" "}
+                {formatFullTimestamp(entry.deliveredAt)}
+              </div>
+            )}
+            {entry.error && (
+              <div className="text-error">
+                <strong>Error:</strong> {entry.error}
+              </div>
+            )}
+            {entry.retryCount > 0 && (
+              <div>
+                <strong className="text-text-primary">Retries:</strong>{" "}
+                {entry.retryCount}
+              </div>
+            )}
           </div>
-          {entry.error && (
-            <div className="text-error mt-1">
-              <strong>Error:</strong> {entry.error}
+
+          {/* Payload section */}
+          {entry.payload != null && (
+            <div className="border-t border-border pt-2 mt-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPayloadExpanded(!payloadExpanded);
+                  }}
+                  className="text-[11px] font-medium text-accent hover:underline"
+                >
+                  {payloadExpanded ? "Hide Payload" : "View Payload"}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    copyPayload();
+                  }}
+                  className="inline-flex items-center gap-1 text-[10px] text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  {copied ? (
+                    <>
+                      <Check size={10} className="text-success" /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={10} /> Copy
+                    </>
+                  )}
+                </button>
+              </div>
+              {payloadExpanded && (
+                <pre className="text-[10px] font-mono text-text-secondary bg-bg-secondary rounded p-2 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-all">
+                  {payloadJson}
+                </pre>
+              )}
             </div>
           )}
 
-          {/* Retry button for failed entries */}
-          {(entry.status === "failed" || entry.status === "dlq") && (
+          {/* Action buttons */}
+          <div className="flex items-center gap-3 mt-3 pt-2 border-t border-border">
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                handleRetry();
+                handleReplay();
               }}
-              className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-accent hover:underline"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-accent hover:underline"
             >
               <RotateCcw size={12} />
-              Retry
+              Replay
             </button>
-          )}
+            {(entry.status === "failed" || entry.status === "dlq") && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRetry();
+                }}
+                className="flex items-center gap-1.5 text-[11px] font-medium text-warning hover:underline"
+              >
+                <RotateCcw size={12} />
+                Retry
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

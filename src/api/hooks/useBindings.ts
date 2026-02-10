@@ -10,6 +10,12 @@ export interface Binding {
   endpoint_name: string;
   created_at: string;
   active: boolean;
+  headers_json: string | null;
+  auth_credential_key: string | null;
+  delivery_mode: string;
+  schedule_time: string | null;
+  schedule_day: string | null;
+  last_scheduled_at: number | null;
 }
 
 async function getSourceBindings(sourceId: string): Promise<Binding[]> {
@@ -45,6 +51,10 @@ async function createBinding(params: {
   customHeaders?: [string, string][];
   authHeaderName?: string;
   authHeaderValue?: string;
+  preserveAuthCredentialKey?: string;
+  deliveryMode?: string;
+  scheduleTime?: string;
+  scheduleDay?: string;
 }): Promise<void> {
   logger.debug("Creating binding", params);
   try {
@@ -57,6 +67,10 @@ async function createBinding(params: {
       customHeaders: params.customHeaders,
       authHeaderName: params.authHeaderName,
       authHeaderValue: params.authHeaderValue,
+      preserveAuthCredentialKey: params.preserveAuthCredentialKey,
+      deliveryMode: params.deliveryMode,
+      scheduleTime: params.scheduleTime,
+      scheduleDay: params.scheduleDay,
     });
     logger.info("Binding created", {
       sourceId: params.sourceId,

@@ -144,4 +144,43 @@
   .pulse-dot {
     animation: pulse-dot 2s ease-in-out infinite;
   }
+
+  /* Resize grip indicator (bottom-right corner) */
+  .resize-grip {
+    position: fixed;
+    bottom: 2px;
+    right: 2px;
+    width: 14px;
+    height: 14px;
+    cursor: nwse-resize;
+    opacity: 0.3;
+    transition: opacity 0.15s;
+    z-index: 50;
+  }
+  .resize-grip:hover {
+    opacity: 0.6;
+  }
+  .resize-grip::before,
+  .resize-grip::after {
+    content: "";
+    position: absolute;
+    background: var(--color-text-secondary);
+    border-radius: 1px;
+  }
+  .resize-grip::before {
+    bottom: 2px;
+    right: 2px;
+    width: 8px;
+    height: 1.5px;
+    transform: rotate(-45deg);
+    transform-origin: bottom right;
+  }
+  .resize-grip::after {
+    bottom: 5px;
+    right: 5px;
+    width: 5px;
+    height: 1.5px;
+    transform: rotate(-45deg);
+    transform-origin: bottom right;
+  }
 }

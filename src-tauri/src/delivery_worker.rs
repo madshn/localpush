@@ -72,16 +72,41 @@ fn resolve_binding_auth(binding: &SourceBinding, credentials: &dyn CredentialSto
 }
 
 /// Resolve delivery targets for an entry.
-/// Prefers per-source bindings; falls back to legacy global webhook.
+///
+/// If `target_endpoint_id` is set (targeted/scheduled delivery), return only that
+/// specific binding's endpoint. Otherwise, filter to on_change bindings only,
+/// with fallback to legacy global webhook.
 fn resolve_targets(
     source_id: &str,
+    target_endpoint_id: Option<&str>,
     binding_store: &BindingStore,
     legacy_config: Option<&WorkerConfig>,
     credentials: &dyn CredentialStore,
 ) -> Vec<(String, WebhookAuth)> {
+    if let Some(ep_id) = target_endpoint_id {
+        // Targeted delivery: find the specific binding
+        let bindings = binding_store.get_for_source(source_id);
+        if let Some(b) = bindings.into_iter().find(|b| b.endpoint_id == ep_id) {
+            let auth = resolve_binding_auth(&b, credentials);
+            return vec![(b.endpoint_url, auth)];
+        }
+        tracing::warn!(
+            source_id = %source_id,
+            endpoint_id = %ep_id,
+            "Targeted binding not found"
+        );
+        return Vec::new();
+    }
+
+    // Fan-out: only on_change bindings
     let bindings = binding_store.get_for_source(source_id);
-    if !bindings.is_empty() {
-        return bindings
+    let on_change_bindings: Vec<_> = bindings
+        .into_iter()
+        .filter(|b| b.delivery_mode == "on_change")
+        .collect();
+
+    if !on_change_bindings.is_empty() {
+        return on_change_bindings
             .into_iter()
             .map(|b| {
                 let auth = resolve_binding_auth(&b, credentials);
@@ -126,7 +151,7 @@ pub async fn process_batch(
     let mut failed = 0;
 
     for entry in entries {
-        let targets = resolve_targets(&entry.event_type, binding_store, legacy_config, credentials);
+        let targets = resolve_targets(&entry.event_type, entry.target_endpoint_id.as_deref(), binding_store, legacy_config, credentials);
 
         if targets.is_empty() {
             tracing::debug!(
@@ -200,9 +225,19 @@ pub fn spawn_worker(
     tauri::async_runtime::spawn(async move {
         tracing::info!("Delivery worker started (5s interval, binding-aware routing)");
         let mut interval = tokio::time::interval(Duration::from_secs(5));
+        let mut tick_count: u64 = 0;
         loop {
             interval.tick().await;
+            tick_count += 1;
             let legacy_config = read_worker_config(&config);
+            let has_legacy = legacy_config.is_some();
+            let binding_count = binding_store.count();
+            tracing::debug!(
+                tick = tick_count,
+                bindings = binding_count,
+                has_legacy_webhook = has_legacy,
+                "Delivery worker tick"
+            );
             process_batch(
                 &*ledger,
                 &*webhook,
@@ -251,6 +286,10 @@ mod tests {
             active: true,
             headers_json: None,
             auth_credential_key: None,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
         }).unwrap();
         store
     }
@@ -393,6 +432,10 @@ mod tests {
             active: true,
             headers_json: Some(serde_json::to_string(&headers).unwrap()),
             auth_credential_key: Some("binding:my-source:ep1".to_string()),
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
         }).unwrap();
 
         ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
@@ -443,6 +486,10 @@ mod tests {
             active: true,
             headers_json: None,
             auth_credential_key: None,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
         };
         assert!(matches!(resolve_binding_auth(&binding, &creds), WebhookAuth::None));
     }
@@ -465,6 +512,10 @@ mod tests {
             active: true,
             headers_json: Some(serde_json::to_string(&headers).unwrap()),
             auth_credential_key: Some("binding:s1:ep1".to_string()),
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
         };
         match resolve_binding_auth(&binding, &creds) {
             WebhookAuth::Custom { headers } => {

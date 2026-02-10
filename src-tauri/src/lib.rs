@@ -23,6 +23,7 @@ pub mod config;
 mod ledger;
 mod state;
 pub mod delivery_worker;
+pub mod scheduled_worker;
 
 use std::sync::Arc;
 use tauri::{App, Manager};
@@ -42,7 +43,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "localpush=info".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "localpush=debug".into()),
         ))
         .with(tracing_subscriber::fmt::layer()) // stdout
         .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false)) // file
@@ -79,6 +80,13 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         state.config.clone(),
         state.binding_store.clone(),
         state.credentials.clone(),
+    );
+
+    // Spawn scheduled delivery worker (daily/weekly cadence)
+    let _scheduler = scheduled_worker::spawn_scheduler(
+        state.ledger.clone(),
+        state.binding_store.clone(),
+        state.source_manager.clone(),
     );
 
     app.manage(state);
@@ -198,7 +206,7 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     // Position window centered below the tray icon
-                    let window_width = 420.0_f64;
+                    let window_width = 630.0_f64;
                     let window_height = 680.0_f64;
                     let x = icon_x + (icon_w / 2.0) - (window_width / 2.0);
                     let y = icon_y + icon_h + 4.0;

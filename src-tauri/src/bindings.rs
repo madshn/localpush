@@ -26,6 +26,22 @@ pub struct SourceBinding {
     /// Credential store key for the secret auth value, e.g. "binding:claude-stats:wf1-Webhook"
     #[serde(default)]
     pub auth_credential_key: Option<String>,
+    /// Delivery mode: "on_change" (default), "daily", or "weekly"
+    #[serde(default = "default_delivery_mode")]
+    pub delivery_mode: String,
+    /// Schedule time in "HH:MM" format (for daily/weekly modes)
+    #[serde(default)]
+    pub schedule_time: Option<String>,
+    /// Day of week for weekly mode: "monday"..."sunday"
+    #[serde(default)]
+    pub schedule_day: Option<String>,
+    /// Epoch timestamp of last scheduled delivery
+    #[serde(default)]
+    pub last_scheduled_at: Option<i64>,
+}
+
+fn default_delivery_mode() -> String {
+    "on_change".to_string()
 }
 
 /// Manages source-to-target bindings, persisted in config SQLite
@@ -73,6 +89,35 @@ impl BindingStore {
             .filter(|b: &SourceBinding| b.active)
             .collect()
     }
+
+    /// Count all active bindings (for diagnostics/logging)
+    pub fn count(&self) -> usize {
+        self.list_all().len()
+    }
+
+    /// Get all active bindings with a scheduled delivery mode (daily/weekly)
+    pub fn get_scheduled_bindings(&self) -> Vec<SourceBinding> {
+        self.list_all()
+            .into_iter()
+            .filter(|b| b.delivery_mode != "on_change")
+            .collect()
+    }
+
+    /// Update the last_scheduled_at timestamp for a binding (load-modify-save)
+    pub fn update_last_scheduled(
+        &self,
+        source_id: &str,
+        endpoint_id: &str,
+        timestamp: i64,
+    ) -> Result<(), String> {
+        let key = format!("binding.{}.{}", source_id, endpoint_id);
+        let json = self.config.get(&key).map_err(|e| e.to_string())?;
+        let json = json.ok_or_else(|| format!("Binding not found: {}.{}", source_id, endpoint_id))?;
+        let mut binding: SourceBinding =
+            serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        binding.last_scheduled_at = Some(timestamp);
+        self.save(&binding)
+    }
 }
 
 #[cfg(test)]
@@ -90,6 +135,10 @@ mod tests {
             active: true,
             headers_json: None,
             auth_credential_key: None,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
         }
     }
 
@@ -108,6 +157,10 @@ mod tests {
             active: true,
             headers_json: None,
             auth_credential_key: None,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
         };
 
         store.save(&binding).unwrap();

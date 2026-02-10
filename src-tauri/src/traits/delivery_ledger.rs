@@ -50,6 +50,9 @@ pub struct DeliveryEntry {
     pub available_at: i64,
     pub created_at: i64,
     pub delivered_at: Option<i64>,
+    /// When set, deliver only to this specific endpoint (for scheduled deliveries)
+    #[serde(default)]
+    pub target_endpoint_id: Option<String>,
 }
 
 /// Trait for delivery ledger operations
@@ -63,6 +66,14 @@ pub trait DeliveryLedgerTrait: Send + Sync {
         &self,
         event_type: &str,
         payload: serde_json::Value,
+    ) -> Result<String, LedgerError>;
+
+    /// Enqueue a targeted delivery (for a specific endpoint only)
+    fn enqueue_targeted(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+        target_endpoint_id: &str,
     ) -> Result<String, LedgerError>;
 
     /// Claim a batch of pending deliveries for processing

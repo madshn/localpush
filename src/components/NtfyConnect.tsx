@@ -19,6 +19,14 @@ export function NtfyConnect({ onConnected }: NtfyConnectProps) {
   const [authToken, setAuthToken] = useState("");
   const connectMutation = useConnectNtfy();
 
+  const handleUrlChange = (value: string) => {
+    if (value && !value.startsWith("http://") && !value.startsWith("https://")) {
+      setServerUrl("https://" + value);
+    } else {
+      setServerUrl(value);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -61,7 +69,7 @@ export function NtfyConnect({ onConnected }: NtfyConnectProps) {
           className={inputClass}
           placeholder="https://ntfy.sh"
           value={serverUrl}
-          onChange={(e) => setServerUrl(e.target.value)}
+          onChange={(e) => handleUrlChange(e.target.value)}
           disabled={connectMutation.isPending}
         />
       </div>

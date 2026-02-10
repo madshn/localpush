@@ -4,23 +4,27 @@ import { logger } from '../../utils/logger';
 
 interface DeliveryQueueItem {
   id: string;
-  eventType: string;
+  event_type: string;
   status: string;
-  retryCount: number;
-  lastError: string | null;
-  createdAt: string;
-  deliveredAt: string | null;
+  retry_count: number;
+  last_error: string | null;
+  created_at: string;
+  delivered_at: string | null;
+  payload: unknown;
 }
 
 export interface ActivityEntry {
   id: string;
   source: string;
+  sourceId: string;
   status: "delivered" | "pending" | "in_flight" | "failed" | "dlq";
   statusCode?: string;
   error?: string;
   timestamp: Date;
   deliveredAt?: Date;
   retryCount: number;
+  payload: unknown;
+  payloadSummary: string;
 }
 
 const prettifyEventType = (eventType: string): string => {
@@ -43,16 +47,37 @@ const prettifyEventType = (eventType: string): string => {
     .join(' ');
 };
 
+const summarizePayload = (payload: unknown): string => {
+  if (!payload || typeof payload !== 'object') return '';
+  const obj = payload as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return '';
+  // Show first 2-3 meaningful key-value pairs
+  const summary = keys.slice(0, 3).map(k => {
+    const v = obj[k];
+    if (typeof v === 'string') return `${k}: ${v.slice(0, 30)}${v.length > 30 ? '...' : ''}`;
+    if (typeof v === 'number') return `${k}: ${v}`;
+    if (Array.isArray(v)) return `${k}: [${v.length} items]`;
+    if (typeof v === 'object' && v !== null) return `${k}: {...}`;
+    return `${k}: ${String(v)}`;
+  }).join(', ');
+  const extra = keys.length > 3 ? ` +${keys.length - 3} more` : '';
+  return summary + extra;
+};
+
 const transformToActivityEntry = (item: DeliveryQueueItem): ActivityEntry => {
   return {
     id: item.id,
-    source: prettifyEventType(item.eventType),
+    source: prettifyEventType(item.event_type),
+    sourceId: item.event_type,
     status: item.status as ActivityEntry['status'],
     statusCode: item.status === 'delivered' ? '200 OK' : undefined,
-    error: item.lastError || undefined,
-    timestamp: new Date(item.createdAt),
-    deliveredAt: item.deliveredAt ? new Date(item.deliveredAt) : undefined,
-    retryCount: item.retryCount,
+    error: item.last_error || undefined,
+    timestamp: new Date(item.created_at),
+    deliveredAt: item.delivered_at ? new Date(item.delivered_at) : undefined,
+    retryCount: item.retry_count,
+    payload: item.payload,
+    payloadSummary: summarizePayload(item.payload),
   };
 };
 

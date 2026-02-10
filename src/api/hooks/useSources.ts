@@ -7,7 +7,8 @@ export interface Source {
   name: string;
   description: string;
   enabled: boolean;
-  lastSync: string | null;
+  last_sync: string | null;
+  watch_path: string | null;
 }
 
 async function getSources(): Promise<Source[]> {

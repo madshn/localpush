@@ -25,6 +25,7 @@ fn main() {
             commands::add_webhook_target,
             commands::test_webhook,
             commands::get_source_preview,
+            commands::get_source_sample_payload,
             commands::get_webhook_config,
             commands::get_setting,
             commands::set_setting,
@@ -39,6 +40,7 @@ fn main() {
             commands::get_source_bindings,
             commands::list_all_bindings,
             commands::trigger_source_push,
+            commands::replay_delivery,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
