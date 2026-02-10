@@ -11,7 +11,7 @@ use localpush_lib::config::AppConfig;
 use localpush_lib::delivery_worker::{self, WorkerConfig};
 use localpush_lib::source_manager::SourceManager;
 use localpush_lib::sources::ClaudeStatsSource;
-use localpush_lib::mocks::{ManualFileWatcher, RecordedWebhookClient};
+use localpush_lib::mocks::{InMemoryCredentialStore, ManualFileWatcher, RecordedWebhookClient};
 use localpush_lib::DeliveryLedger;
 use localpush_lib::traits::{DeliveryLedgerTrait, DeliveryStatus, WebhookAuth, FileWatcher};
 
@@ -93,7 +93,7 @@ fn test_full_pipeline_enable_event_deliver() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let worker_config = delivery_worker::read_worker_config(&config).unwrap();
-        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&worker_config), 10).await;
+        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&worker_config), &InMemoryCredentialStore::new(), 10).await;
     });
 
     // 6. Verify webhook was called
@@ -135,7 +135,7 @@ fn test_pipeline_retry_on_webhook_failure() {
             webhook_url: "https://example.com/hook".to_string(),
             webhook_auth: WebhookAuth::None,
         };
-        delivery_worker::process_batch(&*ledger, &*webhook_fail, &binding_store, Some(&worker_config), 10).await;
+        delivery_worker::process_batch(&*ledger, &*webhook_fail, &binding_store, Some(&worker_config), &InMemoryCredentialStore::new(), 10).await;
     });
 
     // Entry should be failed, not delivered
@@ -190,7 +190,7 @@ fn test_pipeline_multiple_events_batch_delivery() {
             webhook_url: "https://example.com/hook".to_string(),
             webhook_auth: WebhookAuth::None,
         };
-        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&worker_config), 10).await;
+        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&worker_config), &InMemoryCredentialStore::new(), 10).await;
     });
 
     assert_eq!(webhook.call_count(), 3);
@@ -223,7 +223,7 @@ fn test_orphan_recovery_then_redelivery() {
             webhook_auth: WebhookAuth::None,
         };
         // Claim the failed entry (it's now eligible for retry)
-        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&config), 10).await;
+        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&config), &InMemoryCredentialStore::new(), 10).await;
     });
 
     // Note: The failed entry has available_at in the future due to backoff,

@@ -47,6 +47,11 @@ impl DeliveryLedger {
                 WHERE status = 'delivered';"
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
+        // Idempotent migration: add target_endpoint_id column
+        let _ = conn.execute_batch(
+            "ALTER TABLE delivery_ledger ADD COLUMN target_endpoint_id TEXT DEFAULT NULL;"
+        ); // Ignore error if column already exists
+
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -67,7 +72,8 @@ impl DeliveryLedger {
                 last_error TEXT,
                 available_at INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
-                delivered_at INTEGER
+                delivered_at INTEGER,
+                target_endpoint_id TEXT DEFAULT NULL
             );"
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
@@ -94,13 +100,36 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         Ok(event_id)
     }
 
+    fn enqueue_targeted(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+        target_endpoint_id: &str,
+    ) -> Result<String, LedgerError> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let event_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().timestamp();
+        let payload_str = serde_json::to_string(&payload)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO delivery_ledger (id, event_id, event_type, payload, available_at, created_at, target_endpoint_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+            params![id, event_id, event_type, payload_str, now, target_endpoint_id],
+        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        tracing::debug!("Enqueued targeted delivery: {} ({}) -> {}", event_id, event_type, target_endpoint_id);
+        Ok(event_id)
+    }
+
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, event_id, event_type, payload, status, retry_count, max_retries,
-                    last_error, available_at, created_at, delivered_at
+                    last_error, available_at, created_at, delivered_at, target_endpoint_id
              FROM delivery_ledger
              WHERE status IN ('pending', 'failed') AND available_at <= ?1
              ORDER BY available_at ASC
@@ -134,6 +163,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
                 available_at: row.get(8)?,
                 created_at: row.get(9)?,
                 delivered_at: row.get(10)?,
+                target_endpoint_id: row.get(11)?,
             })
         }).map_err(|e| LedgerError::DatabaseError(e.to_string()))?
         .filter_map(Result::ok)
@@ -211,7 +241,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, event_id, event_type, payload, status, retry_count, max_retries,
-                    last_error, available_at, created_at, delivered_at
+                    last_error, available_at, created_at, delivered_at, target_endpoint_id
              FROM delivery_ledger
              WHERE status = ?1
              ORDER BY created_at DESC
@@ -235,6 +265,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
                 available_at: row.get(8)?,
                 created_at: row.get(9)?,
                 delivered_at: row.get(10)?,
+                target_endpoint_id: row.get(11)?,
             })
         }).map_err(|e| LedgerError::DatabaseError(e.to_string()))?
         .filter_map(Result::ok)

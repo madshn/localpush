@@ -10,6 +10,12 @@ export interface Binding {
   endpoint_name: string;
   created_at: string;
   active: boolean;
+  headers_json: string | null;
+  auth_credential_key: string | null;
+  delivery_mode: string;
+  schedule_time: string | null;
+  schedule_day: string | null;
+  last_scheduled_at: number | null;
 }
 
 async function getSourceBindings(sourceId: string): Promise<Binding[]> {
@@ -42,6 +48,13 @@ async function createBinding(params: {
   endpointId: string;
   endpointUrl: string;
   endpointName: string;
+  customHeaders?: [string, string][];
+  authHeaderName?: string;
+  authHeaderValue?: string;
+  preserveAuthCredentialKey?: string;
+  deliveryMode?: string;
+  scheduleTime?: string;
+  scheduleDay?: string;
 }): Promise<void> {
   logger.debug("Creating binding", params);
   try {
@@ -51,8 +64,19 @@ async function createBinding(params: {
       endpointId: params.endpointId,
       endpointUrl: params.endpointUrl,
       endpointName: params.endpointName,
+      customHeaders: params.customHeaders,
+      authHeaderName: params.authHeaderName,
+      authHeaderValue: params.authHeaderValue,
+      preserveAuthCredentialKey: params.preserveAuthCredentialKey,
+      deliveryMode: params.deliveryMode,
+      scheduleTime: params.scheduleTime,
+      scheduleDay: params.scheduleDay,
     });
-    logger.info("Binding created", params);
+    logger.info("Binding created", {
+      sourceId: params.sourceId,
+      endpointId: params.endpointId,
+      hasAuth: !!params.authHeaderName,
+    });
   } catch (error) {
     logger.error("Failed to create binding", { ...params, error });
     throw error;

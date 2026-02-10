@@ -20,6 +20,28 @@ pub struct SourceBinding {
     pub endpoint_name: String,
     pub created_at: i64,
     pub active: bool,
+    /// Serialized Vec<(String, String)> of non-secret headers (including auth header name without secret value)
+    #[serde(default)]
+    pub headers_json: Option<String>,
+    /// Credential store key for the secret auth value, e.g. "binding:claude-stats:wf1-Webhook"
+    #[serde(default)]
+    pub auth_credential_key: Option<String>,
+    /// Delivery mode: "on_change" (default), "daily", or "weekly"
+    #[serde(default = "default_delivery_mode")]
+    pub delivery_mode: String,
+    /// Schedule time in "HH:MM" format (for daily/weekly modes)
+    #[serde(default)]
+    pub schedule_time: Option<String>,
+    /// Day of week for weekly mode: "monday"..."sunday"
+    #[serde(default)]
+    pub schedule_day: Option<String>,
+    /// Epoch timestamp of last scheduled delivery
+    #[serde(default)]
+    pub last_scheduled_at: Option<i64>,
+}
+
+fn default_delivery_mode() -> String {
+    "on_change".to_string()
 }
 
 /// Manages source-to-target bindings, persisted in config SQLite
@@ -67,6 +89,35 @@ impl BindingStore {
             .filter(|b: &SourceBinding| b.active)
             .collect()
     }
+
+    /// Count all active bindings (for diagnostics/logging)
+    pub fn count(&self) -> usize {
+        self.list_all().len()
+    }
+
+    /// Get all active bindings with a scheduled delivery mode (daily/weekly)
+    pub fn get_scheduled_bindings(&self) -> Vec<SourceBinding> {
+        self.list_all()
+            .into_iter()
+            .filter(|b| b.delivery_mode != "on_change")
+            .collect()
+    }
+
+    /// Update the last_scheduled_at timestamp for a binding (load-modify-save)
+    pub fn update_last_scheduled(
+        &self,
+        source_id: &str,
+        endpoint_id: &str,
+        timestamp: i64,
+    ) -> Result<(), String> {
+        let key = format!("binding.{}.{}", source_id, endpoint_id);
+        let json = self.config.get(&key).map_err(|e| e.to_string())?;
+        let json = json.ok_or_else(|| format!("Binding not found: {}.{}", source_id, endpoint_id))?;
+        let mut binding: SourceBinding =
+            serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        binding.last_scheduled_at = Some(timestamp);
+        self.save(&binding)
+    }
 }
 
 #[cfg(test)]
@@ -82,6 +133,12 @@ mod tests {
             endpoint_name: "Test Endpoint".to_string(),
             created_at: 1000,
             active: true,
+            headers_json: None,
+            auth_credential_key: None,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
         }
     }
 
@@ -98,6 +155,12 @@ mod tests {
             endpoint_name: "Analytics Workflow".to_string(),
             created_at: 1000,
             active: true,
+            headers_json: None,
+            auth_credential_key: None,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
         };
 
         store.save(&binding).unwrap();
@@ -150,5 +213,48 @@ mod tests {
         let bindings = store.get_for_source("claude-stats");
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].endpoint_id, "ep2");
+    }
+
+    #[test]
+    fn test_binding_with_headers_json_round_trips() {
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let store = BindingStore::new(config);
+
+        let headers: Vec<(String, String)> = vec![
+            ("Authorization".to_string(), String::new()),
+            ("X-Custom".to_string(), "value".to_string()),
+        ];
+        let mut binding = test_binding("claude-stats", "ep1");
+        binding.headers_json = Some(serde_json::to_string(&headers).unwrap());
+        binding.auth_credential_key = Some("binding:claude-stats:ep1".to_string());
+
+        store.save(&binding).unwrap();
+        let loaded = store.get_for_source("claude-stats");
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded[0].headers_json.is_some());
+        assert_eq!(loaded[0].auth_credential_key.as_deref(), Some("binding:claude-stats:ep1"));
+
+        // Verify headers deserialize correctly
+        let parsed: Vec<(String, String)> = serde_json::from_str(loaded[0].headers_json.as_ref().unwrap()).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].0, "Authorization");
+        assert_eq!(parsed[1].1, "value");
+    }
+
+    #[test]
+    fn test_binding_without_new_fields_deserializes() {
+        // Simulate a v0.1-era binding JSON without headers_json/auth_credential_key
+        let json = r#"{
+            "source_id": "claude-stats",
+            "target_id": "t1",
+            "endpoint_id": "ep1",
+            "endpoint_url": "https://example.com/webhook",
+            "endpoint_name": "Test",
+            "created_at": 1000,
+            "active": true
+        }"#;
+        let binding: SourceBinding = serde_json::from_str(json).unwrap();
+        assert!(binding.headers_json.is_none());
+        assert!(binding.auth_credential_key.is_none());
     }
 }

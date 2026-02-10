@@ -1,136 +1,134 @@
-import { useState } from 'react';
-import { useTargets, useTestTargetConnection } from '../api/hooks/useTargets';
-import { N8nConnect } from './N8nConnect';
-import { NtfyConnect } from './NtfyConnect';
-import { logger } from '../utils/logger';
+import { useState } from "react";
+import * as Tabs from "@radix-ui/react-tabs";
+import { Webhook, Bell, Plus, X } from "lucide-react";
+import { toast } from "sonner";
+import { useTargets, useTestTargetConnection } from "../api/hooks/useTargets";
+import { N8nConnect } from "./N8nConnect";
+import { NtfyConnect } from "./NtfyConnect";
+import { logger } from "../utils/logger";
 
-type TargetType = 'n8n' | 'ntfy';
+interface TargetInfo {
+  id: string;
+  target_type: string;
+}
 
 export function TargetSetup() {
-  const [selectedType, setSelectedType] = useState<TargetType>('n8n');
   const [testingTargetId, setTestingTargetId] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
   const { data: targets, isLoading } = useTargets();
   const testMutation = useTestTargetConnection();
 
-  const handleTargetConnected = (targetInfo: any) => {
-    logger.info('Target connected successfully', { targetId: targetInfo.id, type: targetInfo.target_type });
+  const handleTargetConnected = (targetInfo: TargetInfo) => {
+    logger.info("Target connected successfully", {
+      targetId: targetInfo.id,
+      type: targetInfo.target_type,
+    });
+    toast.success("Target connected");
+    setShowAddForm(false);
   };
 
   const handleTestConnection = async (targetId: string) => {
     setTestingTargetId(targetId);
     try {
       await testMutation.mutateAsync(targetId);
+      toast.success("Connection test successful");
     } catch (error) {
-      logger.error('Target test failed', { targetId, error });
+      logger.error("Target test failed", { targetId, error });
+      toast.error("Connection test failed");
     } finally {
       setTestingTargetId(null);
     }
   };
 
   return (
-    <div>
+    <div className="flex flex-col gap-3">
       {/* Connected Targets */}
       {!isLoading && targets && targets.length > 0 && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <h2 className="card-title">Connected Targets</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="bg-bg-secondary border border-border rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold">Connected Targets</h2>
+            <span className="text-[10px] font-medium text-accent">
+              {targets.length} Active
+            </span>
+          </div>
+          <div className="flex flex-col gap-2">
             {targets.map((target) => (
               <div
                 key={target.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: 8,
-                  backgroundColor: 'var(--bg-secondary)',
-                  borderRadius: 4,
-                }}
+                className="flex items-center gap-3 p-3 bg-bg-primary rounded-md border-l-2 border-l-accent"
               >
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 500, marginBottom: 2 }}>{target.name}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-                    <span
-                      style={{
-                        padding: '2px 6px',
-                        backgroundColor: target.target_type === 'n8n' ? '#4f9eff33' : '#10b98133',
-                        color: target.target_type === 'n8n' ? '#4f9eff' : '#10b981',
-                        borderRadius: 3,
-                        fontSize: 11,
-                        fontWeight: 500,
-                      }}
-                    >
-                      {target.target_type}
-                    </span>
+                {target.target_type === "n8n" ? (
+                  <Webhook size={16} className="text-accent shrink-0" />
+                ) : (
+                  <Bell size={16} className="text-success shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium truncate">
+                    {target.name}
                   </div>
+                  <span
+                    className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                      target.target_type === "n8n"
+                        ? "bg-accent-muted text-accent"
+                        : "bg-success-bg text-success"
+                    }`}
+                  >
+                    {target.target_type}
+                  </span>
                 </div>
                 <button
-                  className="btn-secondary"
+                  className="text-xs font-medium px-2.5 py-1 rounded bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors disabled:opacity-50"
                   onClick={() => handleTestConnection(target.id)}
                   disabled={testingTargetId === target.id}
-                  style={{ fontSize: 12, padding: '4px 8px' }}
                 >
-                  {testingTargetId === target.id ? 'Testing...' : 'Test'}
+                  {testingTargetId === target.id ? "Testing..." : "Test"}
                 </button>
               </div>
             ))}
           </div>
-
-          {testMutation.isSuccess && (
-            <div className="status-message" style={{ backgroundColor: 'var(--success-bg)', color: 'var(--success-text)', marginTop: 8 }}>
-              Connection test successful
-            </div>
-          )}
-
-          {testMutation.isError && (
-            <div className="status-message" style={{ backgroundColor: 'var(--error-bg)', color: 'var(--error-text)', marginTop: 8 }}>
-              {testMutation.error.message || 'Connection test failed'}
-            </div>
-          )}
         </div>
       )}
 
-      {/* Add Target */}
-      <div className="card">
-        <h2 className="card-title">Add Target</h2>
+      {/* Add New Target */}
+      {showAddForm ? (
+        <div className="bg-bg-secondary border border-border rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold">Add New Target</h2>
+            <button
+              onClick={() => setShowAddForm(false)}
+              className="text-text-secondary hover:text-text-primary transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
 
-        {/* Target Type Tabs */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid var(--bg-secondary)' }}>
-          <button
-            onClick={() => setSelectedType('n8n')}
-            style={{
-              padding: '8px 16px',
-              background: 'none',
-              border: 'none',
-              color: selectedType === 'n8n' ? 'var(--accent)' : 'var(--text-secondary)',
-              borderBottom: selectedType === 'n8n' ? '2px solid var(--accent)' : '2px solid transparent',
-              cursor: 'pointer',
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            n8n
-          </button>
-          <button
-            onClick={() => setSelectedType('ntfy')}
-            style={{
-              padding: '8px 16px',
-              background: 'none',
-              border: 'none',
-              color: selectedType === 'ntfy' ? 'var(--accent)' : 'var(--text-secondary)',
-              borderBottom: selectedType === 'ntfy' ? '2px solid var(--accent)' : '2px solid transparent',
-              cursor: 'pointer',
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            ntfy
-          </button>
+          <Tabs.Root defaultValue="n8n">
+            <Tabs.List className="flex gap-1 mb-4 bg-bg-primary rounded-lg p-1">
+              <Tabs.Trigger value="n8n" className="tab-trigger">
+                n8n
+              </Tabs.Trigger>
+              <Tabs.Trigger value="ntfy" className="tab-trigger">
+                ntfy
+              </Tabs.Trigger>
+            </Tabs.List>
+
+            <Tabs.Content value="n8n">
+              <N8nConnect onConnected={handleTargetConnected} />
+            </Tabs.Content>
+            <Tabs.Content value="ntfy">
+              <NtfyConnect onConnected={handleTargetConnected} />
+            </Tabs.Content>
+          </Tabs.Root>
         </div>
-
-        {/* Connection Forms */}
-        {selectedType === 'n8n' && <N8nConnect onConnected={handleTargetConnected} />}
-        {selectedType === 'ntfy' && <NtfyConnect onConnected={handleTargetConnected} />}
-      </div>
+      ) : (
+        <button
+          onClick={() => setShowAddForm(true)}
+          className="flex items-center justify-center gap-2 w-full py-2.5 text-xs font-medium rounded-lg border border-dashed border-border text-text-secondary hover:text-accent hover:border-accent transition-colors"
+        >
+          <Plus size={14} />
+          Add New Target
+        </button>
+      )}
     </div>
   );
 }

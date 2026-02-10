@@ -23,17 +23,31 @@ React 18 + TypeScript menu bar UI for LocalPush. Communicates with Rust backend 
 ## Architecture
 
 ```
-App.tsx (Router)
-├── StatusIndicator    # Overall app health (green/yellow/red)
-├── SourceList         # Add/configure sources (uses useSources hook)
-├── DeliveryQueue      # In-flight deliveries (uses useDeliveryQueue hook)
-├── TransparencyPreview (modal)  # Show user's real data before enabling
-└── SettingsPanel      # Auth config, webhook URL, etc.
+App.tsx (3-tab Radix layout + Sonner Toaster)
+├── StatusIndicator        # Overall app health (Lucide icons)
+├── PipelineView (tab 1)   # Home — SummaryStats + PipelineCard list
+│   ├── SummaryStats       # Delivery count + health grid + SparklineChart
+│   └── PipelineCard       # Per-source card with enable flow
+│       ├── TransparencyPreview  # Real data preview before enabling
+│       ├── EndpointPicker       # Pick target endpoint for binding
+│       ├── DeliveryConfig       # Auth headers + custom headers
+│       └── SecurityCoaching     # Final confirmation with data summary
+├── ActivityLog (tab 2)    # Searchable, date-grouped delivery log
+│   ├── DateDivider        # Date group separator
+│   └── ActivityCard       # Expandable delivery entry
+├── SettingsPanel (tab 3)  # Targets + general settings
+│   └── TargetSetup        # Connected targets + add new (Radix Tabs)
+│       ├── N8nConnect     # n8n instance form
+│       └── NtfyConnect    # ntfy server form
+└── Skeleton               # Loading placeholder utility
 
 api/hooks/
 ├── useDeliveryStatus  # Query: get current delivery stats
 ├── useSources         # Query: list configured sources
-└── useDeliveryQueue   # Query: in-flight deliveries
+├── useDeliveryQueue   # Query: in-flight deliveries
+├── useTargets         # Query/mutate connected targets
+├── useBindings        # Query/mutate source-target bindings
+└── useActivityLog     # Query delivery activity log
 ```
 
 ---
@@ -228,17 +242,31 @@ describe("SourceList", () => {
 
 | File | Purpose |
 |------|---------|
-| `App.tsx` | Main UI router, nav tabs |
+| `App.tsx` | 3-tab Radix layout, Sonner Toaster |
+| `styles.css` | Tailwind v4 entry + design tokens + animations |
 | `api/hooks/useDeliveryStatus.ts` | Query delivery overall status |
 | `api/hooks/useSources.ts` | Query configured sources |
 | `api/hooks/useDeliveryQueue.ts` | Query in-flight deliveries |
-| `components/StatusIndicator.tsx` | Color-coded health indicator |
-| `components/SourceList.tsx` | List + add sources |
-| `components/DeliveryQueue.tsx` | Show pending deliveries |
-| `components/TransparencyPreview.tsx` | Preview real data modal |
-| `components/SettingsPanel.tsx` | Configure auth, webhook URL |
-| `store.ts` | Zustand UI state store |
-| `styles.css` | Minimal CSS |
+| `api/hooks/useTargets.ts` | Query/mutate connected targets |
+| `api/hooks/useBindings.ts` | Query/mutate source-target bindings |
+| `api/hooks/useActivityLog.ts` | Query delivery activity log |
+| `components/StatusIndicator.tsx` | Health indicator with Lucide icons |
+| `components/PipelineView.tsx` | Home tab — stats + source cards |
+| `components/PipelineCard.tsx` | Per-source pipeline card |
+| `components/SummaryStats.tsx` | Delivery count + health grid |
+| `components/SparklineChart.tsx` | SVG area chart |
+| `components/ActivityLog.tsx` | Searchable activity feed |
+| `components/ActivityCard.tsx` | Expandable delivery entry |
+| `components/DateDivider.tsx` | Date group separator |
+| `components/TransparencyPreview.tsx` | Preview real data before enabling |
+| `components/EndpointPicker.tsx` | Pick target endpoint |
+| `components/DeliveryConfig.tsx` | Auth/custom headers config |
+| `components/SecurityCoaching.tsx` | Final confirmation coaching |
+| `components/TargetSetup.tsx` | Connected targets + add new |
+| `components/N8nConnect.tsx` | n8n instance connection form |
+| `components/NtfyConnect.tsx` | ntfy server connection form |
+| `components/SettingsPanel.tsx` | Settings tab container |
+| `components/Skeleton.tsx` | Loading placeholder utility |
 
 ---
 

@@ -29,7 +29,7 @@ function createTestQueryClient() {
 export function render(
   ui: ReactNode,
   {
-    initialState,
+    initialState: _initialState,
     ...renderOptions
   }: RenderOptions & {
     initialState?: unknown;

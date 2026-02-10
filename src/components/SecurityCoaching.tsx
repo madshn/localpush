@@ -1,7 +1,10 @@
+import { Shield, Lock, Unlock, AlertTriangle } from "lucide-react";
+
 interface SecurityCoachingProps {
   endpointUrl: string;
   authenticated: boolean;
   authType?: string;
+  isEditing?: boolean;
   onConfirm: () => void;
   onBack: () => void;
 }
@@ -10,6 +13,7 @@ export function SecurityCoaching({
   endpointUrl,
   authenticated,
   authType,
+  isEditing = false,
   onConfirm,
   onBack,
 }: SecurityCoachingProps) {
@@ -18,30 +22,27 @@ export function SecurityCoaching({
   const authSecure = authenticated;
 
   return (
-    <div className="card">
-      <h3 className="card-title">Security Assessment</h3>
+    <div className="bg-bg-secondary border border-border rounded-lg p-4">
+      <h3 className="text-sm font-semibold mb-3">Security Assessment</h3>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginBottom: "16px" }}>
+      <div className="flex flex-col gap-3 mb-3">
         {/* Transport Security */}
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-            <div
-              style={{
-                width: "12px",
-                height: "12px",
-                borderRadius: "50%",
-                background: transportSecure ? "var(--success)" : "var(--error)",
-              }}
-            />
-            <span style={{ fontWeight: 600, fontSize: "13px" }}>Transport Security</span>
+          <div className="flex items-center gap-2 mb-1.5">
+            {transportSecure ? (
+              <Lock size={14} className="text-success" />
+            ) : (
+              <Unlock size={14} className="text-error" />
+            )}
+            <span className="text-xs font-semibold">Transport Security</span>
           </div>
-          <p style={{ fontSize: "12px", color: "var(--text-secondary)", marginLeft: "20px" }}>
+          <p className="text-xs text-text-secondary ml-[22px]">
             {transportSecure ? (
               <>HTTPS encryption detected. Data will be encrypted in transit.</>
             ) : (
               <>
-                <span style={{ color: "var(--error)" }}>Warning:</span> HTTP connection detected.
-                Data will be sent unencrypted.
+                <span className="text-error">Warning:</span> HTTP connection
+                detected. Data will be sent unencrypted.
               </>
             )}
           </p>
@@ -49,65 +50,63 @@ export function SecurityCoaching({
 
         {/* Authentication */}
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-            <div
-              style={{
-                width: "12px",
-                height: "12px",
-                borderRadius: "50%",
-                background: authSecure ? "var(--success)" : "var(--warning)",
-              }}
-            />
-            <span style={{ fontWeight: 600, fontSize: "13px" }}>Authentication</span>
+          <div className="flex items-center gap-2 mb-1.5">
+            {authSecure ? (
+              <Shield size={14} className="text-success" />
+            ) : (
+              <AlertTriangle size={14} className="text-warning" />
+            )}
+            <span className="text-xs font-semibold">Authentication</span>
           </div>
-          <p style={{ fontSize: "12px", color: "var(--text-secondary)", marginLeft: "20px" }}>
+          <p className="text-xs text-text-secondary ml-[22px]">
             {authSecure ? (
               <>
-                Authenticated endpoint ({authType || "unknown method"}). Only authorized recipients
-                can access data.
+                Authenticated endpoint ({authType || "unknown method"}). Only
+                authorized recipients can access data.
               </>
             ) : (
               <>
-                <span style={{ color: "var(--warning)" }}>Advisory:</span> No authentication
-                configured. Anyone with the URL can receive data.
+                <span className="text-warning">Advisory:</span> No
+                authentication configured. Anyone with the URL can receive data.
               </>
             )}
           </p>
         </div>
 
-        {/* Overall Guidance */}
-        <div
-          style={{
-            padding: "12px",
-            background: "var(--bg-primary)",
-            borderRadius: "6px",
-            border: `1px solid var(--border)`,
-          }}
-        >
-          <p style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.5" }}>
+        {/* Security coaching box (Stitch prototype 7 style) */}
+        <div className="flex gap-2.5 p-3 bg-accent/10 border border-accent/20 rounded-md">
+          <Shield size={16} className="text-accent shrink-0 mt-0.5" />
+          <p className="text-xs text-text-secondary leading-relaxed">
             {transportSecure && authSecure ? (
               <>This endpoint uses industry-standard security practices.</>
             ) : !transportSecure ? (
               <>
-                <strong style={{ color: "var(--error)" }}>Not recommended:</strong> Sending
-                sensitive data over HTTP exposes it to interception.
+                <strong className="text-error">Not recommended:</strong> Sending
+                sensitive data over HTTP exposes it to interception. Use HTTPS to
+                ensure your local data is encrypted during transit.
               </>
             ) : (
               <>
-                <strong style={{ color: "var(--warning)" }}>Caution:</strong> Ensure this endpoint
-                URL is kept private if it contains sensitive data.
+                <strong className="text-warning">Caution:</strong> Ensure this
+                endpoint URL is kept private if it handles sensitive data.
               </>
             )}
           </p>
         </div>
       </div>
 
-      <div className="preview-actions">
-        <button className="btn btn-secondary" onClick={onBack}>
+      <div className="flex gap-2 justify-end">
+        <button
+          className="text-xs font-medium px-3 py-1.5 rounded-md bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
+          onClick={onBack}
+        >
           Back
         </button>
-        <button className="btn" onClick={onConfirm}>
-          Confirm & Enable
+        <button
+          className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors"
+          onClick={onConfirm}
+        >
+          {isEditing ? "Save Changes" : "Confirm & Enable"}
         </button>
       </div>
     </div>

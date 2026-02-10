@@ -70,6 +70,8 @@ pub struct ClaudeStatsPayload {
     pub last_computed_date: String,
     pub today: Option<DailyStats>,
     pub yesterday: Option<DailyStats>,
+    /// 14-day rolling breakdown with zero-filled gaps (oldest → newest)
+    pub daily_breakdown: Vec<DailyStats>,
     pub model_totals: Vec<ModelTotal>,
     pub summary: SummaryStats,
     pub metadata: PayloadMetadata,
@@ -221,6 +223,41 @@ impl ClaudeStatsSource {
         let change = ((today as f64 - yesterday as f64) / yesterday as f64) * 100.0;
         Some(change)
     }
+
+    /// Build a rolling daily breakdown with zero-filled gaps.
+    /// Returns `window_days` entries ordered oldest → newest.
+    fn build_daily_breakdown(stats: &ClaudeStatsRaw, window_days: usize) -> Vec<DailyStats> {
+        let today = chrono::Local::now().date_naive();
+        let mut breakdown = Vec::with_capacity(window_days);
+
+        for i in (0..window_days).rev() {
+            let date = today - chrono::Duration::days(i as i64);
+            let date_str = date.format("%Y-%m-%d").to_string();
+
+            let daily = match Self::find_daily_activity(stats, &date_str) {
+                Some((activity, tokens)) => DailyStats {
+                    date: date_str,
+                    messages: activity.message_count,
+                    sessions: activity.session_count,
+                    tool_calls: activity.tool_call_count,
+                    total_tokens: Self::total_tokens(&tokens),
+                    tokens_by_model: tokens,
+                },
+                None => DailyStats {
+                    date: date_str,
+                    messages: 0,
+                    sessions: 0,
+                    tool_calls: 0,
+                    total_tokens: 0,
+                    tokens_by_model: HashMap::new(),
+                },
+            };
+
+            breakdown.push(daily);
+        }
+
+        breakdown
+    }
 }
 
 impl Default for ClaudeStatsSource {
@@ -273,6 +310,9 @@ impl Source for ClaudeStatsSource {
                 }
             });
 
+        // Build 14-day rolling breakdown with zero-filled gaps (before model_usage is consumed)
+        let daily_breakdown = Self::build_daily_breakdown(&stats, 14);
+
         // Build model totals
         let model_totals: Vec<ModelTotal> = stats
             .model_usage
@@ -302,6 +342,7 @@ impl Source for ClaudeStatsSource {
             last_computed_date: stats.last_computed_date,
             today,
             yesterday,
+            daily_breakdown,
             model_totals,
             summary,
             metadata: PayloadMetadata {

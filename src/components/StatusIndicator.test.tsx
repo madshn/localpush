@@ -23,15 +23,15 @@ describe('StatusIndicator', () => {
     expect(screen.getByText('Loading...')).toBeInTheDocument();
   });
 
-  it('applies correct CSS class for each status', () => {
+  it('renders an icon for each status', () => {
     const { container: activeContainer } = render(
       <StatusIndicator status="active" />
     );
-    expect(activeContainer.querySelector('.status-dot.active')).toBeInTheDocument();
+    expect(activeContainer.querySelector('svg')).toBeInTheDocument();
 
     const { container: errorContainer } = render(
       <StatusIndicator status="error" />
     );
-    expect(errorContainer.querySelector('.status-dot.error')).toBeInTheDocument();
+    expect(errorContainer.querySelector('svg')).toBeInTheDocument();
   });
 });

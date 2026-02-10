@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use localpush_lib::{commands, setup_app};
+use std::sync::atomic::Ordering;
+
+use localpush_lib::{commands, setup_app, SHOULD_EXIT};
 
 fn main() {
     let app = tauri::Builder::default()
@@ -14,6 +16,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::get_app_info,
             commands::get_delivery_status,
             commands::get_sources,
             commands::get_delivery_queue,
@@ -22,6 +25,7 @@ fn main() {
             commands::add_webhook_target,
             commands::test_webhook,
             commands::get_source_preview,
+            commands::get_source_sample_payload,
             commands::get_webhook_config,
             commands::get_setting,
             commands::set_setting,
@@ -36,14 +40,17 @@ fn main() {
             commands::get_source_bindings,
             commands::list_all_bindings,
             commands::trigger_source_push,
+            commands::replay_delivery,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
     app.run(|_app_handle, event| {
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
-            // Keep app running in tray
-            api.prevent_exit();
+            if !SHOULD_EXIT.load(Ordering::SeqCst) {
+                // Keep app running in tray (window close, not explicit quit)
+                api.prevent_exit();
+            }
         }
     });
 }

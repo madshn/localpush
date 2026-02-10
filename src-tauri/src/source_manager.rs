@@ -143,6 +143,7 @@ impl SourceManager {
 
         // Only process if enabled
         if !self.is_enabled(&source_id) {
+            tracing::debug!(source_id = %source_id, "Ignoring file event for disabled source");
             return Ok(());
         }
 
@@ -154,9 +155,10 @@ impl SourceManager {
         let source =
             source.ok_or_else(|| SourceManagerError::SourceNotFound(source_id.clone()))?;
 
+        tracing::debug!(source_id = %source_id, "Parsing source data for enqueue");
         let payload = source.parse()?;
         self.ledger.enqueue(&source_id, payload)?;
-        tracing::info!("Enqueued delivery from source: {}", source_id);
+        tracing::info!(source_id = %source_id, "Enqueued delivery from source");
         Ok(())
     }
 
