@@ -1,4 +1,5 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
+use crate::source_config::PropertyDef;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::fs;
@@ -347,6 +348,46 @@ impl Source for ClaudeSessionsSource {
             fields,
             last_updated: Some(Utc::now()),
         })
+    }
+
+    fn available_properties(&self) -> Vec<PropertyDef> {
+        vec![
+            PropertyDef {
+                key: "sessions".to_string(),
+                label: "Sessions".to_string(),
+                description: "Session list with metadata from the last 7 days".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "cache_efficiency".to_string(),
+                label: "Cache Efficiency".to_string(),
+                description: "Cache hit rate and prompt caching metrics".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "model_distribution".to_string(),
+                label: "Model Distribution".to_string(),
+                description: "Which Claude models were used across sessions".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "git_branches".to_string(),
+                label: "Git Branches".to_string(),
+                description: "Active git branches from session contexts".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "first_prompt_preview".to_string(),
+                label: "First Prompt Preview".to_string(),
+                description: "Opening text from each session (may contain project details)".to_string(),
+                default_enabled: false,
+                privacy_sensitive: true,
+            },
+        ]
     }
 }
 

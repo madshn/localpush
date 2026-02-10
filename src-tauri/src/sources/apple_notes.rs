@@ -1,4 +1,5 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
+use crate::source_config::PropertyDef;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -214,6 +215,25 @@ impl Source for AppleNotesSource {
             fields,
             last_updated,
         })
+    }
+
+    fn available_properties(&self) -> Vec<PropertyDef> {
+        vec![
+            PropertyDef {
+                key: "recent_notes".to_string(),
+                label: "Recent Notes".to_string(),
+                description: "Note titles and folders from the last 7 days".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "folder_stats".to_string(),
+                label: "Folder Statistics".to_string(),
+                description: "Per-folder note counts".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+        ]
     }
 }
 
