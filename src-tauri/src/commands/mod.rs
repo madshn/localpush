@@ -8,6 +8,24 @@ use crate::state::AppState;
 use crate::traits::{DeliveryStatus, Target, WebhookAuth};
 
 #[derive(Debug, Serialize)]
+pub struct AppInfoResponse {
+    pub version: String,
+    pub build_profile: String,
+}
+
+#[tauri::command]
+pub fn get_app_info() -> AppInfoResponse {
+    AppInfoResponse {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        build_profile: if cfg!(debug_assertions) {
+            "debug".to_string()
+        } else {
+            "release".to_string()
+        },
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub struct DeliveryStatusResponse {
     pub overall: String,
     pub pending_count: usize,

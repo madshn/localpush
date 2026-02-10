@@ -3,6 +3,12 @@
 //! This library provides the core functionality for LocalPush, organized around
 //! trait-based dependency injection for testability.
 
+use std::sync::atomic::AtomicBool;
+
+/// Set to true when user explicitly chooses Quit from tray menu.
+/// Checked by the `ExitRequested` handler to distinguish window-close from quit.
+pub static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
+
 pub mod bindings;
 pub mod commands;
 pub mod traits;
@@ -141,10 +147,14 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
 fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState};
-    use tauri::menu::{Menu, MenuItem};
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 
+    let version = env!("CARGO_PKG_VERSION");
+    let about_label = format!("LocalPush v{}", version);
+    let about = MenuItem::with_id(app, "about", &about_label, false, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit LocalPush", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&quit])?;
+    let menu = Menu::with_items(app, &[&about, &separator, &quit])?;
 
     let icon = tauri::include_image!("icons/tray-icon.png");
 
@@ -155,6 +165,8 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             if event.id.as_ref() == "quit" {
+                // Signal that this is an intentional quit (not a window close)
+                SHOULD_EXIT.store(true, std::sync::atomic::Ordering::SeqCst);
                 app.exit(0);
             }
         })
