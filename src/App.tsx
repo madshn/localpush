@@ -1,4 +1,3 @@
-import { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Workflow, Activity, Settings, ExternalLink } from "lucide-react";
 import { Toaster, toast } from "sonner";
@@ -50,7 +49,6 @@ async function handleOpenDashboard() {
 
 function App() {
   const { data: status } = useDeliveryStatus();
-  const [activeTab, setActiveTab] = useState("pipeline");
 
   if (isDashboard) {
     return (
@@ -80,7 +78,7 @@ function App() {
         </div>
       </header>
 
-      <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+      <Tabs.Root defaultValue="pipeline" className="flex-1 flex flex-col min-h-0">
         <Tabs.List className="flex gap-1 px-4 py-2 border-b border-border">
           <Tabs.Trigger value="pipeline" className="tab-trigger">
             <Workflow size={14} />
@@ -97,7 +95,7 @@ function App() {
         </Tabs.List>
 
         <Tabs.Content value="pipeline" className="flex-1 overflow-y-auto p-4">
-          <PipelineView onViewAllActivity={() => setActiveTab("activity")} />
+          <PipelineView />
         </Tabs.Content>
         <Tabs.Content value="activity" className="flex-1 overflow-y-auto p-4">
           <ActivityLog />
