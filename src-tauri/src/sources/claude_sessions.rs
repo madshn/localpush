@@ -4,15 +4,16 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
+use std::time::SystemTime;
 use tracing::{debug, info, warn};
 
-/// Wrapper for the sessions-index.json file format
+/// Wrapper for the sessions-index.json file format (legacy)
 #[derive(Debug, Deserialize)]
 struct SessionIndexFile {
     entries: Vec<SessionIndexEntry>,
 }
 
-/// Entry in a project's sessions-index.json
+/// Entry in a project's sessions-index.json (legacy)
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionIndexEntry {
@@ -25,6 +26,21 @@ struct SessionIndexEntry {
     modified: Option<String>,
     git_branch: Option<String>,
     project_path: Option<String>,
+}
+
+/// Unified session metadata extracted from either JSONL files or sessions-index.json
+#[derive(Debug)]
+struct SessionInfo {
+    session_id: String,
+    first_prompt: Option<String>,
+    summary: Option<String>,
+    message_count: u32,
+    created: Option<String>,
+    modified: Option<String>,
+    git_branch: Option<String>,
+    project_path: Option<String>,
+    #[allow(dead_code)]
+    jsonl_path: Option<String>,
 }
 
 /// Aggregated token counts from a session's JSONL file
@@ -40,7 +56,10 @@ struct TokenSummary {
 /// Claude Code session activity source.
 ///
 /// Watches `~/.claude/projects/` and aggregates session metadata + token usage
-/// from sessions modified within the last 24 hours.
+/// from sessions modified within the last 7 days.
+///
+/// Primary discovery: scan JSONL files directly in project directories.
+/// Fallback: parse sessions-index.json (older Claude Code versions).
 pub struct ClaudeSessionsSource {
     claude_projects_dir: PathBuf,
 }
@@ -65,7 +84,223 @@ impl ClaudeSessionsSource {
         }
     }
 
-    /// Scan all project directories for sessions-index.json files
+    /// Scan project directories for JSONL session files.
+    ///
+    /// Each project directory (e.g. `-Users-name-dev-project/`) contains
+    /// `{session-uuid}.jsonl` files. We use file system mtime as the
+    /// "modified" timestamp and parse the JSONL content for metadata.
+    fn scan_jsonl_sessions(&self, cutoff: DateTime<Utc>) -> Vec<(SessionInfo, TokenSummary)> {
+        let read_dir = match fs::read_dir(&self.claude_projects_dir) {
+            Ok(rd) => rd,
+            Err(e) => {
+                debug!(
+                    "Cannot read projects dir {}: {}",
+                    self.claude_projects_dir.display(),
+                    e
+                );
+                return Vec::new();
+            }
+        };
+
+        let mut results = Vec::new();
+
+        for project_entry in read_dir.flatten() {
+            let project_path = project_entry.path();
+            if !project_path.is_dir() {
+                continue;
+            }
+
+            let project_name = project_entry.file_name().to_string_lossy().to_string();
+
+            let project_dir = match fs::read_dir(&project_path) {
+                Ok(rd) => rd,
+                Err(_) => continue,
+            };
+
+            for file_entry in project_dir.flatten() {
+                let path = file_entry.path();
+                let name = file_entry.file_name().to_string_lossy().to_string();
+
+                // Only process UUID.jsonl files (skip subagent dirs, index files)
+                if !name.ends_with(".jsonl") {
+                    continue;
+                }
+
+                // Check file mtime against cutoff (fast — no file content reading)
+                let metadata = match fs::metadata(&path) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let modified_time = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                let modified_dt: DateTime<Utc> = modified_time.into();
+
+                if modified_dt < cutoff {
+                    continue;
+                }
+
+                // Extract session ID from filename
+                let session_id = name.trim_end_matches(".jsonl").to_string();
+
+                // Parse JSONL content for metadata and tokens
+                let jsonl_path_str = path.to_string_lossy().to_string();
+                let (info, tokens) =
+                    Self::parse_jsonl_session(&session_id, &jsonl_path_str, &project_name, modified_dt);
+
+                results.push((info, tokens));
+            }
+        }
+
+        debug!("JSONL scan found {} recent sessions", results.len());
+        results
+    }
+
+    /// Parse a JSONL session file to extract metadata and token usage.
+    fn parse_jsonl_session(
+        session_id: &str,
+        jsonl_path: &str,
+        project_dir_name: &str,
+        file_modified: DateTime<Utc>,
+    ) -> (SessionInfo, TokenSummary) {
+        let mut tokens = TokenSummary::default();
+        let mut first_prompt: Option<String> = None;
+        let mut first_timestamp: Option<String> = None;
+        let mut last_timestamp: Option<String> = None;
+        let mut git_branch: Option<String> = None;
+        let mut cwd: Option<String> = None;
+        let mut message_count: u32 = 0;
+        let mut summary: Option<String> = None;
+
+        let content = match fs::read_to_string(jsonl_path) {
+            Ok(c) => c,
+            Err(_) => {
+                return (
+                    SessionInfo {
+                        session_id: session_id.to_string(),
+                        first_prompt: None,
+                        summary: None,
+                        message_count: 0,
+                        created: None,
+                        modified: Some(file_modified.to_rfc3339()),
+                        git_branch: None,
+                        project_path: None,
+                        jsonl_path: Some(jsonl_path.to_string()),
+                    },
+                    tokens,
+                );
+            }
+        };
+
+        for line in content.lines() {
+            let obj = match serde_json::from_str::<serde_json::Value>(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let msg_type = obj.get("type").and_then(|t| t.as_str());
+            let ts = obj.get("timestamp").and_then(|t| t.as_str()).map(|s| s.to_string());
+
+            match msg_type {
+                Some("user") => {
+                    message_count += 1;
+                    if first_timestamp.is_none() {
+                        first_timestamp.clone_from(&ts);
+                        git_branch = obj
+                            .get("gitBranch")
+                            .and_then(|b| b.as_str())
+                            .map(|s| s.to_string());
+                        cwd = obj
+                            .get("cwd")
+                            .and_then(|c| c.as_str())
+                            .map(|s| s.to_string());
+
+                        // Extract first prompt text
+                        let msg_content = obj.pointer("/message/content");
+                        first_prompt = match msg_content {
+                            Some(serde_json::Value::String(s)) => {
+                                Some(s.chars().take(120).collect())
+                            }
+                            Some(serde_json::Value::Array(arr)) => arr.iter().find_map(|item| {
+                                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                    item.get("text")
+                                        .and_then(|t| t.as_str())
+                                        .map(|s| s.chars().take(120).collect())
+                                } else {
+                                    None
+                                }
+                            }),
+                            _ => None,
+                        };
+                    }
+                    if ts.is_some() {
+                        last_timestamp.clone_from(&ts);
+                    }
+                }
+                Some("assistant") => {
+                    if let Some(usage) = obj.pointer("/message/usage") {
+                        tokens.input += usage
+                            .get("input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        tokens.output += usage
+                            .get("output_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        tokens.cache_read += usage
+                            .get("cache_read_input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        tokens.cache_creation += usage
+                            .get("cache_creation_input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                    }
+
+                    if tokens.model.is_none() {
+                        tokens.model = obj
+                            .pointer("/message/model")
+                            .and_then(|m| m.as_str())
+                            .map(|s| s.to_string());
+                    }
+
+                    if ts.is_some() {
+                        last_timestamp.clone_from(&ts);
+                    }
+                }
+                Some("summary") => {
+                    // Some sessions have a summary message type
+                    summary = obj
+                        .get("summary")
+                        .and_then(|s| s.as_str())
+                        .map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
+
+        let info = SessionInfo {
+            session_id: session_id.to_string(),
+            first_prompt,
+            summary,
+            message_count,
+            created: first_timestamp,
+            modified: last_timestamp.or_else(|| Some(file_modified.to_rfc3339())),
+            git_branch,
+            project_path: cwd.or_else(|| {
+                // Derive project path from directory name convention:
+                // "-Users-name-dev-project" → "/Users/name/dev/project"
+                if project_dir_name.starts_with('-') {
+                    Some(project_dir_name.replace('-', "/"))
+                } else {
+                    None
+                }
+            }),
+            jsonl_path: Some(jsonl_path.to_string()),
+        };
+
+        (info, tokens)
+    }
+
+    /// Scan sessions-index.json files (legacy fallback for older Claude Code versions)
     fn scan_session_indices(&self) -> Vec<(String, Vec<SessionIndexEntry>)> {
         let read_dir = match fs::read_dir(&self.claude_projects_dir) {
             Ok(rd) => rd,
@@ -95,8 +330,6 @@ impl ClaudeSessionsSource {
                 }
             };
 
-            // Try wrapped format first: { "version": N, "entries": [...] }
-            // Fall back to bare array: [...]
             let entries = serde_json::from_str::<SessionIndexFile>(&content)
                 .map(|f| f.entries)
                 .or_else(|_| serde_json::from_str::<Vec<SessionIndexEntry>>(&content));
@@ -104,7 +337,7 @@ impl ClaudeSessionsSource {
             match entries {
                 Ok(entries) => {
                     let dir_name = entry.file_name().to_string_lossy().to_string();
-                    debug!("Found {} sessions in {}", entries.len(), dir_name);
+                    debug!("Found {} sessions in index for {}", entries.len(), dir_name);
                     results.push((dir_name, entries));
                 }
                 Err(e) => {
@@ -116,7 +349,7 @@ impl ClaudeSessionsSource {
         results
     }
 
-    /// Extract token usage from a session's JSONL file
+    /// Extract token usage from a JSONL file path (legacy helper for index-based sessions)
     fn extract_tokens(jsonl_path: &str) -> TokenSummary {
         let mut summary = TokenSummary::default();
 
@@ -166,14 +399,27 @@ impl ClaudeSessionsSource {
     }
 
     /// Collect sessions modified within the last 7 days, sorted newest first.
-    /// sessions-index.json is not updated in real-time by Claude Code,
-    /// so a 24h window often misses active sessions.
-    fn recent_sessions(&self) -> Vec<(SessionIndexEntry, TokenSummary)> {
+    ///
+    /// Uses two discovery strategies:
+    /// 1. Primary: scan JSONL files directly (works with current Claude Code)
+    /// 2. Fallback: parse sessions-index.json (older Claude Code versions)
+    ///
+    /// Results are deduplicated by session ID, preferring JSONL-discovered sessions.
+    fn recent_sessions(&self) -> Vec<(SessionInfo, TokenSummary)> {
         let cutoff = Utc::now() - chrono::Duration::days(7);
-        let mut results = Vec::new();
 
+        // Primary: scan JSONL files directly
+        let mut results = self.scan_jsonl_sessions(cutoff);
+        let mut seen_ids: std::collections::HashSet<String> =
+            results.iter().map(|(info, _)| info.session_id.clone()).collect();
+
+        // Fallback: sessions-index.json (may find sessions with JSONL in different locations)
         for (_dir, entries) in self.scan_session_indices() {
             for entry in entries {
+                if seen_ids.contains(&entry.session_id) {
+                    continue;
+                }
+
                 let modified_dt = entry
                     .modified
                     .as_ref()
@@ -191,7 +437,20 @@ impl ClaudeSessionsSource {
                     .map(Self::extract_tokens)
                     .unwrap_or_default();
 
-                results.push((entry, tokens));
+                let info = SessionInfo {
+                    session_id: entry.session_id.clone(),
+                    first_prompt: entry.first_prompt,
+                    summary: entry.summary,
+                    message_count: entry.message_count.unwrap_or(0),
+                    created: entry.created,
+                    modified: entry.modified,
+                    git_branch: entry.git_branch,
+                    project_path: entry.project_path,
+                    jsonl_path: entry.full_path,
+                };
+
+                seen_ids.insert(entry.session_id);
+                results.push((info, tokens));
             }
         }
 
@@ -203,12 +462,12 @@ impl ClaudeSessionsSource {
     }
 
     /// Calculate duration in seconds between created and modified timestamps
-    fn session_duration(entry: &SessionIndexEntry) -> Option<i64> {
-        let start = entry
+    fn session_duration(info: &SessionInfo) -> Option<i64> {
+        let start = info
             .created
             .as_ref()
             .and_then(|c| DateTime::parse_from_rfc3339(c).ok());
-        let end = entry
+        let end = info
             .modified
             .as_ref()
             .and_then(|m| DateTime::parse_from_rfc3339(m).ok());
@@ -231,12 +490,11 @@ impl ClaudeSessionsSource {
             .join(",")
     }
 
-    /// Get the display title for a session, falling back through summary -> first_prompt -> "Untitled"
-    fn session_title(entry: &SessionIndexEntry) -> &str {
-        entry
-            .summary
+    /// Get the display title for a session
+    fn session_title(info: &SessionInfo) -> &str {
+        info.summary
             .as_deref()
-            .or(entry.first_prompt.as_deref())
+            .or(info.first_prompt.as_deref())
             .unwrap_or("Untitled session")
     }
 }
@@ -259,16 +517,16 @@ impl Source for ClaudeSessionsSource {
 
         let sessions: Vec<serde_json::Value> = recent
             .iter()
-            .map(|(entry, tokens)| {
+            .map(|(info, tokens)| {
                 serde_json::json!({
-                    "id": entry.session_id,
-                    "project_path": entry.project_path,
-                    "git_branch": entry.git_branch,
-                    "title": Self::session_title(entry),
-                    "start_time": entry.created,
-                    "end_time": entry.modified,
-                    "duration_seconds": Self::session_duration(entry),
-                    "message_count": entry.message_count,
+                    "id": info.session_id,
+                    "project_path": info.project_path,
+                    "git_branch": info.git_branch,
+                    "title": Self::session_title(info),
+                    "start_time": info.created,
+                    "end_time": info.modified,
+                    "duration_seconds": Self::session_duration(info),
+                    "message_count": info.message_count,
                     "tokens": {
                         "input": tokens.input,
                         "output": tokens.output,
@@ -283,7 +541,7 @@ impl Source for ClaudeSessionsSource {
         let total_tokens: u64 = recent.iter().map(|(_, t)| t.input + t.output).sum();
         let total_duration: i64 = recent
             .iter()
-            .filter_map(|(e, _)| Self::session_duration(e))
+            .filter_map(|(info, _)| Self::session_duration(info))
             .sum();
 
         Ok(serde_json::json!({
@@ -326,14 +584,14 @@ impl Source for ClaudeSessionsSource {
         ];
 
         // Show most recent session details
-        if let Some((entry, _)) = recent.first() {
+        if let Some((info, _)) = recent.first() {
             fields.push(PreviewField {
                 label: "Latest Session".to_string(),
-                value: Self::session_title(entry).to_string(),
+                value: Self::session_title(info).to_string(),
                 sensitive: true,
             });
 
-            if let Some(ref project) = entry.project_path {
+            if let Some(ref project) = info.project_path {
                 fields.push(PreviewField {
                     label: "Project".to_string(),
                     value: project.clone(),
@@ -383,7 +641,8 @@ impl Source for ClaudeSessionsSource {
             PropertyDef {
                 key: "first_prompt_preview".to_string(),
                 label: "First Prompt Preview".to_string(),
-                description: "Opening text from each session (may contain project details)".to_string(),
+                description: "Opening text from each session (may contain project details)"
+                    .to_string(),
                 default_enabled: false,
                 privacy_sensitive: true,
             },
@@ -396,20 +655,44 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn setup_test_dir() -> TempDir {
+    /// Create a test directory with a JSONL session file (new format)
+    fn setup_jsonl_test_dir() -> TempDir {
         let dir = TempDir::new().unwrap();
         let project_dir = dir.path().join("-Users-test-project");
         fs::create_dir_all(&project_dir).unwrap();
 
         let now = Utc::now();
-        // Use the real wrapped format: { "version": 1, "entries": [...] }
+        let created = (now - chrono::Duration::hours(2)).to_rfc3339();
+        let modified = now.to_rfc3339();
+
+        let jsonl = format!(
+            concat!(
+                r#"{{"type":"user","sessionId":"test-session-1","timestamp":"{created}","cwd":"/Users/test/project","gitBranch":"main","message":{{"role":"user","content":"test prompt"}}}}"#,
+                "\n",
+                r#"{{"type":"assistant","timestamp":"{modified}","message":{{"model":"claude-opus-4-6","usage":{{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":500,"cache_creation_input_tokens":200}}}}}}"#,
+            ),
+            created = created,
+            modified = modified,
+        );
+        fs::write(project_dir.join("test-session-1.jsonl"), jsonl).unwrap();
+
+        dir
+    }
+
+    /// Create a test directory with sessions-index.json (legacy format)
+    fn setup_legacy_test_dir() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        let project_dir = dir.path().join("-Users-test-project");
+        fs::create_dir_all(&project_dir).unwrap();
+
+        let now = Utc::now();
         let index = serde_json::json!({
             "version": 1,
             "entries": [{
-                "sessionId": "test-session-1",
-                "fullPath": project_dir.join("test-session-1.jsonl").to_str().unwrap(),
-                "firstPrompt": "test prompt",
-                "summary": "Test session",
+                "sessionId": "legacy-session-1",
+                "fullPath": project_dir.join("legacy-session-1.jsonl").to_str().unwrap(),
+                "firstPrompt": "legacy prompt",
+                "summary": "Legacy session",
                 "messageCount": 10,
                 "created": (now - chrono::Duration::hours(2)).to_rfc3339(),
                 "modified": now.to_rfc3339(),
@@ -428,14 +711,14 @@ mod tests {
             "\n",
             r#"{"type":"assistant","message":{"model":"claude-opus-4-6","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":500,"cache_creation_input_tokens":200}}}"#,
         );
-        fs::write(project_dir.join("test-session-1.jsonl"), jsonl).unwrap();
+        fs::write(project_dir.join("legacy-session-1.jsonl"), jsonl).unwrap();
 
         dir
     }
 
     #[test]
-    fn test_parse_sessions() {
-        let dir = setup_test_dir();
+    fn test_parse_jsonl_sessions() {
+        let dir = setup_jsonl_test_dir();
         let source = ClaudeSessionsSource::new_with_path(dir.path());
 
         let result = source.parse().unwrap();
@@ -447,18 +730,36 @@ mod tests {
         assert_eq!(sessions[0]["tokens"]["cache_read"], 500);
         assert_eq!(sessions[0]["tokens"]["cache_creation"], 200);
         assert_eq!(sessions[0]["model"], "claude-opus-4-6");
+        assert_eq!(sessions[0]["title"], "test prompt");
+        assert_eq!(sessions[0]["git_branch"], "main");
     }
 
     #[test]
-    fn test_preview() {
-        let dir = setup_test_dir();
+    fn test_parse_legacy_sessions() {
+        let dir = setup_legacy_test_dir();
+        let source = ClaudeSessionsSource::new_with_path(dir.path());
+
+        let result = source.parse().unwrap();
+        let sessions = result["sessions"].as_array().unwrap();
+
+        // Should find sessions from both JSONL scan and legacy index
+        assert!(!sessions.is_empty());
+    }
+
+    #[test]
+    fn test_preview_jsonl() {
+        let dir = setup_jsonl_test_dir();
         let source = ClaudeSessionsSource::new_with_path(dir.path());
 
         let preview = source.preview().unwrap();
 
         assert_eq!(preview.title, "Claude Code Sessions");
         assert!(!preview.fields.is_empty());
-        assert!(preview.summary.contains("1 sessions"));
+        assert!(
+            preview.summary.contains("1 sessions"),
+            "Summary was: {}",
+            preview.summary
+        );
     }
 
     #[test]
@@ -513,7 +814,8 @@ mod tests {
     }
 
     #[test]
-    fn test_old_session_excluded() {
+    fn test_old_session_excluded_via_index() {
+        // Legacy index sessions with old timestamps should be excluded
         let dir = TempDir::new().unwrap();
         let project_dir = dir.path().join("-Users-test-old");
         fs::create_dir_all(&project_dir).unwrap();
@@ -538,7 +840,6 @@ mod tests {
         let source = ClaudeSessionsSource::new_with_path(dir.path());
         let result = source.parse().unwrap();
         let sessions = result["sessions"].as_array().unwrap();
-
         assert!(sessions.is_empty());
     }
 }

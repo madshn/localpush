@@ -111,15 +111,19 @@ export function TargetSetup() {
           <Tabs.Root defaultValue="n8n">
             <Tabs.List className="flex gap-1 mb-4 bg-bg-primary rounded-lg p-1">
               <Tabs.Trigger value="n8n" className="tab-trigger">
+                <Webhook size={12} className="shrink-0" />
                 n8n
               </Tabs.Trigger>
               <Tabs.Trigger value="ntfy" className="tab-trigger">
-                ntfy
+                <Bell size={12} className="shrink-0" />
+                ntfy.app
               </Tabs.Trigger>
               <Tabs.Trigger value="make" className="tab-trigger">
+                <Cog size={12} className="shrink-0" />
                 Make
               </Tabs.Trigger>
               <Tabs.Trigger value="zapier" className="tab-trigger">
+                <Zap size={12} className="shrink-0" />
                 Zapier
               </Tabs.Trigger>
             </Tabs.List>

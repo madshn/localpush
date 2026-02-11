@@ -210,6 +210,8 @@ export function usePipelineFlow({
 
   const handleAddTarget = (sourceId: string) => {
     logger.info("Add Target flow started", { sourceId });
+    // Reset to clean state to avoid stale fields from prior flows
+    resetFlowState(sourceId);
     updateFlowState(sourceId, { step: "pick_endpoint" });
   };
 
@@ -269,6 +271,16 @@ export function usePipelineFlow({
       !state.selectedEndpointUrl ||
       !state.selectedEndpointName
     ) {
+      logger.error("Security confirm aborted — missing flow state", {
+        sourceId,
+        hasTarget: !!state.selectedTarget,
+        hasEndpoint: !!state.selectedEndpoint,
+        hasUrl: !!state.selectedEndpointUrl,
+        hasName: !!state.selectedEndpointName,
+        step: state.step,
+      });
+      toast.error("Something went wrong. Please try again.");
+      resetFlowState(sourceId);
       return;
     }
 

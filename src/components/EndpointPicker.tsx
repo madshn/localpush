@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Search, X, ChevronRight } from "lucide-react";
+import { Search, X, ChevronRight, Loader2 } from "lucide-react";
 import { logger } from "../utils/logger";
 
 interface Target {
@@ -176,9 +176,10 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
       ) : (
         <div className="flex flex-col gap-2">
           {loading ? (
-            <p className="text-xs text-text-secondary text-center py-5">
-              Loading endpoints...
-            </p>
+            <div className="flex flex-col items-center gap-2 py-6">
+              <Loader2 size={20} className="text-accent animate-spin" />
+              <p className="text-xs text-text-secondary">Loading endpoints...</p>
+            </div>
           ) : endpoints.length === 0 ? (
             <p className="text-xs text-text-secondary text-center py-5">
               No endpoints available for this target.

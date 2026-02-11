@@ -83,6 +83,16 @@ export function SettingsPanel() {
               {appInfo?.build_profile ?? "..."}
             </span>
           </div>
+          <div className="pt-2 mt-2 border-t border-border">
+            <a
+              href="https://github.com/madshn/localpush/issues"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent hover:underline"
+            >
+              Report an issue
+            </a>
+          </div>
         </div>
       </div>
     </div>

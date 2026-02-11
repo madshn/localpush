@@ -81,6 +81,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         state.config.clone(),
         state.binding_store.clone(),
         state.credentials.clone(),
+        app.handle().clone(),
     );
 
     // Spawn scheduled delivery worker (daily/weekly cadence)
@@ -167,7 +168,7 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     let icon = tauri::include_image!("icons/tray-icon.png");
 
-    let _tray = TrayIconBuilder::new()
+    let _tray = TrayIconBuilder::with_id("main-tray")
         .icon(icon)
         .icon_as_template(true)
         .menu(&menu)

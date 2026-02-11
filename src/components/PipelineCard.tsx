@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Plus, Pencil, Info, X, Zap } from "lucide-react";
+import { Plus, Pencil, Info, X, Zap, SlidersHorizontal } from "lucide-react";
 import { useBindings, type Binding } from "../api/hooks/useBindings";
 import { TransparencyPreview } from "./TransparencyPreview";
 import { EndpointPicker } from "./EndpointPicker";
 import { SecurityCoaching } from "./SecurityCoaching";
 import { DeliveryConfig } from "./DeliveryConfig";
+import { SourceSettings } from "./SourceSettings";
 
 type SourceCategory = "active" | "paused" | "available";
 
@@ -153,6 +154,7 @@ export function PipelineCard({
 }: PipelineCardProps) {
   const { data: bindings } = useBindings(source.id);
   const [showInfo, setShowInfo] = useState(false);
+  const [showProperties, setShowProperties] = useState(false);
   const [showDisableConfirm, setShowDisableConfirm] = useState(false);
 
   const effectiveStatus =
@@ -203,12 +205,35 @@ export function PipelineCard({
                   {status.badge}
                 </span>
               )}
-              {category === "active" && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/10 text-accent">
-                  <Zap size={8} />
-                  Event-driven
-                </span>
-              )}
+              {category === "active" && (() => {
+                const hasScheduled = bindings?.some(
+                  (b) => b.delivery_mode && b.delivery_mode !== "on_change"
+                );
+                const allScheduled = bindings?.every(
+                  (b) => b.delivery_mode && b.delivery_mode !== "on_change"
+                );
+                if (allScheduled && bindings && bindings.length > 0) {
+                  return (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/10 text-accent">
+                      Scheduled
+                    </span>
+                  );
+                }
+                if (hasScheduled) {
+                  return (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/10 text-accent">
+                      <Zap size={8} />
+                      Mixed
+                    </span>
+                  );
+                }
+                return (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/10 text-accent">
+                    <Zap size={8} />
+                    Event-driven
+                  </span>
+                );
+              })()}
               {!isAvailable && (
                 <button
                   onClick={() => setShowInfo(!showInfo)}
@@ -231,7 +256,7 @@ export function PipelineCard({
             }`}
             onClick={handleEnableDisable}
           >
-            {source.enabled ? "Disable" : "Enable"}
+            {source.enabled ? "Disable" : "Configure"}
           </button>
         </div>
 
@@ -302,6 +327,22 @@ export function PipelineCard({
                 </div>
               )}
             </div>
+            {source.enabled && (
+              <button
+                onClick={() => setShowProperties(!showProperties)}
+                className="mt-2 flex items-center gap-1.5 text-[11px] text-text-secondary hover:text-accent transition-colors"
+              >
+                <SlidersHorizontal size={11} />
+                {showProperties ? "Hide Data Properties" : "Data Properties"}
+              </button>
+            )}
+            {showProperties && source.enabled && (
+              <SourceSettings
+                sourceId={source.id}
+                sourceName={source.name}
+                onClose={() => setShowProperties(false)}
+              />
+            )}
           </div>
         )}
 
