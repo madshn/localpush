@@ -1,4 +1,5 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
+use crate::source_config::PropertyDef;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -452,6 +453,46 @@ impl Source for ClaudeStatsSource {
             fields,
             last_updated,
         })
+    }
+
+    fn available_properties(&self) -> Vec<PropertyDef> {
+        vec![
+            PropertyDef {
+                key: "daily_breakdown".to_string(),
+                label: "Daily Breakdown".to_string(),
+                description: "14-day rolling stats with messages and tokens per day".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "model_totals".to_string(),
+                label: "Model Totals".to_string(),
+                description: "Per-model token counts and usage".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "cost_breakdown".to_string(),
+                label: "Cost Breakdown".to_string(),
+                description: "Estimated costs per model (approximate)".to_string(),
+                default_enabled: false,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "hour_breakdown".to_string(),
+                label: "Hour Breakdown".to_string(),
+                description: "Hourly activity distribution across the day".to_string(),
+                default_enabled: false,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "longest_session".to_string(),
+                label: "Longest Session".to_string(),
+                description: "Peak session details and stats".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+        ]
     }
 }
 

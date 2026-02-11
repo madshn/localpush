@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
+use crate::source_config::PropertyDef;
+
 pub mod claude_stats;
 pub mod claude_sessions;
 pub mod apple_podcasts;
@@ -64,4 +66,10 @@ pub trait Source: Send + Sync {
 
     /// Generate transparency preview showing what user will see
     fn preview(&self) -> Result<SourcePreview, SourceError>;
+
+    /// List of configurable properties for this source.
+    /// Default implementation returns empty (no configurable properties).
+    fn available_properties(&self) -> Vec<PropertyDef> {
+        vec![]
+    }
 }

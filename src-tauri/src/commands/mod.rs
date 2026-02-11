@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::bindings::SourceBinding;
+use crate::source_config::{PropertyState, SourceConfigStore};
 use crate::state::AppState;
 use crate::traits::{DeliveryStatus, Target, WebhookAuth};
 
@@ -797,5 +798,66 @@ pub fn replay_delivery(
 
     tracing::info!(event_type = %event_type, event_id = %event_id, "Replay enqueued");
     Ok(event_id)
+}
+
+/// Get available properties for a source
+#[tauri::command]
+pub fn get_source_properties(
+    state: State<'_, AppState>,
+    source_id: String,
+) -> Result<Vec<PropertyState>, String> {
+    tracing::info!(command = "get_source_properties", source_id = %source_id, "Command invoked");
+
+    let source = state
+        .source_manager
+        .get_source(&source_id)
+        .ok_or_else(|| format!("Source {} not found", source_id))?;
+
+    let available_properties = source.available_properties();
+    let config_store = SourceConfigStore::new(state.config.clone());
+    let property_states = config_store.get_all(&source_id, &available_properties);
+
+    tracing::debug!(
+        source_id = %source_id,
+        property_count = property_states.len(),
+        "Source properties retrieved"
+    );
+
+    Ok(property_states)
+}
+
+/// Set a source property on/off
+#[tauri::command]
+pub fn set_source_property(
+    state: State<'_, AppState>,
+    source_id: String,
+    property: String,
+    enabled: bool,
+) -> Result<(), String> {
+    tracing::info!(
+        command = "set_source_property",
+        source_id = %source_id,
+        property = %property,
+        enabled = enabled,
+        "Command invoked"
+    );
+
+    // Verify source exists
+    state
+        .source_manager
+        .get_source(&source_id)
+        .ok_or_else(|| format!("Source {} not found", source_id))?;
+
+    let config_store = SourceConfigStore::new(state.config.clone());
+    config_store.set_enabled(&source_id, &property, enabled)?;
+
+    tracing::info!(
+        source_id = %source_id,
+        property = %property,
+        enabled = enabled,
+        "Source property updated"
+    );
+
+    Ok(())
 }
 

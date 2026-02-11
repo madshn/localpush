@@ -43,6 +43,8 @@ fn main() {
             commands::list_all_bindings,
             commands::trigger_source_push,
             commands::replay_delivery,
+            commands::get_source_properties,
+            commands::set_source_property,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

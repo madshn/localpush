@@ -1,4 +1,5 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
+use crate::source_config::PropertyDef;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 use std::path::PathBuf;
@@ -15,6 +16,33 @@ struct LibraryStats {
     favorites: i64,
     recent_imports: i64,
     albums: i64,
+}
+
+/// Metadata for a single photo from the Photos library.
+#[derive(Debug, serde::Serialize)]
+struct PhotoMetadata {
+    uuid: String,
+    filename: Option<String>,
+    date_created: Option<String>,
+    date_added: String,
+    photo_type: String,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    faces: Vec<String>,
+    labels: Vec<String>,
+}
+
+/// A face detected in a photo.
+#[derive(Debug)]
+struct DetectedFace {
+    asset_id: i64,
+    person_name: String,
+}
+
+/// An ML-generated label for a photo.
+#[derive(Debug)]
+struct PhotoLabel {
+    content: String,
 }
 
 /// Apple Photos library source.
@@ -151,6 +179,198 @@ impl ApplePhotosSource {
             formatted
         }
     }
+
+    /// Check if a uniform type identifier indicates a screenshot.
+    fn is_screenshot(uti: &str) -> bool {
+        uti.contains("screenshot")
+            || uti.contains("public.png") && uti.contains("screen")
+    }
+
+    /// Map photo kind and subtype to a human-readable string.
+    fn photo_subtype(kind: i32, subtype: i32) -> &'static str {
+        match (kind, subtype) {
+            (0, 0) => "normal",
+            (0, 1) => "panorama",
+            (1, 2) => "slo-mo",
+            (1, 3) => "timelapse",
+            (0, 16) => "burst",
+            _ => "other",
+        }
+    }
+
+    /// Query recent photos (added in the last 7 days) with their metadata.
+    fn query_recent_photos(&self) -> Result<Vec<PhotoMetadata>, SourceError> {
+        let conn = self.open_db()?;
+
+        let cutoff = (Utc::now().timestamp() as f64) - CORE_DATA_EPOCH_OFFSET - 86400.0 * 7.0;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT Z_PK, ZUUID, ZORIGINALFILENAME, ZDATECREATED, ZADDEDDATE,
+                        ZKIND, ZKINDSUBTYPE, ZUNIFORMTYPEIDENTIFIER,
+                        ZLATITUDE, ZLONGITUDE
+                 FROM ZASSET
+                 WHERE ZADDEDDATE > ?1
+                   AND ZTRASHEDSTATE = 0
+                 ORDER BY ZADDEDDATE DESC
+                 LIMIT 50",
+            )
+            .map_err(|e| SourceError::ParseError(format!("Photo query prepare: {}", e)))?;
+
+        let mut photos = Vec::new();
+        let rows = stmt
+            .query_map([cutoff], |row| {
+                let pk: i64 = row.get(0)?;
+                let uuid: String = row.get::<_, String>(1).unwrap_or_default();
+                let filename: Option<String> = row.get(2).ok();
+                let date_created: Option<f64> = row.get(3).ok();
+                let date_added: f64 = row.get(4)?;
+                let kind: i32 = row.get(5).unwrap_or(0);
+                let subtype: i32 = row.get(6).unwrap_or(0);
+                let uti: String = row.get::<_, String>(7).unwrap_or_default();
+                let latitude: Option<f64> = row.get(8).ok();
+                let longitude: Option<f64> = row.get(9).ok();
+
+                let photo_type = if Self::is_screenshot(&uti) {
+                    "screenshot".to_string()
+                } else {
+                    Self::photo_subtype(kind, subtype).to_string()
+                };
+
+                Ok((
+                    pk,
+                    PhotoMetadata {
+                        uuid,
+                        filename,
+                        date_created: date_created.map(Self::core_data_to_iso),
+                        date_added: Self::core_data_to_iso(date_added),
+                        photo_type,
+                        latitude,
+                        longitude,
+                        faces: Vec::new(), // Populated later
+                        labels: Vec::new(), // Populated later
+                    },
+                ))
+            })
+            .map_err(|e| SourceError::ParseError(format!("Photo query: {}", e)))?;
+
+        let mut asset_ids = Vec::new();
+        for (pk, photo) in rows.flatten() {
+            asset_ids.push(pk);
+            photos.push(photo);
+        }
+
+        if !asset_ids.is_empty() {
+            // Query faces for these photos
+            let faces = self.query_faces(&conn, &asset_ids)?;
+            for face in faces {
+                // Find the index of the matching asset
+                if let Some(idx) = asset_ids
+                    .iter()
+                    .position(|&id| id == face.asset_id)
+                {
+                    if let Some(photo) = photos.get_mut(idx) {
+                        photo.faces.push(face.person_name);
+                    }
+                }
+            }
+
+            // Query ML labels
+            let labels = self.query_labels(&asset_ids)?;
+            for (idx, photo) in photos.iter_mut().enumerate() {
+                if let Some(asset_id) = asset_ids.get(idx) {
+                    photo.labels = labels
+                        .iter()
+                        .filter(|(id, _)| id == asset_id)
+                        .map(|(_, label)| label.content.clone())
+                        .collect();
+                }
+            }
+        }
+
+        info!("Loaded {} recent photos with metadata", photos.len());
+
+        Ok(photos)
+    }
+
+    /// Query detected faces for the given asset IDs.
+    fn query_faces(
+        &self,
+        conn: &Connection,
+        asset_ids: &[i64],
+    ) -> Result<Vec<DetectedFace>, SourceError> {
+        if asset_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let placeholders = asset_ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let query = format!(
+            "SELECT df.ZASSET, p.ZFULLNAME
+             FROM ZDETECTEDFACE df
+             LEFT JOIN ZPERSON p ON p.Z_PK = df.ZPERSON
+             WHERE df.ZASSET IN ({})
+               AND p.ZFULLNAME IS NOT NULL",
+            placeholders
+        );
+
+        let mut stmt = conn
+            .prepare(&query)
+            .map_err(|e| SourceError::ParseError(format!("Face query prepare: {}", e)))?;
+
+        let params: Vec<&dyn rusqlite::ToSql> =
+            asset_ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+
+        let rows = stmt
+            .query_map(&params[..], |row| {
+                Ok(DetectedFace {
+                    asset_id: row.get(0)?,
+                    person_name: row.get(1)?,
+                })
+            })
+            .map_err(|e| SourceError::ParseError(format!("Face query: {}", e)))?;
+
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Query ML labels from psi.sqlite for the given asset IDs.
+    fn query_labels(&self, asset_ids: &[i64]) -> Result<Vec<(i64, PhotoLabel)>, SourceError> {
+        if asset_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // psi.sqlite is in the search subdirectory
+        let psi_path = self
+            .db_path
+            .parent()
+            .ok_or_else(|| {
+                SourceError::ParseError("Cannot determine Photos database parent".to_string())
+            })?
+            .join("search/psi.sqlite");
+
+        if !psi_path.exists() {
+            debug!("psi.sqlite not found, skipping ML labels");
+            return Ok(Vec::new());
+        }
+
+        let _psi_conn = Connection::open_with_flags(
+            &psi_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| SourceError::ParseError(format!("psi.sqlite open: {}", e)))?;
+
+        // Note: psi.sqlite uses split UUIDs. For simplicity, we'll skip the UUID
+        // mapping for now and return empty labels. A full implementation would
+        // require converting ZASSET.ZUUID to psi's uuid_0/uuid_1 format.
+
+        // For now, return empty to avoid complexity without proper UUID mapping
+        debug!("ML label extraction requires UUID mapping - not yet implemented");
+        Ok(Vec::new())
+    }
 }
 
 impl Source for ApplePhotosSource {
@@ -163,11 +383,12 @@ impl Source for ApplePhotosSource {
     }
 
     fn watch_path(&self) -> Option<PathBuf> {
-        self.db_path.parent().map(|p| p.to_path_buf())
+        Some(self.db_path.clone())
     }
 
     fn parse(&self) -> Result<serde_json::Value, SourceError> {
         let stats = self.query_library_stats()?;
+        let recent_photos = self.query_recent_photos()?;
 
         Ok(serde_json::json!({
             "source": "apple_photos",
@@ -179,7 +400,8 @@ impl Source for ApplePhotosSource {
                 "favorites": stats.favorites,
                 "recent_imports_7d": stats.recent_imports,
                 "albums": stats.albums,
-            }
+            },
+            "recent_photos": recent_photos,
         }))
     }
 
@@ -238,6 +460,46 @@ impl Source for ApplePhotosSource {
             last_updated,
         })
     }
+
+    fn available_properties(&self) -> Vec<PropertyDef> {
+        vec![
+            PropertyDef {
+                key: "library_stats".to_string(),
+                label: "Library Statistics".to_string(),
+                description: "Aggregate counts of photos, videos, albums".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "recent_photos".to_string(),
+                label: "Recent Photos".to_string(),
+                description: "New photos with metadata from the last 7 days".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "photo_location".to_string(),
+                label: "Photo Locations".to_string(),
+                description: "GPS coordinates where photos were taken".to_string(),
+                default_enabled: false,
+                privacy_sensitive: true,
+            },
+            PropertyDef {
+                key: "photo_faces".to_string(),
+                label: "Detected Faces".to_string(),
+                description: "Names of people detected in photos".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "photo_labels".to_string(),
+                label: "ML Content Labels".to_string(),
+                description: "Machine learning tags for photo content".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+        ]
+    }
 }
 
 #[cfg(test)]
@@ -266,9 +528,12 @@ mod tests {
     }
 
     #[test]
-    fn test_watch_path_is_parent_dir() {
+    fn test_watch_path_is_database_file() {
         let source = ApplePhotosSource::new_with_path("/tmp/database/Photos.sqlite");
-        assert_eq!(source.watch_path(), Some(PathBuf::from("/tmp/database")));
+        assert_eq!(
+            source.watch_path(),
+            Some(PathBuf::from("/tmp/database/Photos.sqlite"))
+        );
     }
 
     #[test]
@@ -285,5 +550,23 @@ mod tests {
         assert_eq!(ApplePhotosSource::format_number(1_234), "1,234");
         assert_eq!(ApplePhotosSource::format_number(12_345), "12,345");
         assert_eq!(ApplePhotosSource::format_number(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn test_is_screenshot() {
+        assert!(ApplePhotosSource::is_screenshot("public.png.screenshot"));
+        assert!(ApplePhotosSource::is_screenshot("com.apple.screenshot"));
+        assert!(!ApplePhotosSource::is_screenshot("public.jpeg"));
+        assert!(!ApplePhotosSource::is_screenshot("public.heic"));
+    }
+
+    #[test]
+    fn test_photo_subtype() {
+        assert_eq!(ApplePhotosSource::photo_subtype(0, 0), "normal");
+        assert_eq!(ApplePhotosSource::photo_subtype(0, 1), "panorama");
+        assert_eq!(ApplePhotosSource::photo_subtype(1, 2), "slo-mo");
+        assert_eq!(ApplePhotosSource::photo_subtype(1, 3), "timelapse");
+        assert_eq!(ApplePhotosSource::photo_subtype(0, 16), "burst");
+        assert_eq!(ApplePhotosSource::photo_subtype(99, 99), "other");
     }
 }

@@ -16,6 +16,7 @@ pub mod mocks;
 pub mod production;
 pub mod sources;
 pub mod source_manager;
+pub mod source_config;
 pub mod target_manager;
 pub mod targets;
 

@@ -1,5 +1,7 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
+use crate::source_config::PropertyDef;
 use chrono::{DateTime, Utc};
+use regex::Regex;
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -14,6 +16,20 @@ const SEVEN_DAYS_SECS: f64 = 86_400.0 * 7.0;
 /// Maximum number of recent episodes to return.
 const RECENT_EPISODE_LIMIT: u32 = 50;
 
+/// An extracted link from an episode description.
+#[derive(Debug, Serialize, Clone)]
+struct ExtractedLink {
+    url: String,
+    source: String, // "anchor" or "bare"
+}
+
+/// A transcript snippet entry.
+#[derive(Debug, Serialize, Clone)]
+struct TranscriptSnippet {
+    speaker_id: Option<String>,
+    content: String,
+}
+
 /// A single played episode with metadata from its parent podcast.
 #[derive(Debug, Serialize)]
 struct EpisodeInfo {
@@ -22,6 +38,10 @@ struct EpisodeInfo {
     duration_seconds: Option<f64>,
     play_count: i64,
     last_played: Option<String>,
+    episode_url: Option<String>,
+    links: Vec<ExtractedLink>,
+    has_transcript: bool,
+    transcript_snippet: Option<Vec<TranscriptSnippet>>,
 }
 
 /// Apple Podcasts listening history source.
@@ -77,6 +97,69 @@ impl ApplePodcastsSource {
         .map_err(|e| SourceError::ParseError(format!("SQLite open: {}", e)))
     }
 
+    /// Extract URLs from HTML description text.
+    fn extract_urls(html_description: &str) -> Vec<ExtractedLink> {
+        let mut links = Vec::new();
+
+        // Tier 1: Extract href="..." from anchor tags
+        if let Ok(href_re) = Regex::new(r#"href="([^"]+)""#) {
+            for cap in href_re.captures_iter(html_description) {
+                if let Some(url_match) = cap.get(1) {
+                    links.push(ExtractedLink {
+                        url: url_match.as_str().to_string(),
+                        source: "anchor".to_string(),
+                    });
+                }
+            }
+        }
+
+        // Tier 2: Extract bare URLs not already captured
+        if let Ok(bare_re) = Regex::new(r#"https?://[^\s<>"']+"#) {
+            for mat in bare_re.find_iter(html_description) {
+                let url = mat.as_str().to_string();
+                if !links.iter().any(|l| l.url == url) {
+                    links.push(ExtractedLink {
+                        url,
+                        source: "bare".to_string(),
+                    });
+                }
+            }
+        }
+
+        // Filter boilerplate
+        links.retain(|l| !l.url.contains("acast.com/privacy"));
+
+        links
+    }
+
+    /// Parse transcript snippet JSON if available.
+    fn parse_transcript_snippet(json_str: &str) -> Option<Vec<TranscriptSnippet>> {
+        if json_str.is_empty() {
+            return None;
+        }
+
+        // Try to parse as JSON array
+        if let Ok(parsed) = serde_json::from_str::<Vec<serde_json::Value>>(json_str) {
+            let snippets: Vec<TranscriptSnippet> = parsed
+                .iter()
+                .filter_map(|item| {
+                    Some(TranscriptSnippet {
+                        speaker_id: item.get("speaker_id")?.as_str().map(String::from),
+                        content: item.get("content")?.as_str()?.to_string(),
+                    })
+                })
+                .collect();
+
+            if snippets.is_empty() {
+                None
+            } else {
+                Some(snippets)
+            }
+        } else {
+            None
+        }
+    }
+
     /// Query episodes played within the last 7 days, ordered most-recent first.
     fn query_recent_episodes(&self) -> Result<Vec<EpisodeInfo>, SourceError> {
         let conn = self.open_db()?;
@@ -85,7 +168,9 @@ impl ApplePodcastsSource {
 
         let mut stmt = conn
             .prepare(
-                "SELECT e.ZTITLE, p.ZTITLE, e.ZDURATION, e.ZPLAYCOUNT, e.ZLASTDATEPLAYED
+                "SELECT e.ZTITLE, p.ZTITLE, e.ZDURATION, e.ZPLAYCOUNT, e.ZLASTDATEPLAYED,
+                        e.ZWEBPAGEURL, e.ZITEMDESCRIPTION, e.ZTRANSCRIPTIDENTIFIER,
+                        e.ZENTITLEDTRANSCRIPTSNIPPET
                  FROM ZMTEPISODE e
                  LEFT JOIN ZMTPODCAST p ON e.ZPODCAST = p.Z_PK
                  WHERE e.ZLASTDATEPLAYED > ?1
@@ -96,16 +181,35 @@ impl ApplePodcastsSource {
 
         let rows = stmt
             .query_map(rusqlite::params![cutoff, RECENT_EPISODE_LIMIT], |row| {
+                let episode_title: String = row.get::<_, String>(0).unwrap_or_default();
+                let podcast_name: String = row.get::<_, String>(1).unwrap_or_default();
+                let duration_seconds: Option<f64> = row.get::<_, Option<f64>>(2).ok().flatten();
+                let play_count: i64 = row.get::<_, i64>(3).unwrap_or(0);
+                let last_played: Option<String> = row
+                    .get::<_, Option<f64>>(4)
+                    .ok()
+                    .flatten()
+                    .map(Self::core_data_to_iso);
+
+                let episode_url: Option<String> = row.get::<_, Option<String>>(5).ok().flatten();
+                let description: String = row.get::<_, String>(6).unwrap_or_default();
+                let transcript_id: Option<String> = row.get::<_, Option<String>>(7).ok().flatten();
+                let transcript_json: String = row.get::<_, String>(8).unwrap_or_default();
+
+                let links = Self::extract_urls(&description);
+                let has_transcript = transcript_id.is_some();
+                let transcript_snippet = Self::parse_transcript_snippet(&transcript_json);
+
                 Ok(EpisodeInfo {
-                    episode_title: row.get::<_, String>(0).unwrap_or_default(),
-                    podcast_name: row.get::<_, String>(1).unwrap_or_default(),
-                    duration_seconds: row.get::<_, Option<f64>>(2).ok().flatten(),
-                    play_count: row.get::<_, i64>(3).unwrap_or(0),
-                    last_played: row
-                        .get::<_, Option<f64>>(4)
-                        .ok()
-                        .flatten()
-                        .map(Self::core_data_to_iso),
+                    episode_title,
+                    podcast_name,
+                    duration_seconds,
+                    play_count,
+                    last_played,
+                    episode_url,
+                    links,
+                    has_transcript,
+                    transcript_snippet,
                 })
             })
             .map_err(|e| SourceError::ParseError(format!("SQL query: {}", e)))?;
@@ -223,6 +327,39 @@ impl Source for ApplePodcastsSource {
             last_updated,
         })
     }
+
+    fn available_properties(&self) -> Vec<PropertyDef> {
+        vec![
+            PropertyDef {
+                key: "recent_episodes".to_string(),
+                label: "Recent Episodes".to_string(),
+                description: "Episode list with play data from the last 7 days".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "episode_links".to_string(),
+                label: "Episode Links".to_string(),
+                description: "URLs extracted from episode descriptions".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "transcript_snippets".to_string(),
+                label: "Transcript Snippets".to_string(),
+                description: "Preview text from episode transcripts".to_string(),
+                default_enabled: false,
+                privacy_sensitive: false,
+            },
+            PropertyDef {
+                key: "podcast_metadata".to_string(),
+                label: "Podcast Metadata".to_string(),
+                description: "Show-level information and statistics".to_string(),
+                default_enabled: true,
+                privacy_sensitive: false,
+            },
+        ]
+    }
 }
 
 #[cfg(test)]
@@ -276,5 +413,77 @@ mod tests {
         assert_eq!(ApplePodcastsSource::format_number(42), "42");
         assert_eq!(ApplePodcastsSource::format_number(1_234), "1,234");
         assert_eq!(ApplePodcastsSource::format_number(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn test_extract_urls_from_anchor_tags() {
+        let html = r#"<a href="https://example.com/show-notes">Show notes</a>"#;
+        let links = ApplePodcastsSource::extract_urls(html);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].url, "https://example.com/show-notes");
+        assert_eq!(links[0].source, "anchor");
+    }
+
+    #[test]
+    fn test_extract_bare_urls() {
+        let text = "Check out https://example.com/page for more info";
+        let links = ApplePodcastsSource::extract_urls(text);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].url, "https://example.com/page");
+        assert_eq!(links[0].source, "bare");
+    }
+
+    #[test]
+    fn test_extract_urls_mixed() {
+        let html = r#"Visit <a href="https://site1.com">here</a> or https://site2.com"#;
+        let links = ApplePodcastsSource::extract_urls(html);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].source, "anchor");
+        assert_eq!(links[1].source, "bare");
+    }
+
+    #[test]
+    fn test_extract_urls_filters_boilerplate() {
+        let html = r#"<a href="https://acast.com/privacy">Privacy</a>"#;
+        let links = ApplePodcastsSource::extract_urls(html);
+        assert_eq!(links.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_urls_no_duplicates() {
+        let html = r#"<a href="https://example.com">Link</a> and https://example.com again"#;
+        let links = ApplePodcastsSource::extract_urls(html);
+        assert_eq!(links.len(), 1); // Only the anchor version
+        assert_eq!(links[0].source, "anchor");
+    }
+
+    #[test]
+    fn test_parse_transcript_snippet_valid() {
+        let json = r#"[{"speaker_id":"1","content":"Hello"},{"speaker_id":"2","content":"World"}]"#;
+        let snippet = ApplePodcastsSource::parse_transcript_snippet(json);
+        assert!(snippet.is_some());
+        let parsed = snippet.unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].content, "Hello");
+        assert_eq!(parsed[1].content, "World");
+    }
+
+    #[test]
+    fn test_parse_transcript_snippet_empty() {
+        let snippet = ApplePodcastsSource::parse_transcript_snippet("");
+        assert!(snippet.is_none());
+    }
+
+    #[test]
+    fn test_parse_transcript_snippet_invalid_json() {
+        let json = "not valid json";
+        let snippet = ApplePodcastsSource::parse_transcript_snippet(json);
+        assert!(snippet.is_none());
+    }
+
+    #[test]
+    fn test_extract_urls_empty_string() {
+        let links = ApplePodcastsSource::extract_urls("");
+        assert_eq!(links.len(), 0);
     }
 }
