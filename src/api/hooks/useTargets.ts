@@ -25,7 +25,7 @@ interface Endpoint {
   url: string;
   authenticated: boolean;
   auth_type?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export function useTargets() {
@@ -85,6 +85,44 @@ export function useConnectNtfy() {
         authToken: authToken || undefined,
       });
       logger.debug('ntfy target connected', { targetId: result.id });
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['targets'] });
+    },
+  });
+}
+
+export function useConnectMake() {
+  const queryClient = useQueryClient();
+
+  return useMutation<TargetInfo, Error, { zoneUrl: string; apiKey: string }>({
+    mutationFn: async ({ zoneUrl, apiKey }) => {
+      logger.debug('Connecting Make.com target', { zoneUrl });
+      const result = await invoke<TargetInfo>('connect_make_target', {
+        zoneUrl,
+        apiKey,
+      });
+      logger.debug('Make.com target connected', { targetId: result.id });
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['targets'] });
+    },
+  });
+}
+
+export function useConnectZapier() {
+  const queryClient = useQueryClient();
+
+  return useMutation<TargetInfo, Error, { name: string; webhookUrl: string }>({
+    mutationFn: async ({ name, webhookUrl }) => {
+      logger.debug('Connecting Zapier target', { name, webhookUrl });
+      const result = await invoke<TargetInfo>('connect_zapier_target', {
+        name,
+        webhookUrl,
+      });
+      logger.debug('Zapier target connected', { targetId: result.id });
       return result;
     },
     onSuccess: () => {

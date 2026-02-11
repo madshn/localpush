@@ -99,6 +99,12 @@
   }
 }
 
+@keyframes dash {
+  to {
+    stroke-dashoffset: -8;
+  }
+}
+
 /* ─── Component Layer ─── */
 @layer components {
   /* Radix Tab trigger styling */
@@ -143,6 +149,12 @@
   /* Status pulse */
   .pulse-dot {
     animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  /* Pipeline connector animated line */
+  .pulse-line {
+    stroke-dasharray: 4;
+    animation: dash 1s linear infinite;
   }
 
   /* Resize grip indicator (bottom-right corner) */

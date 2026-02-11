@@ -1,10 +1,12 @@
 import { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Webhook, Bell, Plus, X } from "lucide-react";
+import { Webhook, Bell, Plus, X, Zap, Cog } from "lucide-react";
 import { toast } from "sonner";
 import { useTargets, useTestTargetConnection } from "../api/hooks/useTargets";
 import { N8nConnect } from "./N8nConnect";
 import { NtfyConnect } from "./NtfyConnect";
+import { MakeConnect } from "./MakeConnect";
+import { ZapierConnect } from "./ZapierConnect";
 import { logger } from "../utils/logger";
 
 interface TargetInfo {
@@ -59,8 +61,12 @@ export function TargetSetup() {
               >
                 {target.target_type === "n8n" ? (
                   <Webhook size={16} className="text-accent shrink-0" />
-                ) : (
+                ) : target.target_type === "ntfy" ? (
                   <Bell size={16} className="text-success shrink-0" />
+                ) : target.target_type === "make" ? (
+                  <Cog size={16} className="text-purple-500 shrink-0" />
+                ) : (
+                  <Zap size={16} className="text-orange-500 shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium truncate">
@@ -110,6 +116,12 @@ export function TargetSetup() {
               <Tabs.Trigger value="ntfy" className="tab-trigger">
                 ntfy
               </Tabs.Trigger>
+              <Tabs.Trigger value="make" className="tab-trigger">
+                Make
+              </Tabs.Trigger>
+              <Tabs.Trigger value="zapier" className="tab-trigger">
+                Zapier
+              </Tabs.Trigger>
             </Tabs.List>
 
             <Tabs.Content value="n8n">
@@ -117,6 +129,12 @@ export function TargetSetup() {
             </Tabs.Content>
             <Tabs.Content value="ntfy">
               <NtfyConnect onConnected={handleTargetConnected} />
+            </Tabs.Content>
+            <Tabs.Content value="make">
+              <MakeConnect onConnected={handleTargetConnected} />
+            </Tabs.Content>
+            <Tabs.Content value="zapier">
+              <ZapierConnect onConnected={handleTargetConnected} />
             </Tabs.Content>
           </Tabs.Root>
         </div>
