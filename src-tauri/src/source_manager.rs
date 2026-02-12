@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::config::AppConfig;
+use crate::source_config::SourceConfigStore;
 use crate::sources::{Source, SourceError};
 use crate::traits::{DeliveryLedgerTrait, FileWatcher, FileWatcherError, LedgerError};
 
@@ -35,6 +36,21 @@ pub struct SourceInfo {
     pub enabled: bool,
     pub watch_path: Option<PathBuf>,
 }
+
+/// Metadata keys that should always be preserved in payloads (never filtered).
+/// These include structural fields that provide context but aren't user-selectable data sections.
+const METADATA_KEYS: &[&str] = &[
+    "metadata",
+    "source",
+    "version",
+    "generated_at",
+    "file_path",
+    "timestamp",
+    "last_computed_date",
+    "today",
+    "yesterday",
+    "summary",
+];
 
 /// Registry and orchestrator for data sources
 pub struct SourceManager {
@@ -131,7 +147,44 @@ impl SourceManager {
         self.enabled.lock().unwrap().contains(source_id)
     }
 
-    /// Handle a file event: lookup source, parse, enqueue to ledger
+    /// Filter payload based on enabled properties.
+    /// Returns a filtered JSON value with only enabled properties, plus metadata keys.
+    fn filter_payload(
+        &self,
+        source_id: &str,
+        payload: serde_json::Value,
+        source: &Arc<dyn Source>,
+    ) -> Result<serde_json::Value, SourceManagerError> {
+        let available_props = source.available_properties();
+
+        // If source has no configurable properties, return payload as-is
+        if available_props.is_empty() {
+            return Ok(payload);
+        }
+
+        let config_store = SourceConfigStore::new(self.config.clone());
+        let enabled_set = config_store.enabled_set(source_id, &available_props);
+
+        // Parse payload as object
+        let mut obj = match payload {
+            serde_json::Value::Object(map) => map,
+            other => return Ok(other), // Not an object, can't filter
+        };
+
+        // Remove keys that are not enabled AND not metadata
+        obj.retain(|key, _| {
+            // Always keep metadata keys
+            if METADATA_KEYS.contains(&key.as_str()) {
+                return true;
+            }
+            // Keep if enabled
+            enabled_set.contains(key)
+        });
+
+        Ok(serde_json::Value::Object(obj))
+    }
+
+    /// Handle a file event: lookup source, parse, filter properties, enqueue to ledger
     pub fn handle_file_event(&self, path: &PathBuf) -> Result<(), SourceManagerError> {
         let source_id = {
             let path_map = self.path_to_source.lock().unwrap();
@@ -157,7 +210,11 @@ impl SourceManager {
 
         tracing::debug!(source_id = %source_id, "Parsing source data for enqueue");
         let payload = source.parse()?;
-        self.ledger.enqueue(&source_id, payload)?;
+
+        // Filter payload based on enabled properties
+        let filtered_payload = self.filter_payload(&source_id, payload, &source)?;
+
+        self.ledger.enqueue(&source_id, filtered_payload)?;
         tracing::info!(source_id = %source_id, "Enqueued delivery from source");
         Ok(())
     }
@@ -165,6 +222,16 @@ impl SourceManager {
     /// Get a source by ID (for preview commands)
     pub fn get_source(&self, id: &str) -> Option<Arc<dyn Source>> {
         self.sources.lock().unwrap().get(id).cloned()
+    }
+
+    /// Parse and filter a source's payload based on enabled properties.
+    /// Used by manual push commands.
+    pub fn parse_and_filter(&self, source_id: &str) -> Result<serde_json::Value, SourceManagerError> {
+        let source = self.get_source(source_id)
+            .ok_or_else(|| SourceManagerError::SourceNotFound(source_id.to_string()))?;
+
+        let payload = source.parse()?;
+        self.filter_payload(source_id, payload, &source)
     }
 
     /// List all registered sources with their enabled state
@@ -317,5 +384,192 @@ mod tests {
         let restored = mgr.restore_enabled();
         assert_eq!(restored, vec!["claude-stats"]);
         assert!(mgr.is_enabled("claude-stats"));
+    }
+
+    #[test]
+    fn test_filter_payload_with_enabled_properties() {
+        use crate::source_config::SourceConfigStore;
+        use serde_json::json;
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let mgr = SourceManager::new(ledger, watcher, config.clone());
+        let source: Arc<dyn Source> = Arc::new(ClaudeStatsSource::new_with_path("/tmp/fake.json"));
+        mgr.register(source.clone());
+
+        // Set specific properties enabled
+        let store = SourceConfigStore::new(config);
+        store.set_enabled("claude-stats", "daily_breakdown", true).unwrap();
+        store.set_enabled("claude-stats", "model_totals", false).unwrap();
+
+        // Mock payload with multiple sections
+        let payload = json!({
+            "metadata": {"source": "localpush"},
+            "version": 2,
+            "daily_breakdown": [{"date": "2024-01-01"}],
+            "model_totals": [{"model": "opus"}],
+            "summary": {"total_sessions": 10}
+        });
+
+        let filtered = mgr.filter_payload("claude-stats", payload, &source).unwrap();
+
+        // Should keep metadata, version, and daily_breakdown (enabled)
+        assert!(filtered.get("metadata").is_some(), "metadata should be preserved");
+        assert!(filtered.get("version").is_some(), "version should be preserved");
+        assert!(filtered.get("daily_breakdown").is_some(), "daily_breakdown is enabled");
+
+        // Should remove model_totals (disabled)
+        assert!(filtered.get("model_totals").is_none(), "model_totals is disabled");
+
+        // summary is a metadata key, so it should be preserved even though not in available_properties
+        assert!(filtered.get("summary").is_some(), "summary is metadata and should be preserved");
+    }
+
+    #[test]
+    fn test_filter_payload_defaults_when_no_config() {
+        use serde_json::json;
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let mgr = SourceManager::new(ledger, watcher, config);
+        let source: Arc<dyn Source> = Arc::new(ClaudeStatsSource::new_with_path("/tmp/fake.json"));
+        mgr.register(source.clone());
+
+        // No explicit config → should use defaults from available_properties()
+        let payload = json!({
+            "metadata": {"source": "localpush"},
+            "daily_breakdown": [],
+            "model_totals": [],
+            "cost_breakdown": [],
+        });
+
+        let filtered = mgr.filter_payload("claude-stats", payload, &source).unwrap();
+
+        // daily_breakdown and model_totals default to enabled=true
+        assert!(filtered.get("daily_breakdown").is_some());
+        assert!(filtered.get("model_totals").is_some());
+
+        // cost_breakdown defaults to enabled=false
+        assert!(filtered.get("cost_breakdown").is_none());
+    }
+
+    #[test]
+    fn test_filter_payload_all_disabled_keeps_metadata() {
+        use crate::source_config::SourceConfigStore;
+        use serde_json::json;
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let mgr = SourceManager::new(ledger, watcher, config.clone());
+        let source: Arc<dyn Source> = Arc::new(ClaudeStatsSource::new_with_path("/tmp/fake.json"));
+        mgr.register(source.clone());
+
+        // Disable all properties
+        let store = SourceConfigStore::new(config);
+        let available = source.available_properties();
+        for prop in &available {
+            store.set_enabled("claude-stats", &prop.key, false).unwrap();
+        }
+
+        let payload = json!({
+            "metadata": {"source": "localpush"},
+            "version": 2,
+            "daily_breakdown": [],
+            "model_totals": [],
+        });
+
+        let filtered = mgr.filter_payload("claude-stats", payload, &source).unwrap();
+
+        // Metadata should still be there
+        assert!(filtered.get("metadata").is_some());
+        assert!(filtered.get("version").is_some());
+
+        // Data sections should be removed
+        assert!(filtered.get("daily_breakdown").is_none());
+        assert!(filtered.get("model_totals").is_none());
+    }
+
+    #[test]
+    fn test_filter_payload_no_properties_returns_unchanged() {
+        use serde_json::json;
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let mgr = SourceManager::new(ledger, watcher, config);
+
+        // Create a mock source with no configurable properties
+        use crate::sources::{Source, SourcePreview, SourceError};
+        use std::path::PathBuf;
+
+        struct NoPropertiesSource;
+        impl Source for NoPropertiesSource {
+            fn id(&self) -> &str { "test-source" }
+            fn name(&self) -> &str { "Test" }
+            fn watch_path(&self) -> Option<PathBuf> { None }
+            fn parse(&self) -> Result<serde_json::Value, SourceError> {
+                Ok(json!({"data": 1}))
+            }
+            fn preview(&self) -> Result<SourcePreview, SourceError> {
+                unimplemented!()
+            }
+            // available_properties() returns empty vec (default)
+        }
+
+        let source = Arc::new(NoPropertiesSource) as Arc<dyn Source>;
+        let payload = json!({"data": 1, "other": 2});
+
+        let filtered = mgr.filter_payload("test-source", payload.clone(), &source).unwrap();
+
+        // Should return unchanged since no properties are defined
+        assert_eq!(filtered, payload);
+    }
+
+    #[test]
+    fn test_parse_and_filter_integration() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut stats_file = NamedTempFile::new().unwrap();
+        write!(
+            stats_file,
+            r#"{{
+            "version": 2,
+            "lastComputedDate": "2026-02-04",
+            "dailyActivity": [],
+            "dailyModelTokens": [],
+            "modelUsage": {{}},
+            "totalSessions": 10,
+            "totalMessages": 100,
+            "hourCounts": {{}}
+        }}"#
+        )
+        .unwrap();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let mgr = SourceManager::new(ledger, watcher, config.clone());
+        let source = Arc::new(ClaudeStatsSource::new_with_path(stats_file.path()));
+        mgr.register(source);
+
+        // Disable daily_breakdown
+        let store = SourceConfigStore::new(config);
+        store.set_enabled("claude-stats", "daily_breakdown", false).unwrap();
+
+        let filtered = mgr.parse_and_filter("claude-stats").unwrap();
+
+        // Should have metadata
+        assert!(filtered.get("metadata").is_some());
+        assert!(filtered.get("version").is_some());
+
+        // Should NOT have daily_breakdown
+        assert!(filtered.get("daily_breakdown").is_none(), "daily_breakdown should be filtered out");
+
+        // Should have model_totals (default enabled)
+        assert!(filtered.get("model_totals").is_some());
     }
 }
