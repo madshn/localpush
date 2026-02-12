@@ -52,6 +52,11 @@ impl DeliveryLedger {
             "ALTER TABLE delivery_ledger ADD COLUMN target_endpoint_id TEXT DEFAULT NULL;"
         ); // Ignore error if column already exists
 
+        // Idempotent migration: add retry_log column (JSON array of retry attempts)
+        let _ = conn.execute_batch(
+            "ALTER TABLE delivery_ledger ADD COLUMN retry_log TEXT DEFAULT '[]';"
+        ); // Ignore error if column already exists
+
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -73,7 +78,8 @@ impl DeliveryLedger {
                 available_at INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
                 delivered_at INTEGER,
-                target_endpoint_id TEXT DEFAULT NULL
+                target_endpoint_id TEXT DEFAULT NULL,
+                retry_log TEXT DEFAULT '[]'
             );"
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
@@ -207,11 +213,11 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let now = chrono::Utc::now().timestamp();
 
         let conn = self.conn.lock().unwrap();
-        // Get current retry count and max
-        let (retry_count, max_retries): (u32, u32) = conn.query_row(
-            "SELECT retry_count, max_retries FROM delivery_ledger WHERE event_id = ?1",
+        // Get current retry count, max, and retry_log
+        let (retry_count, max_retries, retry_log_str): (u32, u32, String) = conn.query_row(
+            "SELECT retry_count, max_retries, COALESCE(retry_log, '[]') FROM delivery_ledger WHERE event_id = ?1",
             params![event_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         let new_retry_count = retry_count + 1;
@@ -224,11 +230,22 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             (DeliveryStatus::Failed, now + delay as i64)
         };
 
+        // Append to retry_log
+        let mut retry_log: Vec<serde_json::Value> = serde_json::from_str(&retry_log_str)
+            .unwrap_or_default();
+        retry_log.push(serde_json::json!({
+            "at": now,
+            "error": error,
+            "attempt": new_retry_count
+        }));
+        let new_retry_log_str = serde_json::to_string(&retry_log)
+            .unwrap_or_else(|_| "[]".to_string());
+
         conn.execute(
             "UPDATE delivery_ledger
-             SET status = ?1, retry_count = ?2, last_error = ?3, available_at = ?4
-             WHERE event_id = ?5",
-            params![new_status.as_str(), new_retry_count, error, next_available, event_id],
+             SET status = ?1, retry_count = ?2, last_error = ?3, available_at = ?4, retry_log = ?5
+             WHERE event_id = ?6",
+            params![new_status.as_str(), new_retry_count, error, next_available, new_retry_log_str, event_id],
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         tracing::warn!("Delivery failed: {} (attempt {}/{}): {}",
@@ -345,6 +362,29 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         tracing::info!("Delivery reset to pending: {}", event_id);
         Ok(())
     }
+
+    fn get_retry_history(&self, entry_id: &str) -> Result<Vec<serde_json::Value>, LedgerError> {
+        let conn = self.conn.lock().unwrap();
+
+        // Query retry_log column by entry id
+        let retry_log_str: String = conn.query_row(
+            "SELECT COALESCE(retry_log, '[]') FROM delivery_ledger WHERE id = ?1",
+            params![entry_id],
+            |row| row.get(0),
+        ).map_err(|e| {
+            if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
+                LedgerError::NotFound(entry_id.to_string())
+            } else {
+                LedgerError::DatabaseError(e.to_string())
+            }
+        })?;
+
+        // Parse JSON array
+        let retry_log: Vec<serde_json::Value> = serde_json::from_str(&retry_log_str)
+            .map_err(|e| LedgerError::DatabaseError(format!("Failed to parse retry_log: {}", e)))?;
+
+        Ok(retry_log)
+    }
 }
 
 #[cfg(test)]
@@ -416,5 +456,45 @@ mod tests {
                 assert_eq!(status, DeliveryStatus::Dlq);
             }
         }
+    }
+
+    #[test]
+    fn test_get_retry_history() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+
+        let event_id = ledger.enqueue("test.event", serde_json::json!({})).unwrap();
+
+        // Get the entry ID
+        let entries = ledger.claim_batch(1).unwrap();
+        let entry_id = entries[0].id.clone();
+
+        // Initial retry history should be empty
+        let history = ledger.get_retry_history(&entry_id).unwrap();
+        assert_eq!(history.len(), 0);
+
+        // Fail twice
+        ledger.mark_failed(&event_id, "Connection refused").unwrap();
+        ledger.claim_batch(1).unwrap();
+        ledger.mark_failed(&event_id, "Timeout").unwrap();
+
+        // Should have 2 entries in retry history
+        let history = ledger.get_retry_history(&entry_id).unwrap();
+        assert_eq!(history.len(), 2);
+
+        // Verify structure
+        assert!(history[0].get("at").is_some());
+        assert_eq!(history[0].get("error").unwrap().as_str().unwrap(), "Connection refused");
+        assert_eq!(history[0].get("attempt").unwrap().as_u64().unwrap(), 1);
+
+        assert_eq!(history[1].get("error").unwrap().as_str().unwrap(), "Timeout");
+        assert_eq!(history[1].get("attempt").unwrap().as_u64().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_get_retry_history_not_found() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+        let result = ledger.get_retry_history("nonexistent-id");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), LedgerError::NotFound(_)));
     }
 }
