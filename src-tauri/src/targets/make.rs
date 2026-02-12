@@ -48,12 +48,12 @@ struct Hook {
 
 impl MakeTarget {
     /// Create a new Make.com target with zone URL and API key
-    pub fn new(id: String, zone_url: String, api_key: String) -> Self {
+    pub fn new(id: String, zone_url: String, api_key: String, team_id: Option<String>) -> Self {
         Self {
             id,
             zone_url: zone_url.trim_end_matches('/').to_string(),
             api_key,
-            team_id: None,
+            team_id,
             client: Client::new(),
         }
     }
@@ -198,6 +198,7 @@ mod tests {
             "make-1".to_string(),
             "https://eu1.make.com".to_string(),
             "fake-key".to_string(),
+            None,
         );
 
         let hooks = vec![
@@ -235,6 +236,7 @@ mod tests {
             "t".to_string(),
             "https://eu1.make.com/".to_string(),
             "k".to_string(),
+            None,
         );
         assert_eq!(target.base_url(), "https://eu1.make.com");
     }
@@ -245,6 +247,7 @@ mod tests {
             "t".to_string(),
             "https://eu1.make.com".to_string(),
             "k".to_string(),
+            None,
         );
         assert_eq!(
             target.api_url("/teams"),

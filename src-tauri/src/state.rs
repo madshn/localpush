@@ -127,7 +127,8 @@ impl AppState {
                         tracing::debug!(target_id = %tid, cred_key = %cred_key, result = ?cred_result, "Make.com credential lookup");
                         match cred_result {
                             Ok(Some(api_key)) if !api_key.is_empty() => {
-                                let target = crate::targets::MakeTarget::new(tid.clone(), url, api_key);
+                                let team_id = config.get(&format!("target.{}.team_id", tid)).ok().flatten();
+                                let target = crate::targets::MakeTarget::new(tid.clone(), url, api_key, team_id);
                                 target_manager.register(Arc::new(target));
                                 tracing::info!(target_id = %tid, "Restored Make.com target");
                             }
