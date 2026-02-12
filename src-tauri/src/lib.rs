@@ -25,6 +25,7 @@ mod ledger;
 mod state;
 pub mod delivery_worker;
 pub mod scheduled_worker;
+pub mod error_diagnosis;
 
 use std::sync::Arc;
 use tauri::{App, Manager};

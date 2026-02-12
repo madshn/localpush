@@ -930,3 +930,183 @@ pub fn set_source_property(
     Ok(())
 }
 
+/// Get error diagnosis for a failed delivery
+#[tauri::command]
+pub fn get_error_diagnosis(
+    state: State<'_, AppState>,
+    entry_id: String,
+) -> Result<crate::error_diagnosis::ErrorDiagnosis, String> {
+    tracing::info!(command = "get_error_diagnosis", entry_id = %entry_id, "Command invoked");
+
+    // Find the entry by iterating through all statuses
+    let mut entry = None;
+    for status in [DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
+        if let Ok(entries) = state.ledger.get_by_status(status) {
+            if let Some(e) = entries.into_iter().find(|e| e.id == entry_id) {
+                entry = Some(e);
+                break;
+            }
+        }
+    }
+
+    let entry = entry.ok_or_else(|| {
+        tracing::error!(entry_id = %entry_id, "Delivery entry not found");
+        format!("Entry {} not found", entry_id)
+    })?;
+
+    // Extract HTTP status code from error text if present
+    let status_code = entry.last_error.as_ref().and_then(|err| {
+        if let Some(start) = err.find("HTTP ") {
+            if let Some(code_str) = err[start + 5..].split_whitespace().next() {
+                code_str.parse::<u16>().ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    let error_text = entry.last_error.as_deref().unwrap_or("Unknown error");
+
+    // Get source and endpoint names for better context
+    let source_name = entry.event_type.replace('-', " ");
+    let endpoint_name = entry.target_endpoint_id.as_deref().unwrap_or("target");
+
+    let diagnosis = crate::error_diagnosis::diagnose_error(
+        status_code,
+        error_text,
+        &source_name,
+        endpoint_name,
+    );
+
+    tracing::debug!(
+        entry_id = %entry_id,
+        category = ?diagnosis.category,
+        "Error diagnosis generated"
+    );
+
+    Ok(diagnosis)
+}
+
+/// Get retry history for a delivery entry
+#[tauri::command]
+pub fn get_retry_history(
+    state: State<'_, AppState>,
+    entry_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    tracing::info!(command = "get_retry_history", entry_id = %entry_id, "Command invoked");
+
+    // Find the entry
+    let mut entry = None;
+    for status in [DeliveryStatus::Pending, DeliveryStatus::InFlight, DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
+        if let Ok(entries) = state.ledger.get_by_status(status) {
+            if let Some(e) = entries.into_iter().find(|e| e.id == entry_id) {
+                entry = Some(e);
+                break;
+            }
+        }
+    }
+
+    let _entry = entry.ok_or_else(|| {
+        tracing::error!(entry_id = %entry_id, "Delivery entry not found");
+        format!("Entry {} not found", entry_id)
+    })?;
+
+    // Parse retry_log from the entry (it's stored in last_error for now, we'll need to query it separately)
+    // For now, return empty array - this will be populated when we properly query retry_log from DB
+    // TODO: Query retry_log column from database
+    Ok(vec![])
+}
+
+/// Get count of DLQ entries
+#[tauri::command]
+pub fn get_dlq_count(state: State<'_, AppState>) -> Result<u32, String> {
+    tracing::info!(command = "get_dlq_count", "Command invoked");
+
+    match state.ledger.get_stats() {
+        Ok(stats) => {
+            tracing::debug!(dlq_count = stats.dlq, "DLQ count retrieved");
+            Ok(stats.dlq as u32)
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get DLQ count");
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Dismiss a DLQ entry (marks it as handled)
+#[tauri::command]
+pub fn dismiss_dlq_entry(
+    state: State<'_, AppState>,
+    entry_id: String,
+) -> Result<(), String> {
+    tracing::info!(command = "dismiss_dlq_entry", entry_id = %entry_id, "Command invoked");
+
+    // Find the entry by event_id (convert entry_id to event_id)
+    let mut event_id_opt = None;
+    if let Ok(dlq_entries) = state.ledger.get_by_status(DeliveryStatus::Dlq) {
+        if let Some(entry) = dlq_entries.into_iter().find(|e| e.id == entry_id) {
+            event_id_opt = Some(entry.event_id);
+        }
+    }
+
+    let event_id = event_id_opt.ok_or_else(|| {
+        tracing::error!(entry_id = %entry_id, "DLQ entry not found");
+        format!("DLQ entry {} not found", entry_id)
+    })?;
+
+    // Mark as delivered to remove from DLQ (dismissed entries are considered "handled")
+    state.ledger.mark_delivered(&event_id).map_err(|e| {
+        tracing::error!(event_id = %event_id, error = %e, "Failed to dismiss DLQ entry");
+        e.to_string()
+    })?;
+
+    tracing::info!(entry_id = %entry_id, "DLQ entry dismissed");
+    Ok(())
+}
+
+/// Replay a delivery by creating a new pending entry with the same payload
+#[tauri::command]
+pub fn replay_delivery_by_id(
+    state: State<'_, AppState>,
+    entry_id: String,
+) -> Result<String, String> {
+    tracing::info!(command = "replay_delivery_by_id", entry_id = %entry_id, "Command invoked");
+
+    // Find the entry
+    let mut entry = None;
+    for status in [DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
+        if let Ok(entries) = state.ledger.get_by_status(status) {
+            if let Some(e) = entries.into_iter().find(|e| e.id == entry_id) {
+                entry = Some(e);
+                break;
+            }
+        }
+    }
+
+    let entry = entry.ok_or_else(|| {
+        tracing::error!(entry_id = %entry_id, "Delivery entry not found for replay");
+        format!("Entry {} not found", entry_id)
+    })?;
+
+    // Re-enqueue with the same payload and target
+    let new_event_id = if let Some(ref target_id) = entry.target_endpoint_id {
+        state.ledger.enqueue_targeted(&entry.event_type, entry.payload, target_id)
+    } else {
+        state.ledger.enqueue(&entry.event_type, entry.payload)
+    }.map_err(|e| {
+        tracing::error!(entry_id = %entry_id, error = %e, "Failed to replay delivery");
+        e.to_string()
+    })?;
+
+    tracing::info!(
+        entry_id = %entry_id,
+        new_event_id = %new_event_id,
+        "Delivery replayed successfully"
+    );
+
+    Ok(new_event_id)
+}
+

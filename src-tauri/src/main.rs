@@ -47,6 +47,11 @@ fn main() {
             commands::replay_delivery,
             commands::get_source_properties,
             commands::set_source_property,
+            commands::get_error_diagnosis,
+            commands::get_retry_history,
+            commands::get_dlq_count,
+            commands::dismiss_dlq_entry,
+            commands::replay_delivery_by_id,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

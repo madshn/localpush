@@ -52,6 +52,11 @@ impl DeliveryLedger {
             "ALTER TABLE delivery_ledger ADD COLUMN target_endpoint_id TEXT DEFAULT NULL;"
         ); // Ignore error if column already exists
 
+        // Idempotent migration: add retry_log column (JSON array of retry attempts)
+        let _ = conn.execute_batch(
+            "ALTER TABLE delivery_ledger ADD COLUMN retry_log TEXT DEFAULT '[]';"
+        ); // Ignore error if column already exists
+
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -73,7 +78,8 @@ impl DeliveryLedger {
                 available_at INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
                 delivered_at INTEGER,
-                target_endpoint_id TEXT DEFAULT NULL
+                target_endpoint_id TEXT DEFAULT NULL,
+                retry_log TEXT DEFAULT '[]'
             );"
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
@@ -207,11 +213,11 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let now = chrono::Utc::now().timestamp();
 
         let conn = self.conn.lock().unwrap();
-        // Get current retry count and max
-        let (retry_count, max_retries): (u32, u32) = conn.query_row(
-            "SELECT retry_count, max_retries FROM delivery_ledger WHERE event_id = ?1",
+        // Get current retry count, max, and retry_log
+        let (retry_count, max_retries, retry_log_str): (u32, u32, String) = conn.query_row(
+            "SELECT retry_count, max_retries, COALESCE(retry_log, '[]') FROM delivery_ledger WHERE event_id = ?1",
             params![event_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         let new_retry_count = retry_count + 1;
@@ -224,11 +230,22 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             (DeliveryStatus::Failed, now + delay as i64)
         };
 
+        // Append to retry_log
+        let mut retry_log: Vec<serde_json::Value> = serde_json::from_str(&retry_log_str)
+            .unwrap_or_default();
+        retry_log.push(serde_json::json!({
+            "at": now,
+            "error": error,
+            "attempt": new_retry_count
+        }));
+        let new_retry_log_str = serde_json::to_string(&retry_log)
+            .unwrap_or_else(|_| "[]".to_string());
+
         conn.execute(
             "UPDATE delivery_ledger
-             SET status = ?1, retry_count = ?2, last_error = ?3, available_at = ?4
-             WHERE event_id = ?5",
-            params![new_status.as_str(), new_retry_count, error, next_available, event_id],
+             SET status = ?1, retry_count = ?2, last_error = ?3, available_at = ?4, retry_log = ?5
+             WHERE event_id = ?6",
+            params![new_status.as_str(), new_retry_count, error, next_available, new_retry_log_str, event_id],
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         tracing::warn!("Delivery failed: {} (attempt {}/{}): {}",
