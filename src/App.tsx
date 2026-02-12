@@ -1,7 +1,11 @@
+import { useEffect, useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Workflow, Activity, Settings, ExternalLink } from "lucide-react";
+import { Workflow, Activity, Settings, ExternalLink, AlertTriangle } from "lucide-react";
 import { Toaster, toast } from "sonner";
+import { listen } from "@tauri-apps/api/event";
+import { useQueryClient } from "@tanstack/react-query";
 import { useDeliveryStatus } from "./api/hooks/useDeliveryStatus";
+import { useDlqCount } from "./api/hooks/useErrorDiagnosis";
 import { StatusIndicator } from "./components/StatusIndicator";
 import { PipelineView } from "./components/PipelineView";
 import { ActivityLog } from "./components/ActivityLog";
@@ -49,6 +53,30 @@ async function handleOpenDashboard() {
 
 function App() {
   const { data: status } = useDeliveryStatus();
+  const { data: dlqCount } = useDlqCount();
+  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState("pipeline");
+
+  // Listen for DLQ events from backend
+  useEffect(() => {
+    const unlisten = listen("delivery:dlq", (event) => {
+      logger.warn("Delivery moved to DLQ", { payload: event.payload });
+
+      // Invalidate relevant queries to update UI
+      queryClient.invalidateQueries({ queryKey: ["activityLog"] });
+      queryClient.invalidateQueries({ queryKey: ["dlqCount"] });
+      queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
+
+      // Show toast notification (optional - backend will handle macOS notification)
+      toast.error("Delivery failed after all retries", {
+        description: "Check the Activity tab for details",
+      });
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [queryClient]);
 
   if (isDashboard) {
     return (
@@ -78,15 +106,38 @@ function App() {
         </div>
       </header>
 
-      <Tabs.Root defaultValue="pipeline" className="flex-1 flex flex-col min-h-0">
+      {/* DLQ failure banner */}
+      {dlqCount && dlqCount > 0 && (
+        <div
+          onClick={() => setActiveTab("activity")}
+          className="mx-4 mt-3 px-3 py-2 bg-error-bg border border-error/20 rounded-lg cursor-pointer hover:bg-error-bg/80 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="text-error shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-error">
+                {dlqCount} {dlqCount === 1 ? "delivery" : "deliveries"} need attention
+              </p>
+            </div>
+            <span className="text-[10px] text-error/80 font-medium">View →</span>
+          </div>
+        </div>
+      )}
+
+      <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
         <Tabs.List className="flex gap-1 px-4 py-2 border-b border-border">
           <Tabs.Trigger value="pipeline" className="tab-trigger">
             <Workflow size={14} />
             Pipeline
           </Tabs.Trigger>
-          <Tabs.Trigger value="activity" className="tab-trigger">
+          <Tabs.Trigger value="activity" className="tab-trigger relative">
             <Activity size={14} />
             Activity
+            {dlqCount && dlqCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 flex items-center justify-center bg-error text-[9px] font-semibold text-white rounded-full">
+                {dlqCount}
+              </span>
+            )}
           </Tabs.Trigger>
           <Tabs.Trigger value="settings" className="tab-trigger">
             <Settings size={14} />

@@ -35,6 +35,7 @@ fn main() {
             commands::connect_ntfy_target,
             commands::connect_make_target,
             commands::connect_zapier_target,
+            commands::connect_custom_target,
             commands::connect_google_sheets_target,
             commands::list_targets,
             commands::test_target_connection,
@@ -47,6 +48,13 @@ fn main() {
             commands::replay_delivery,
             commands::get_source_properties,
             commands::set_source_property,
+            commands::get_error_diagnosis,
+            commands::get_retry_history,
+            commands::get_dlq_count,
+            commands::dismiss_dlq_entry,
+            commands::replay_delivery_by_id,
+            commands::open_feedback,
+            commands::get_timeline_gaps,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

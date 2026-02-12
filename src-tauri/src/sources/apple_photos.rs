@@ -85,7 +85,21 @@ impl ApplePhotosSource {
             &self.db_path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
-        .map_err(|e| SourceError::ParseError(format!("SQLite: {}", e)))
+        .map_err(|e| {
+            let err_msg = e.to_string();
+            // Detect permission denied errors
+            if err_msg.contains("unable to open database")
+                || err_msg.contains("disk I/O error")
+                || err_msg.contains("attempt to write a readonly database")
+            {
+                warn!("Permission denied accessing Photos database");
+                SourceError::PermissionDenied(
+                    "Cannot access Apple Photos library".to_string()
+                )
+            } else {
+                SourceError::ParseError(format!("SQLite: {}", e))
+            }
+        })
     }
 
     /// Convert a Core Data timestamp to an ISO 8601 string.
@@ -568,5 +582,22 @@ mod tests {
         assert_eq!(ApplePhotosSource::photo_subtype(1, 3), "timelapse");
         assert_eq!(ApplePhotosSource::photo_subtype(0, 16), "burst");
         assert_eq!(ApplePhotosSource::photo_subtype(99, 99), "other");
+    }
+
+    #[test]
+    fn test_available_properties_includes_privacy_flags() {
+        let source = ApplePhotosSource::new_with_path("/tmp/test.sqlite");
+        let props = source.available_properties();
+
+        // Should have at least library stats, recent photos, and privacy-sensitive properties
+        assert!(props.len() >= 3, "Expected at least 3 properties");
+
+        // Location should be marked privacy-sensitive and default disabled
+        let location_prop = props.iter().find(|p| p.key == "photo_location");
+        assert!(location_prop.is_some(), "photo_location property should exist");
+        if let Some(prop) = location_prop {
+            assert!(prop.privacy_sensitive, "Location should be privacy sensitive");
+            assert!(!prop.default_enabled, "Location should be disabled by default");
+        }
     }
 }

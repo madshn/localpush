@@ -1,5 +1,6 @@
 //! Tauri commands exposed to the frontend
 
+use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -60,6 +61,18 @@ pub struct DeliveryQueueItem {
 pub struct WebhookConfig {
     pub url: String,
     pub auth: WebhookAuth,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CustomTargetConfig {
+    pub name: String,
+    pub webhook_url: String,
+    pub auth_type: String,
+    pub auth_token: Option<String>,
+    pub auth_header_name: Option<String>,
+    pub auth_header_value: Option<String>,
+    pub auth_username: Option<String>,
+    pub auth_password: Option<String>,
 }
 
 /// Get the current delivery status
@@ -503,7 +516,7 @@ pub async fn connect_make_target(
             .unwrap_or("0")
     );
     let target =
-        crate::targets::MakeTarget::new(target_id.clone(), zone_url.clone(), api_key.clone());
+        crate::targets::MakeTarget::new(target_id.clone(), zone_url.clone(), api_key.clone(), None);
 
     // Test connection before persisting
     let info = target.test_connection().await.map_err(|e| {
@@ -511,24 +524,42 @@ pub async fn connect_make_target(
         e.to_string()
     })?;
 
+    // Extract team_id from test_connection response
+    let team_id = info.details
+        .get("team_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
     // Store API key in keychain
     let cred_key = format!("make:{}", target_id);
     if let Err(e) = state.credentials.store(&cred_key, &api_key) {
         tracing::warn!(error = %e, "Failed to store Make.com API key in keychain");
     }
 
-    // Store URL and type in config
+    // Store URL, type, and team_id in config
     let _ = state
         .config
         .set(&format!("target.{}.url", target_id), &zone_url);
     let _ = state
         .config
         .set(&format!("target.{}.type", target_id), "make");
+    if let Some(ref tid) = team_id {
+        let _ = state
+            .config
+            .set(&format!("target.{}.team_id", target_id), tid);
+        tracing::debug!(target_id = %target_id, team_id = %tid, "Persisted Make.com team_id");
+    }
 
-    // Register target
+    // Register target with team_id
+    let target_with_team_id = crate::targets::MakeTarget::new(
+        target_id.clone(),
+        zone_url.clone(),
+        api_key.clone(),
+        team_id
+    );
     state
         .target_manager
-        .register(std::sync::Arc::new(target));
+        .register(std::sync::Arc::new(target_with_team_id));
 
     tracing::info!(target_id = %target_id, "Make.com target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
@@ -580,6 +611,142 @@ pub async fn connect_zapier_target(
         .register(std::sync::Arc::new(target));
 
     tracing::info!(target_id = %target_id, "Zapier target connected successfully");
+    serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
+/// Connect a Custom webhook target (any REST endpoint with configurable auth)
+#[tauri::command]
+pub async fn connect_custom_target(
+    state: State<'_, AppState>,
+    config: CustomTargetConfig,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "connect_custom_target", url = %config.webhook_url, auth_type = %config.auth_type, "Command invoked");
+
+    let target_id = format!(
+        "custom-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("0")
+    );
+
+    // Parse auth type
+    let auth = match config.auth_type.as_str() {
+        "none" => crate::targets::AuthType::None,
+        "bearer" => {
+            let token = config.auth_token.as_ref().ok_or_else(|| {
+                tracing::error!("Bearer auth requires token");
+                "Bearer auth requires token".to_string()
+            })?.clone();
+            crate::targets::AuthType::Bearer { token }
+        }
+        "header" => {
+            let name = config.auth_header_name.as_ref().ok_or_else(|| {
+                tracing::error!("Header auth requires header name");
+                "Header auth requires header name".to_string()
+            })?.clone();
+            let value = config.auth_header_value.as_ref().ok_or_else(|| {
+                tracing::error!("Header auth requires header value");
+                "Header auth requires header value".to_string()
+            })?.clone();
+            crate::targets::AuthType::Header { name, value }
+        }
+        "basic" => {
+            let username = config.auth_username.as_ref().ok_or_else(|| {
+                tracing::error!("Basic auth requires username");
+                "Basic auth requires username".to_string()
+            })?.clone();
+            let password = config.auth_password.as_ref().ok_or_else(|| {
+                tracing::error!("Basic auth requires password");
+                "Basic auth requires password".to_string()
+            })?.clone();
+            crate::targets::AuthType::Basic { username, password }
+        }
+        _ => {
+            tracing::error!(auth_type = %config.auth_type, "Invalid auth type");
+            return Err(format!("Invalid auth type: {}", config.auth_type));
+        }
+    };
+
+    // Create target
+    let target =
+        crate::targets::CustomTarget::new(target_id.clone(), config.name.clone(), config.webhook_url.clone(), auth)
+            .map_err(|e| {
+                tracing::error!(error = %e, "Invalid custom webhook configuration");
+                e.to_string()
+            })?;
+
+    // Test connection before persisting
+    let info = target.test_connection().await.map_err(|e| {
+        tracing::error!(error = %e, "Custom webhook connection test failed");
+        e.to_string()
+    })?;
+
+    // Store specific auth secrets in credential store
+    match config.auth_type.as_str() {
+        "bearer" => {
+            if let Some(ref token) = config.auth_token {
+                let cred_key = format!("custom:{}:token", target_id);
+                if let Err(e) = state.credentials.store(&cred_key, token) {
+                    tracing::warn!(error = %e, "Failed to store bearer token in keychain");
+                }
+            }
+        }
+        "header" => {
+            if let Some(ref value) = config.auth_header_value {
+                let cred_key = format!("custom:{}:header_value", target_id);
+                if let Err(e) = state.credentials.store(&cred_key, value) {
+                    tracing::warn!(error = %e, "Failed to store header value in keychain");
+                }
+            }
+        }
+        "basic" => {
+            if let Some(ref password) = config.auth_password {
+                let cred_key = format!("custom:{}:password", target_id);
+                if let Err(e) = state.credentials.store(&cred_key, password) {
+                    tracing::warn!(error = %e, "Failed to store password in keychain");
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Store URL, name, auth_type, and other metadata in config
+    let _ = state
+        .config
+        .set(&format!("target.{}.url", target_id), &config.webhook_url);
+    let _ = state
+        .config
+        .set(&format!("target.{}.name", target_id), &config.name);
+    let _ = state
+        .config
+        .set(&format!("target.{}.type", target_id), "custom");
+    let _ = state
+        .config
+        .set(&format!("target.{}.auth_type", target_id), &config.auth_type);
+
+    // Store non-secret auth metadata
+    if config.auth_type == "header" {
+        if let Some(ref header_name) = config.auth_header_name {
+            let _ = state
+                .config
+                .set(&format!("target.{}.auth_header_name", target_id), header_name);
+        }
+    } else if config.auth_type == "basic" {
+        if let Some(ref username) = config.auth_username {
+            let _ = state
+                .config
+                .set(&format!("target.{}.auth_username", target_id), username);
+        }
+    }
+
+    // Register target
+    state
+        .target_manager
+        .register(std::sync::Arc::new(target));
+
+    tracing::info!(target_id = %target_id, "Custom webhook target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
 }
 
@@ -928,5 +1095,323 @@ pub fn set_source_property(
     );
 
     Ok(())
+}
+
+/// Get error diagnosis for a failed delivery
+#[tauri::command]
+pub fn get_error_diagnosis(
+    state: State<'_, AppState>,
+    entry_id: String,
+) -> Result<crate::error_diagnosis::ErrorDiagnosis, String> {
+    tracing::info!(command = "get_error_diagnosis", entry_id = %entry_id, "Command invoked");
+
+    // Find the entry by iterating through all statuses
+    let mut entry = None;
+    for status in [DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
+        if let Ok(entries) = state.ledger.get_by_status(status) {
+            if let Some(e) = entries.into_iter().find(|e| e.id == entry_id) {
+                entry = Some(e);
+                break;
+            }
+        }
+    }
+
+    let entry = entry.ok_or_else(|| {
+        tracing::error!(entry_id = %entry_id, "Delivery entry not found");
+        format!("Entry {} not found", entry_id)
+    })?;
+
+    // Extract HTTP status code from error text if present
+    let status_code = entry.last_error.as_ref().and_then(|err| {
+        if let Some(start) = err.find("HTTP ") {
+            if let Some(code_str) = err[start + 5..].split_whitespace().next() {
+                code_str.parse::<u16>().ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    let error_text = entry.last_error.as_deref().unwrap_or("Unknown error");
+
+    // Get source and endpoint names for better context
+    let source_name = entry.event_type.replace('-', " ");
+    let endpoint_name = entry.target_endpoint_id.as_deref().unwrap_or("target");
+
+    let diagnosis = crate::error_diagnosis::diagnose_error(
+        status_code,
+        error_text,
+        &source_name,
+        endpoint_name,
+    );
+
+    tracing::debug!(
+        entry_id = %entry_id,
+        category = ?diagnosis.category,
+        "Error diagnosis generated"
+    );
+
+    Ok(diagnosis)
+}
+
+/// Get retry history for a delivery entry
+#[tauri::command]
+pub fn get_retry_history(
+    state: State<'_, AppState>,
+    entry_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    tracing::info!(command = "get_retry_history", entry_id = %entry_id, "Command invoked");
+
+    // Query retry_log directly from the ledger
+    match state.ledger.get_retry_history(&entry_id) {
+        Ok(history) => {
+            tracing::debug!(
+                entry_id = %entry_id,
+                attempts = history.len(),
+                "Retry history retrieved"
+            );
+            Ok(history)
+        }
+        Err(e) => {
+            tracing::error!(entry_id = %entry_id, error = %e, "Failed to get retry history");
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Get count of DLQ entries
+#[tauri::command]
+pub fn get_dlq_count(state: State<'_, AppState>) -> Result<u32, String> {
+    tracing::info!(command = "get_dlq_count", "Command invoked");
+
+    match state.ledger.get_stats() {
+        Ok(stats) => {
+            tracing::debug!(dlq_count = stats.dlq, "DLQ count retrieved");
+            Ok(stats.dlq as u32)
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get DLQ count");
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Dismiss a DLQ entry (marks it as handled)
+#[tauri::command]
+pub fn dismiss_dlq_entry(
+    state: State<'_, AppState>,
+    entry_id: String,
+) -> Result<(), String> {
+    tracing::info!(command = "dismiss_dlq_entry", entry_id = %entry_id, "Command invoked");
+
+    // Find the entry by event_id (convert entry_id to event_id)
+    let mut event_id_opt = None;
+    if let Ok(dlq_entries) = state.ledger.get_by_status(DeliveryStatus::Dlq) {
+        if let Some(entry) = dlq_entries.into_iter().find(|e| e.id == entry_id) {
+            event_id_opt = Some(entry.event_id);
+        }
+    }
+
+    let event_id = event_id_opt.ok_or_else(|| {
+        tracing::error!(entry_id = %entry_id, "DLQ entry not found");
+        format!("DLQ entry {} not found", entry_id)
+    })?;
+
+    // Mark as delivered to remove from DLQ (dismissed entries are considered "handled")
+    state.ledger.mark_delivered(&event_id).map_err(|e| {
+        tracing::error!(event_id = %event_id, error = %e, "Failed to dismiss DLQ entry");
+        e.to_string()
+    })?;
+
+    tracing::info!(entry_id = %entry_id, "DLQ entry dismissed");
+    Ok(())
+}
+
+/// Replay a delivery by creating a new pending entry with the same payload
+#[tauri::command]
+pub fn replay_delivery_by_id(
+    state: State<'_, AppState>,
+    entry_id: String,
+) -> Result<String, String> {
+    tracing::info!(command = "replay_delivery_by_id", entry_id = %entry_id, "Command invoked");
+
+    // Find the entry
+    let mut entry = None;
+    for status in [DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
+        if let Ok(entries) = state.ledger.get_by_status(status) {
+            if let Some(e) = entries.into_iter().find(|e| e.id == entry_id) {
+                entry = Some(e);
+                break;
+            }
+        }
+    }
+
+    let entry = entry.ok_or_else(|| {
+        tracing::error!(entry_id = %entry_id, "Delivery entry not found for replay");
+        format!("Entry {} not found", entry_id)
+    })?;
+
+    // Re-enqueue with the same payload and target
+    let new_event_id = if let Some(ref target_id) = entry.target_endpoint_id {
+        state.ledger.enqueue_targeted(&entry.event_type, entry.payload, target_id)
+    } else {
+        state.ledger.enqueue(&entry.event_type, entry.payload)
+    }.map_err(|e| {
+        tracing::error!(entry_id = %entry_id, error = %e, "Failed to replay delivery");
+        e.to_string()
+    })?;
+
+    tracing::info!(
+        entry_id = %entry_id,
+        new_event_id = %new_event_id,
+        "Delivery replayed successfully"
+    );
+
+    Ok(new_event_id)
+}
+
+/// Open the feedback/issues page in the default browser
+#[tauri::command]
+pub fn open_feedback() -> Result<(), String> {
+    tracing::info!(command = "open_feedback", "Command invoked");
+    open::that("https://github.com/madshn/localpush/issues")
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to open feedback URL");
+            format!("Failed to open browser: {}", e)
+        })
+}
+
+/// Timeline gap structure for scheduled deliveries that didn't happen
+#[derive(Debug, Serialize)]
+pub struct TimelineGap {
+    pub source_id: String,
+    pub source_name: String,
+    pub binding_id: String,
+    pub expected_at: String,
+    pub delivery_mode: String,
+    pub last_delivered_at: Option<String>,
+}
+
+/// Get timeline gaps for scheduled deliveries
+#[tauri::command]
+pub fn get_timeline_gaps(
+    state: State<'_, AppState>,
+) -> Result<Vec<TimelineGap>, String> {
+    tracing::info!(command = "get_timeline_gaps", "Command invoked");
+
+    let mut gaps = Vec::new();
+    let bindings = state.binding_store.get_scheduled_bindings();
+    let now = chrono::Local::now();
+
+    for binding in bindings {
+        // Parse schedule time
+        let schedule_time = match &binding.schedule_time {
+            Some(t) => t,
+            None => continue,
+        };
+
+        let target_time = match chrono::NaiveTime::parse_from_str(schedule_time, "%H:%M") {
+            Ok(t) => t,
+            Err(_) => {
+                tracing::warn!(
+                    source_id = %binding.source_id,
+                    schedule_time = %schedule_time,
+                    "Invalid schedule_time format"
+                );
+                continue;
+            }
+        };
+
+        // Calculate expected delivery time for today
+        let today_target = now
+            .date_naive()
+            .and_time(target_time);
+        let today_target_ts = match today_target
+            .and_local_timezone(now.timezone())
+            .single()
+        {
+            Some(dt) => dt.timestamp(),
+            None => continue,
+        };
+
+        // Check if we're past the expected delivery time
+        if now.timestamp() < today_target_ts {
+            continue; // Not yet time for today's delivery
+        }
+
+        // For weekly: check day of week
+        if binding.delivery_mode == "weekly" {
+            let target_day = match binding.schedule_day.as_deref() {
+                Some(d) => match parse_weekday_for_gaps(d) {
+                    Some(wd) => wd,
+                    None => continue,
+                },
+                None => continue,
+            };
+
+            if now.weekday() != target_day {
+                continue; // Not the right day for weekly delivery
+            }
+        }
+
+        // Check if delivery happened after today's target time
+        let has_delivered_today = binding.last_scheduled_at
+            .map(|last| last >= today_target_ts)
+            .unwrap_or(false);
+
+        if !has_delivered_today {
+            // There's a gap - expected delivery didn't happen
+            let source = state.source_manager.get_source(&binding.source_id);
+            let source_name = source
+                .map(|s| s.name().to_string())
+                .unwrap_or_else(|| binding.source_id.clone());
+
+            gaps.push(TimelineGap {
+                source_id: binding.source_id.clone(),
+                source_name,
+                binding_id: format!("{}.{}", binding.source_id, binding.endpoint_id),
+                expected_at: chrono::DateTime::from_timestamp(today_target_ts, 0)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_default(),
+                delivery_mode: binding.delivery_mode.clone(),
+                last_delivered_at: binding.last_scheduled_at
+                    .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                    .map(|dt| dt.to_rfc3339()),
+            });
+        }
+    }
+
+    tracing::debug!(gaps_found = gaps.len(), "Timeline gaps retrieved");
+    Ok(gaps)
+}
+
+fn parse_weekday_for_gaps(s: &str) -> Option<chrono::Weekday> {
+    use chrono::Weekday;
+    match s.to_lowercase().as_str() {
+        "monday" => Some(Weekday::Mon),
+        "tuesday" => Some(Weekday::Tue),
+        "wednesday" => Some(Weekday::Wed),
+        "thursday" => Some(Weekday::Thu),
+        "friday" => Some(Weekday::Fri),
+        "saturday" => Some(Weekday::Sat),
+        "sunday" => Some(Weekday::Sun),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_weekday_for_gaps() {
+        use chrono::Weekday;
+        assert_eq!(parse_weekday_for_gaps("monday"), Some(Weekday::Mon));
+        assert_eq!(parse_weekday_for_gaps("TUESDAY"), Some(Weekday::Tue));
+        assert_eq!(parse_weekday_for_gaps("Sunday"), Some(Weekday::Sun));
+        assert_eq!(parse_weekday_for_gaps("invalid"), None);
+    }
 }
 

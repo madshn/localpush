@@ -72,11 +72,12 @@ describe("ActivityCard", () => {
     expect(screen.queryByText(/Created:/)).not.toBeInTheDocument();
   });
 
-  it("shows retry button for failed entries when expanded", () => {
+  it("routes failed entries to FailedDeliveryCard", () => {
     render(<ActivityCard entry={failedEntry} />);
 
-    fireEvent.click(screen.getByText("apple-notes"));
-    expect(screen.getByText("Retry")).toBeInTheDocument();
+    // Failed entries should be rendered by FailedDeliveryCard
+    expect(screen.getByText("apple-notes")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
   });
 
   it("does not show retry button for delivered entries", () => {
