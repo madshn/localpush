@@ -30,7 +30,7 @@ const statusStripe: Record<TrafficLightStatus, string> = {
 
 function deliveryModeBadge(binding: Binding): string | null {
   if (!binding.delivery_mode || binding.delivery_mode === "on_change")
-    return null;
+    return "Real-time";
   if (binding.delivery_mode === "daily") {
     return `Daily ${binding.schedule_time || "00:01"}`;
   }
