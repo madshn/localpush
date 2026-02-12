@@ -84,14 +84,18 @@ export function SettingsPanel() {
             </span>
           </div>
           <div className="pt-2 mt-2 border-t border-border">
-            <a
-              href="https://github.com/madshn/localpush/issues"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent hover:underline"
+            <button
+              onClick={async () => {
+                try {
+                  await invoke("open_feedback");
+                } catch (error) {
+                  console.error("Failed to open feedback page:", error);
+                }
+              }}
+              className="text-accent hover:underline cursor-pointer text-left bg-transparent border-0 p-0 font-inherit"
             >
               Report an issue
-            </a>
+            </button>
           </div>
         </div>
       </div>
