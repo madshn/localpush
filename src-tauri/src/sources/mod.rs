@@ -31,6 +31,9 @@ pub enum SourceError {
 
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+
+    #[error("Permission denied: {0}. Grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access > LocalPush")]
+    PermissionDenied(String),
 }
 
 /// A field in the source preview

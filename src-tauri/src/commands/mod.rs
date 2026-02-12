@@ -930,3 +930,14 @@ pub fn set_source_property(
     Ok(())
 }
 
+/// Open the feedback/issues page in the default browser
+#[tauri::command]
+pub fn open_feedback() -> Result<(), String> {
+    tracing::info!(command = "open_feedback", "Command invoked");
+    open::that("https://github.com/madshn/localpush/issues")
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to open feedback URL");
+            format!("Failed to open browser: {}", e)
+        })
+}
+

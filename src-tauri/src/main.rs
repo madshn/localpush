@@ -47,6 +47,7 @@ fn main() {
             commands::replay_delivery,
             commands::get_source_properties,
             commands::set_source_property,
+            commands::open_feedback,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

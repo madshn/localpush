@@ -2216,6 +2216,7 @@ dependencies = [
  "mockall",
  "notify",
  "notify-debouncer-full",
+ "open",
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
