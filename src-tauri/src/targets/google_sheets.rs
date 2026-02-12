@@ -171,8 +171,8 @@ impl GoogleSheetsTarget {
         access_token: &str,
         spreadsheet_id: &str,
         sheet_name: &str,
-    ) -> Result<(), TargetError> {
-        // Get existing sheets
+    ) -> Result<bool, TargetError> {
+        // Get existing sheets. Returns true if sheet was newly created.
         let url = format!(
             "https://sheets.googleapis.com/v4/spreadsheets/{}?fields=sheets.properties.title",
             spreadsheet_id
@@ -204,7 +204,7 @@ impl GoogleSheetsTarget {
             .any(|s| s.properties.title == sheet_name);
 
         if exists {
-            return Ok(());
+            return Ok(false); // Not newly created
         }
 
         // Create the sheet via batchUpdate
@@ -240,7 +240,7 @@ impl GoogleSheetsTarget {
         }
 
         tracing::info!(spreadsheet_id = %spreadsheet_id, sheet = %sheet_name, "Created worksheet");
-        Ok(())
+        Ok(true) // Newly created
     }
 
     /// Append a row to a worksheet in the spreadsheet.
@@ -263,6 +263,53 @@ impl GoogleSheetsTarget {
                 headers,
                 values,
             ]
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .query(&[
+                ("valueInputOption", "RAW"),
+                ("insertDataOption", "INSERT_ROWS"),
+            ])
+            .bearer_auth(access_token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| TargetError::DeliveryError(format!("Sheets API append failed: {}", e)))?;
+
+        if resp.status() == 429 {
+            return Err(TargetError::DeliveryError(
+                "Google Sheets rate limit exceeded (429). Will retry.".to_string(),
+            ));
+        }
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(TargetError::DeliveryError(format!(
+                "Sheets API append HTTP {}: {}",
+                400, body
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Append a data-only row (no headers) to an existing worksheet.
+    async fn append_data_row(
+        &self,
+        access_token: &str,
+        spreadsheet_id: &str,
+        sheet_name: &str,
+        values: &[serde_json::Value],
+    ) -> Result<(), TargetError> {
+        let range = format!("'{}'!A1", sheet_name);
+        let url = format!(
+            "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}:append",
+            spreadsheet_id, range
+        );
+
+        let body = serde_json::json!({
+            "values": [values]
         });
 
         let resp = self
@@ -395,8 +442,9 @@ impl Target for GoogleSheetsTarget {
         // Use event_type (source ID) as the worksheet tab name
         let sheet_name = event_type;
 
-        // Ensure worksheet exists
-        self.ensure_worksheet(&token, endpoint_id, sheet_name)
+        // Ensure worksheet exists (returns true if newly created)
+        let is_new = self
+            .ensure_worksheet(&token, endpoint_id, sheet_name)
             .await?;
 
         // Flatten payload to columns
@@ -409,9 +457,14 @@ impl Target for GoogleSheetsTarget {
         let headers: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
         let values: Vec<serde_json::Value> = pairs.into_iter().map(|(_, v)| v).collect();
 
-        // Append row
-        self.append_row(&token, endpoint_id, sheet_name, &headers, &values)
-            .await?;
+        // Only write header row on first push to a new worksheet
+        if is_new {
+            self.append_row(&token, endpoint_id, sheet_name, &headers, &values)
+                .await?;
+        } else {
+            self.append_data_row(&token, endpoint_id, sheet_name, &values)
+                .await?;
+        }
 
         tracing::info!(
             endpoint_id = %endpoint_id,
