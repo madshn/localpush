@@ -105,6 +105,7 @@ export function FlowModal({
               endpointName={flowState.selectedEndpointName}
               endpointUrl={flowState.selectedEndpointUrl}
               authenticated={flowState.selectedAuthenticated}
+              authType={flowState.selectedAuthType || undefined}
               existingAuthConfigured={!!flowState.existingAuthCredentialKey}
               initialHeaders={
                 flowState.customHeaders.length > 0

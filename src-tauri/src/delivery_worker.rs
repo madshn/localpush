@@ -8,12 +8,22 @@ use std::sync::Arc;
 use std::time::Duration;
 use crate::bindings::{BindingStore, SourceBinding};
 use crate::config::AppConfig;
+use crate::target_manager::TargetManager;
 use crate::traits::{CredentialStore, DeliveryLedgerTrait, WebhookClient, WebhookAuth};
 
 /// Legacy worker configuration derived from AppConfig (v0.1 fallback)
 pub struct WorkerConfig {
     pub webhook_url: String,
     pub webhook_auth: WebhookAuth,
+}
+
+/// A resolved delivery target with enough info to attempt native delivery or webhook POST.
+#[derive(Debug, Clone)]
+pub struct ResolvedTarget {
+    pub url: String,
+    pub auth: WebhookAuth,
+    pub target_id: String,
+    pub endpoint_id: String,
 }
 
 /// Resolve auth for a single binding by combining headers_json with credential store secret.
@@ -82,13 +92,18 @@ fn resolve_targets(
     binding_store: &BindingStore,
     legacy_config: Option<&WorkerConfig>,
     credentials: &dyn CredentialStore,
-) -> Vec<(String, WebhookAuth)> {
+) -> Vec<ResolvedTarget> {
     if let Some(ep_id) = target_endpoint_id {
         // Targeted delivery: find the specific binding
         let bindings = binding_store.get_for_source(source_id);
         if let Some(b) = bindings.into_iter().find(|b| b.endpoint_id == ep_id) {
             let auth = resolve_binding_auth(&b, credentials);
-            return vec![(b.endpoint_url, auth)];
+            return vec![ResolvedTarget {
+                url: b.endpoint_url,
+                auth,
+                target_id: b.target_id,
+                endpoint_id: b.endpoint_id,
+            }];
         }
         tracing::warn!(
             source_id = %source_id,
@@ -110,7 +125,12 @@ fn resolve_targets(
             .into_iter()
             .map(|b| {
                 let auth = resolve_binding_auth(&b, credentials);
-                (b.endpoint_url, auth)
+                ResolvedTarget {
+                    url: b.endpoint_url,
+                    auth,
+                    target_id: b.target_id,
+                    endpoint_id: b.endpoint_id,
+                }
             })
             .collect();
     }
@@ -118,7 +138,12 @@ fn resolve_targets(
     // v0.1 fallback: global webhook
     if let Some(cfg) = legacy_config {
         if !cfg.webhook_url.is_empty() {
-            return vec![(cfg.webhook_url.clone(), cfg.webhook_auth.clone())];
+            return vec![ResolvedTarget {
+                url: cfg.webhook_url.clone(),
+                auth: cfg.webhook_auth.clone(),
+                target_id: String::new(),
+                endpoint_id: String::new(),
+            }];
         }
     }
 
@@ -144,12 +169,15 @@ pub struct BatchResult {
 ///
 /// For each entry, resolves targets from bindings (by source_id/event_type),
 /// falling back to legacy global webhook if no bindings exist.
+/// Native targets (e.g. Google Sheets) get first chance via `deliver()`;
+/// if they return `Ok(true)`, webhook POST is skipped.
 pub async fn process_batch(
     ledger: &dyn DeliveryLedgerTrait,
     webhook: &dyn WebhookClient,
     binding_store: &BindingStore,
     legacy_config: Option<&WorkerConfig>,
     credentials: &dyn CredentialStore,
+    target_manager: Option<&TargetManager>,
     batch_size: usize,
 ) -> BatchResult {
     let entries = match ledger.claim_batch(batch_size) {
@@ -179,14 +207,48 @@ pub async fn process_batch(
         let mut any_success = false;
         let mut last_error = None;
 
-        for (url, auth) in &targets {
-            match webhook.send(url, &entry.payload, auth).await {
+        for rt in &targets {
+            // Try native delivery first (e.g. Google Sheets appends rows directly)
+            if !rt.target_id.is_empty() {
+                if let Some(tm) = target_manager {
+                    if let Some(target) = tm.get(&rt.target_id) {
+                        match target.deliver(&rt.endpoint_id, &entry.payload, &entry.event_type, credentials).await {
+                            Ok(true) => {
+                                any_success = true;
+                                tracing::debug!(
+                                    target_id = %rt.target_id,
+                                    endpoint_id = %rt.endpoint_id,
+                                    event_id = %entry.event_id,
+                                    "Delivered natively"
+                                );
+                                continue; // Skip webhook POST
+                            }
+                            Ok(false) => {
+                                // Target doesn't handle delivery — fall through to webhook
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    target_id = %rt.target_id,
+                                    event_id = %entry.event_id,
+                                    error = %e,
+                                    "Native delivery failed"
+                                );
+                                last_error = Some(e.to_string());
+                                continue; // Don't also try webhook for this target
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Webhook delivery (default path)
+            match webhook.send(&rt.url, &entry.payload, &rt.auth).await {
                 Ok(_) => {
                     any_success = true;
-                    tracing::debug!(url = %url, event_id = %entry.event_id, "Delivered");
+                    tracing::debug!(url = %rt.url, event_id = %entry.event_id, "Delivered");
                 }
                 Err(e) => {
-                    tracing::warn!(url = %url, event_id = %entry.event_id, error = %e, "Delivery failed");
+                    tracing::warn!(url = %rt.url, event_id = %entry.event_id, error = %e, "Delivery failed");
                     last_error = Some(e.to_string());
                 }
             }
@@ -269,6 +331,7 @@ pub fn spawn_worker(
     config: Arc<AppConfig>,
     binding_store: Arc<BindingStore>,
     credentials: Arc<dyn CredentialStore>,
+    target_manager: Arc<TargetManager>,
     app_handle: tauri::AppHandle,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
@@ -294,6 +357,7 @@ pub fn spawn_worker(
                 &binding_store,
                 legacy_config.as_ref(),
                 &*credentials,
+                Some(&target_manager),
                 10,
             ).await;
 
@@ -369,7 +433,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("test.event", serde_json::json!({"hello": "world"})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         assert_eq!(result.failed, 0);
@@ -385,7 +449,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         assert_eq!(result.failed, 0);
@@ -401,7 +465,7 @@ mod tests {
         ledger.enqueue("my-source", serde_json::json!({})).unwrap();
 
         // Even though legacy config is provided, binding should be used
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         // Webhook was called with binding URL, not legacy URL
@@ -418,7 +482,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("test.event", serde_json::json!({})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
 
         assert_eq!(result.delivered, 0);
         assert_eq!(result.failed, 1);
@@ -432,7 +496,7 @@ mod tests {
         let bs = test_binding_store();
         let creds = test_credentials();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
 
         assert_eq!(result.delivered, 0);
         assert_eq!(result.failed, 0);
@@ -450,7 +514,7 @@ mod tests {
         ledger.enqueue("event.b", serde_json::json!({"b": 2})).unwrap();
         ledger.enqueue("event.c", serde_json::json!({"c": 3})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
 
         assert_eq!(result.delivered, 3);
         assert_eq!(webhook.call_count(), 3);
@@ -465,7 +529,7 @@ mod tests {
         ledger.enqueue("orphan-source", serde_json::json!({})).unwrap();
 
         // No legacy config, no bindings → entry should be marked delivered (not stuck)
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
 
         assert_eq!(result.delivered, 0); // resolve_targets returns empty, skipped
         assert_eq!(result.failed, 0);
@@ -507,7 +571,7 @@ mod tests {
 
         ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         assert_eq!(result.failed, 0);
@@ -533,7 +597,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         let requests = webhook.requests();
@@ -550,7 +614,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("test.event", serde_json::json!({})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
 
         assert_eq!(result.failed, 1);
         assert!(result.dlq_transitions.is_empty(), "first failure is not DLQ");
@@ -624,5 +688,152 @@ mod tests {
 
         let wc = read_worker_config(&config).unwrap();
         assert_eq!(wc.webhook_url, "https://example.com/hook");
+    }
+
+    // ========================================================================
+    // Native delivery tests (Target.deliver() integration)
+    // ========================================================================
+
+    use crate::target_manager::TargetManager;
+    use crate::traits::{Target, TargetInfo, TargetEndpoint, TargetError, CredentialStore as CredTrait};
+
+    /// Mock target that handles delivery natively (returns Ok(true))
+    struct NativeDeliveryTarget;
+
+    #[async_trait::async_trait]
+    impl Target for NativeDeliveryTarget {
+        fn id(&self) -> &str { "native-t1" }
+        fn name(&self) -> &str { "Native Target" }
+        fn target_type(&self) -> &str { "native" }
+        fn base_url(&self) -> &str { "https://native.example.com" }
+
+        async fn test_connection(&self) -> Result<TargetInfo, TargetError> {
+            Ok(TargetInfo {
+                id: self.id().to_string(),
+                name: self.name().to_string(),
+                target_type: self.target_type().to_string(),
+                base_url: self.base_url().to_string(),
+                connected: true,
+                details: serde_json::json!({}),
+            })
+        }
+
+        async fn list_endpoints(&self) -> Result<Vec<TargetEndpoint>, TargetError> {
+            Ok(vec![])
+        }
+
+        async fn deliver(
+            &self,
+            _endpoint_id: &str,
+            _payload: &serde_json::Value,
+            _event_type: &str,
+            _credentials: &dyn CredTrait,
+        ) -> Result<bool, TargetError> {
+            Ok(true) // Handled natively
+        }
+    }
+
+    /// Mock target that does NOT handle delivery (returns Ok(false))
+    struct PassthroughTarget;
+
+    #[async_trait::async_trait]
+    impl Target for PassthroughTarget {
+        fn id(&self) -> &str { "passthrough-t1" }
+        fn name(&self) -> &str { "Passthrough Target" }
+        fn target_type(&self) -> &str { "passthrough" }
+        fn base_url(&self) -> &str { "https://passthrough.example.com" }
+
+        async fn test_connection(&self) -> Result<TargetInfo, TargetError> {
+            Ok(TargetInfo {
+                id: self.id().to_string(),
+                name: self.name().to_string(),
+                target_type: self.target_type().to_string(),
+                base_url: self.base_url().to_string(),
+                connected: true,
+                details: serde_json::json!({}),
+            })
+        }
+
+        async fn list_endpoints(&self) -> Result<Vec<TargetEndpoint>, TargetError> {
+            Ok(vec![])
+        }
+
+        // Uses default deliver() → Ok(false)
+    }
+
+    #[tokio::test]
+    async fn test_native_delivery_skips_webhook() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+        let webhook = RecordedWebhookClient::success();
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let bs = BindingStore::new(config.clone());
+        let creds = test_credentials();
+        let tm = TargetManager::new(config.clone());
+
+        // Register native target
+        tm.register(Arc::new(NativeDeliveryTarget));
+
+        // Create binding pointing to the native target
+        bs.save(&SourceBinding {
+            source_id: "my-source".to_string(),
+            target_id: "native-t1".to_string(),
+            endpoint_id: "ep1".to_string(),
+            endpoint_url: "https://native.example.com/endpoint".to_string(),
+            endpoint_name: "Native Endpoint".to_string(),
+            created_at: 1000,
+            active: true,
+            headers_json: None,
+            auth_credential_key: None,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
+        }).unwrap();
+
+        ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
+
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, Some(&tm), 10).await;
+
+        assert_eq!(result.delivered, 1, "Entry should be marked delivered");
+        assert_eq!(result.failed, 0);
+        assert_eq!(webhook.call_count(), 0, "Webhook should NOT be called when target handles delivery natively");
+    }
+
+    #[tokio::test]
+    async fn test_passthrough_target_uses_webhook() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+        let webhook = RecordedWebhookClient::success();
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let bs = BindingStore::new(config.clone());
+        let creds = test_credentials();
+        let tm = TargetManager::new(config.clone());
+
+        // Register passthrough target (deliver() returns Ok(false))
+        tm.register(Arc::new(PassthroughTarget));
+
+        // Create binding pointing to the passthrough target
+        bs.save(&SourceBinding {
+            source_id: "my-source".to_string(),
+            target_id: "passthrough-t1".to_string(),
+            endpoint_id: "ep1".to_string(),
+            endpoint_url: "https://passthrough.example.com/hook".to_string(),
+            endpoint_name: "Passthrough Endpoint".to_string(),
+            created_at: 1000,
+            active: true,
+            headers_json: None,
+            auth_credential_key: None,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
+        }).unwrap();
+
+        ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
+
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, Some(&tm), 10).await;
+
+        assert_eq!(result.delivered, 1, "Entry should be delivered via webhook");
+        assert_eq!(result.failed, 0);
+        assert_eq!(webhook.call_count(), 1, "Webhook SHOULD be called when target returns Ok(false)");
     }
 }

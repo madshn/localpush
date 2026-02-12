@@ -25,6 +25,7 @@
     "process:default",
     "updater:default",
     "fs:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "google-auth:default"
   ]
 }

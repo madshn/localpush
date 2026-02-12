@@ -146,6 +146,27 @@ impl AppState {
                             Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to restore Zapier target"),
                         }
                     }
+                    "google-sheets" => {
+                        let cred_key = format!("google-sheets:{}", tid);
+                        match credentials.retrieve(&cred_key) {
+                            Ok(Some(tokens_json)) => {
+                                match serde_json::from_str::<crate::targets::google_sheets::GoogleTokens>(&tokens_json) {
+                                    Ok(tokens) => {
+                                        let email = config.get(&format!("target.{}.email", tid))
+                                            .ok().flatten().unwrap_or_default();
+                                        let target = crate::targets::GoogleSheetsTarget::new(
+                                            tid.clone(), email, tokens,
+                                        );
+                                        target_manager.register(Arc::new(target));
+                                        tracing::info!(target_id = %tid, "Restored Google Sheets target");
+                                    }
+                                    Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to parse Google Sheets tokens"),
+                                }
+                            }
+                            Ok(None) => tracing::warn!(target_id = %tid, "Google Sheets tokens not found — target skipped"),
+                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve Google Sheets tokens"),
+                        }
+                    }
                     _ => tracing::warn!(target_id = %tid, target_type = %ttype, "Unknown target type"),
                 }
             }

@@ -11,6 +11,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_google_auth::init())
         .setup(|app| {
             setup_app(app)?;
             Ok(())
@@ -34,6 +35,7 @@ fn main() {
             commands::connect_ntfy_target,
             commands::connect_make_target,
             commands::connect_zapier_target,
+            commands::connect_google_sheets_target,
             commands::list_targets,
             commands::test_target_connection,
             commands::list_target_endpoints,

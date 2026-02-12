@@ -112,6 +112,40 @@ export function useConnectMake() {
   });
 }
 
+export function useConnectGoogleSheets() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    TargetInfo,
+    Error,
+    {
+      email: string;
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      clientId: string;
+      clientSecret: string;
+    }
+  >({
+    mutationFn: async ({ email, accessToken, refreshToken, expiresAt, clientId, clientSecret }) => {
+      logger.debug('Connecting Google Sheets target', { email });
+      const result = await invoke<TargetInfo>('connect_google_sheets_target', {
+        email,
+        accessToken,
+        refreshToken,
+        expiresAt,
+        clientId,
+        clientSecret,
+      });
+      logger.debug('Google Sheets target connected', { targetId: result.id });
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['targets'] });
+    },
+  });
+}
+
 export function useConnectZapier() {
   const queryClient = useQueryClient();
 

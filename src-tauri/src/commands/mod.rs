@@ -800,6 +800,75 @@ pub fn replay_delivery(
     Ok(event_id)
 }
 
+/// Connect a Google Sheets target (OAuth2 tokens from frontend)
+#[tauri::command]
+pub async fn connect_google_sheets_target(
+    state: State<'_, AppState>,
+    email: String,
+    access_token: String,
+    refresh_token: String,
+    expires_at: i64,
+    client_id: String,
+    client_secret: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "connect_google_sheets_target", email = %email, "Command invoked");
+
+    let target_id = format!(
+        "gsheets-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("0")
+    );
+
+    let tokens = crate::targets::google_sheets::GoogleTokens {
+        access_token,
+        refresh_token,
+        expires_at,
+        client_id,
+        client_secret,
+    };
+
+    let target = crate::targets::GoogleSheetsTarget::new(
+        target_id.clone(),
+        email.clone(),
+        tokens.clone(),
+    );
+
+    // Test connection before persisting
+    let info = target.test_connection().await.map_err(|e| {
+        tracing::error!(error = %e, "Google Sheets connection test failed");
+        e.to_string()
+    })?;
+
+    // Store tokens in credential store
+    let cred_key = format!("google-sheets:{}", target_id);
+    let tokens_json = serde_json::to_string(&tokens).map_err(|e| e.to_string())?;
+    if let Err(e) = state.credentials.store(&cred_key, &tokens_json) {
+        tracing::warn!(error = %e, "Failed to store Google Sheets tokens");
+    }
+
+    // Store config
+    let _ = state
+        .config
+        .set(&format!("target.{}.url", target_id), "https://sheets.google.com");
+    let _ = state
+        .config
+        .set(&format!("target.{}.type", target_id), "google-sheets");
+    let _ = state
+        .config
+        .set(&format!("target.{}.email", target_id), &email);
+
+    // Register target
+    state
+        .target_manager
+        .register(std::sync::Arc::new(target));
+
+    tracing::info!(target_id = %target_id, email = %email, "Google Sheets target connected successfully");
+    serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
 /// Get available properties for a source
 #[tauri::command]
 pub fn get_source_properties(

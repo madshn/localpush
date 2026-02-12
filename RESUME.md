@@ -37,6 +37,12 @@ WHAT'S NEXT:
 - Enable and test remaining sources (claude-sessions, apple-podcasts, etc.)
 - UX improvements (checkbox discoverability, onboarding flow)
 - See ROADMAP.md for phase-locked deliverables
+
+MARKETING HANDOFF FROM LEAH (2026-02-11):
+Landing page experience brief + Stitch prototypes + build handoff are ready.
+Read docs/marketing/handoff-bob-landing-page.md for the full build spec.
+Mira is setting up localpush.dev (Render + Supabase).
+Bob can build the landing page now — all visual direction and content approved.
 ```
 
 ---

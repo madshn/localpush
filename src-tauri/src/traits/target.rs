@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::CredentialStore;
+
 /// Errors that can occur when interacting with a target
 #[derive(Debug, Clone, Error)]
 pub enum TargetError {
@@ -14,6 +16,10 @@ pub enum TargetError {
     InvalidConfig(String),
     #[error("Not connected")]
     NotConnected,
+    #[error("Delivery failed: {0}")]
+    DeliveryError(String),
+    #[error("Token expired")]
+    TokenExpired,
 }
 
 /// Metadata about a registered target and its connection state
@@ -61,4 +67,20 @@ pub trait Target: Send + Sync {
 
     /// List available endpoints (e.g., ntfy topics)
     async fn list_endpoints(&self) -> Result<Vec<TargetEndpoint>, TargetError>;
+
+    /// Deliver a payload natively (non-webhook targets like Google Sheets).
+    ///
+    /// `event_type` is the source ID (e.g. "claude-stats", "apple-podcasts").
+    /// Returns `Ok(true)` if the target handled delivery (skip webhook POST).
+    /// Returns `Ok(false)` if the target doesn't handle delivery (fall through to webhook).
+    /// Default: `Ok(false)` — existing webhook targets unchanged.
+    async fn deliver(
+        &self,
+        _endpoint_id: &str,
+        _payload: &serde_json::Value,
+        _event_type: &str,
+        _credentials: &dyn CredentialStore,
+    ) -> Result<bool, TargetError> {
+        Ok(false)
+    }
 }

@@ -74,13 +74,14 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         }
     }));
 
-    // Spawn background delivery worker (binding-aware routing)
+    // Spawn background delivery worker (binding-aware routing + native delivery)
     let _worker = delivery_worker::spawn_worker(
         state.ledger.clone(),
         state.webhook_client.clone(),
         state.config.clone(),
         state.binding_store.clone(),
         state.credentials.clone(),
+        state.target_manager.clone(),
         app.handle().clone(),
     );
 

@@ -473,6 +473,7 @@ export function PipelineCard({
                 endpointName={flowState.selectedEndpointName}
                 endpointUrl={flowState.selectedEndpointUrl}
                 authenticated={flowState.selectedAuthenticated}
+                authType={flowState.selectedAuthType || undefined}
                 existingAuthConfigured={!!flowState.existingAuthCredentialKey}
                 initialHeaders={flowState.customHeaders.length > 0 ? flowState.customHeaders : undefined}
                 initialAuthName={flowState.authHeaderName || undefined}

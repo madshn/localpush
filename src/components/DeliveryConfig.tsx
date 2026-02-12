@@ -10,6 +10,7 @@ interface DeliveryConfigProps {
   endpointName: string;
   endpointUrl: string;
   authenticated: boolean;
+  authType?: string;
   existingAuthConfigured?: boolean;
   initialHeaders?: [string, string][];
   initialAuthName?: string;
@@ -34,6 +35,7 @@ export function DeliveryConfig({
   endpointName,
   endpointUrl,
   authenticated,
+  authType,
   existingAuthConfigured = false,
   initialHeaders,
   initialAuthName,
@@ -131,7 +133,8 @@ export function DeliveryConfig({
     }
   };
 
-  const authRequired = authenticated;
+  const oauthManaged = authType === "oauth2";
+  const authRequired = authenticated && !oauthManaged;
   const canContinue = !authRequired || authValue.trim() !== "" || existingAuthConfigured;
 
   const inputClass =
@@ -150,38 +153,45 @@ export function DeliveryConfig({
       </div>
 
       {/* Auth section */}
-      {authRequired && !existingAuthConfigured && (
+      {oauthManaged && (
+        <div className="text-xs text-success bg-success-bg border border-success/30 rounded-md p-2.5 mb-3">
+          Authenticated via OAuth2. No additional credentials needed.
+        </div>
+      )}
+      {!oauthManaged && authRequired && !existingAuthConfigured && (
         <div className="text-xs text-error bg-error-bg border border-error rounded-md p-2.5 mb-3">
           This endpoint requires authentication.
         </div>
       )}
-      {authRequired && existingAuthConfigured && (
+      {!oauthManaged && authRequired && existingAuthConfigured && (
         <div className="text-xs text-success bg-success-bg border border-success rounded-md p-2.5 mb-3">
           Auth token configured. Leave blank to keep existing token.
         </div>
       )}
 
-      <div className="mb-3">
-        <label className="block text-xs font-medium mb-1.5">
-          {authRequired ? "Auth Header (required)" : "Auth Header (optional)"}
-        </label>
-        <div className="flex gap-1.5 mb-1.5">
-          <input
-            type="text"
-            value={authName}
-            onChange={(e) => setAuthName(e.target.value)}
-            placeholder="Header name"
-            className={`${inputClass} !w-[140px] shrink-0`}
-          />
-          <input
-            type="password"
-            value={authValue}
-            onChange={(e) => setAuthValue(e.target.value)}
-            placeholder={existingAuthConfigured ? "Leave blank to keep existing token" : "Secret value (e.g. Bearer token...)"}
-            className={inputClass}
-          />
+      {!oauthManaged && (
+        <div className="mb-3">
+          <label className="block text-xs font-medium mb-1.5">
+            {authRequired ? "Auth Header (required)" : "Auth Header (optional)"}
+          </label>
+          <div className="flex gap-1.5 mb-1.5">
+            <input
+              type="text"
+              value={authName}
+              onChange={(e) => setAuthName(e.target.value)}
+              placeholder="Header name"
+              className={`${inputClass} !w-[140px] shrink-0`}
+            />
+            <input
+              type="password"
+              value={authValue}
+              onChange={(e) => setAuthValue(e.target.value)}
+              placeholder={existingAuthConfigured ? "Leave blank to keep existing token" : "Secret value (e.g. Bearer token...)"}
+              className={inputClass}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Custom headers */}
       <div className="mb-3">
