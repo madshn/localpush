@@ -2,8 +2,6 @@ import { useState } from "react";
 import {
   CheckCircle2,
   Clock,
-  AlertTriangle,
-  Skull,
   ChevronDown,
   ChevronRight,
   RotateCcw,
@@ -15,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ActivityEntry } from "../api/hooks/useActivityLog";
 import { logger } from "../utils/logger";
+import { FailedDeliveryCard } from "./FailedDeliveryCard";
 
 interface ActivityCardProps {
   entry: ActivityEntry;
@@ -36,16 +35,6 @@ const statusConfig = {
     color: "text-warning",
     borderColor: "",
   },
-  failed: {
-    icon: AlertTriangle,
-    color: "text-error",
-    borderColor: "border-l-2 border-l-error",
-  },
-  dlq: {
-    icon: Skull,
-    color: "text-error",
-    borderColor: "border-l-2 border-l-error",
-  },
 } as const;
 
 const statusLabels: Record<string, string> = {
@@ -61,6 +50,12 @@ export function ActivityCard({ entry }: ActivityCardProps) {
   const [payloadExpanded, setPayloadExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
+
+  // Route failed/dlq entries to the enhanced FailedDeliveryCard
+  if (entry.status === "failed" || entry.status === "dlq") {
+    return <FailedDeliveryCard entry={entry} />;
+  }
+
   const config = statusConfig[entry.status];
   const Icon = config.icon;
 
@@ -82,15 +77,6 @@ export function ActivityCard({ entry }: ActivityCardProps) {
       second: "2-digit",
       hour12: false,
     });
-
-  const handleRetry = async () => {
-    try {
-      await invoke("retry_delivery", { eventId: entry.id });
-      toast.success("Delivery queued for retry");
-    } catch (error) {
-      toast.error(`Retry failed: ${error}`);
-    }
-  };
 
   const handleReplay = async () => {
     try {
@@ -238,18 +224,6 @@ export function ActivityCard({ entry }: ActivityCardProps) {
               <RotateCcw size={12} />
               Replay
             </button>
-            {(entry.status === "failed" || entry.status === "dlq") && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRetry();
-                }}
-                className="flex items-center gap-1.5 text-[11px] font-medium text-warning hover:underline"
-              >
-                <RotateCcw size={12} />
-                Retry
-              </button>
-            )}
           </div>
         </div>
       )}

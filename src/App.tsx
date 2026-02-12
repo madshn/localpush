@@ -1,7 +1,11 @@
+import { useEffect } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Workflow, Activity, Settings, ExternalLink } from "lucide-react";
 import { Toaster, toast } from "sonner";
+import { listen } from "@tauri-apps/api/event";
+import { useQueryClient } from "@tanstack/react-query";
 import { useDeliveryStatus } from "./api/hooks/useDeliveryStatus";
+import { useDlqCount } from "./api/hooks/useErrorDiagnosis";
 import { StatusIndicator } from "./components/StatusIndicator";
 import { PipelineView } from "./components/PipelineView";
 import { ActivityLog } from "./components/ActivityLog";
@@ -49,6 +53,29 @@ async function handleOpenDashboard() {
 
 function App() {
   const { data: status } = useDeliveryStatus();
+  const { data: dlqCount } = useDlqCount();
+  const queryClient = useQueryClient();
+
+  // Listen for DLQ events from backend
+  useEffect(() => {
+    const unlisten = listen("delivery:dlq", (event) => {
+      logger.warn("Delivery moved to DLQ", { payload: event.payload });
+
+      // Invalidate relevant queries to update UI
+      queryClient.invalidateQueries({ queryKey: ["activityLog"] });
+      queryClient.invalidateQueries({ queryKey: ["dlqCount"] });
+      queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
+
+      // Show toast notification (optional - backend will handle macOS notification)
+      toast.error("Delivery failed after all retries", {
+        description: "Check the Activity tab for details",
+      });
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [queryClient]);
 
   if (isDashboard) {
     return (
@@ -84,9 +111,14 @@ function App() {
             <Workflow size={14} />
             Pipeline
           </Tabs.Trigger>
-          <Tabs.Trigger value="activity" className="tab-trigger">
+          <Tabs.Trigger value="activity" className="tab-trigger relative">
             <Activity size={14} />
             Activity
+            {dlqCount && dlqCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 flex items-center justify-center bg-error text-[9px] font-semibold text-white rounded-full">
+                {dlqCount}
+              </span>
+            )}
           </Tabs.Trigger>
           <Tabs.Trigger value="settings" className="tab-trigger">
             <Settings size={14} />
