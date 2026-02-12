@@ -504,7 +504,7 @@ pub async fn connect_make_target(
             .unwrap_or("0")
     );
     let target =
-        crate::targets::MakeTarget::new(target_id.clone(), zone_url.clone(), api_key.clone());
+        crate::targets::MakeTarget::new(target_id.clone(), zone_url.clone(), api_key.clone(), None);
 
     // Test connection before persisting
     let info = target.test_connection().await.map_err(|e| {
@@ -512,24 +512,42 @@ pub async fn connect_make_target(
         e.to_string()
     })?;
 
+    // Extract team_id from test_connection response
+    let team_id = info.details
+        .get("team_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
     // Store API key in keychain
     let cred_key = format!("make:{}", target_id);
     if let Err(e) = state.credentials.store(&cred_key, &api_key) {
         tracing::warn!(error = %e, "Failed to store Make.com API key in keychain");
     }
 
-    // Store URL and type in config
+    // Store URL, type, and team_id in config
     let _ = state
         .config
         .set(&format!("target.{}.url", target_id), &zone_url);
     let _ = state
         .config
         .set(&format!("target.{}.type", target_id), "make");
+    if let Some(ref tid) = team_id {
+        let _ = state
+            .config
+            .set(&format!("target.{}.team_id", target_id), tid);
+        tracing::debug!(target_id = %target_id, team_id = %tid, "Persisted Make.com team_id");
+    }
 
-    // Register target
+    // Register target with team_id
+    let target_with_team_id = crate::targets::MakeTarget::new(
+        target_id.clone(),
+        zone_url.clone(),
+        api_key.clone(),
+        team_id
+    );
     state
         .target_manager
-        .register(std::sync::Arc::new(target));
+        .register(std::sync::Arc::new(target_with_team_id));
 
     tracing::info!(target_id = %target_id, "Make.com target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
