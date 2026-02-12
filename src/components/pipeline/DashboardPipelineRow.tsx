@@ -1,10 +1,11 @@
-import { Pencil, Zap } from "lucide-react";
+import { Pencil, Zap, AlertTriangle } from "lucide-react";
 import { SourceCard } from "./SourceCard";
 import { TargetCard } from "./TargetCard";
 import { AddTargetCard } from "./AddTargetCard";
 import { PipelineConnector } from "./PipelineConnector";
 import type { SourceData, SourceCategory, TrafficLightStatus } from "./types";
 import type { Binding } from "../../api/hooks/useBindings";
+import type { TimelineGap } from "../../api/hooks/useTimelineGaps";
 
 interface DashboardPipelineRowProps {
   source: SourceData;
@@ -12,10 +13,12 @@ interface DashboardPipelineRowProps {
   bindings: Binding[];
   trafficLightStatus: TrafficLightStatus;
   isPushing: boolean;
+  gap: TimelineGap | null;
   onAddTarget: (sourceId: string) => void;
   onEditBinding: (sourceId: string, endpointId: string) => void;
   onPushNow: (sourceId: string) => void;
   onEnableClick: (sourceId: string, isEnabled: boolean) => void;
+  onViewActivity?: () => void;
 }
 
 const statusStripe: Record<TrafficLightStatus, string> = {
@@ -47,12 +50,22 @@ export function DashboardPipelineRow({
   bindings,
   trafficLightStatus,
   isPushing,
+  gap,
   onAddTarget,
   onEditBinding,
   onPushNow,
   onEnableClick,
+  onViewActivity,
 }: DashboardPipelineRowProps) {
   const isActive = category === "active" && bindings.length > 0;
+
+  const formatGapDate = (isoDate: string): string => {
+    const date = new Date(isoDate);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  };
 
   return (
     <div className="relative bg-bg-secondary border border-border rounded-lg overflow-hidden">
@@ -102,6 +115,39 @@ export function DashboardPipelineRow({
             <AddTargetCard onClick={() => onAddTarget(source.id)} />
           )}
         </div>
+
+        {/* Timeline gap warning */}
+        {gap && (
+          <div className="mt-2 px-2 py-1.5 bg-warning-bg border border-warning/20 rounded">
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle size={12} className="text-warning mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-medium text-warning mb-0.5">
+                  Missing: {gap.delivery_mode} delivery for{" "}
+                  {formatGapDate(gap.expected_at)}
+                </p>
+                <p className="text-[9px] text-text-secondary">
+                  Expected at {new Date(gap.expected_at).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" })}
+                  {gap.last_delivered_at && (
+                    <>
+                      {" "}
+                      — last delivered{" "}
+                      {formatGapDate(gap.last_delivered_at)}
+                    </>
+                  )}
+                </p>
+              </div>
+              {onViewActivity && (
+                <button
+                  onClick={onViewActivity}
+                  className="text-[9px] font-medium text-warning hover:underline shrink-0"
+                >
+                  View
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Action row */}
         <div className="flex items-center justify-between mt-1.5 pl-1">

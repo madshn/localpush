@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Workflow, Activity, Settings, ExternalLink } from "lucide-react";
+import { Workflow, Activity, Settings, ExternalLink, AlertTriangle } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { listen } from "@tauri-apps/api/event";
 import { useQueryClient } from "@tanstack/react-query";
@@ -55,6 +55,7 @@ function App() {
   const { data: status } = useDeliveryStatus();
   const { data: dlqCount } = useDlqCount();
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState("pipeline");
 
   // Listen for DLQ events from backend
   useEffect(() => {
@@ -105,7 +106,25 @@ function App() {
         </div>
       </header>
 
-      <Tabs.Root defaultValue="pipeline" className="flex-1 flex flex-col min-h-0">
+      {/* DLQ failure banner */}
+      {dlqCount && dlqCount > 0 && (
+        <div
+          onClick={() => setActiveTab("activity")}
+          className="mx-4 mt-3 px-3 py-2 bg-error-bg border border-error/20 rounded-lg cursor-pointer hover:bg-error-bg/80 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="text-error shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-error">
+                {dlqCount} {dlqCount === 1 ? "delivery" : "deliveries"} need attention
+              </p>
+            </div>
+            <span className="text-[10px] text-error/80 font-medium">View →</span>
+          </div>
+        </div>
+      )}
+
+      <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
         <Tabs.List className="flex gap-1 px-4 py-2 border-b border-border">
           <Tabs.Trigger value="pipeline" className="tab-trigger">
             <Workflow size={14} />

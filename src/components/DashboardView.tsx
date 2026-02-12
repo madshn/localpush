@@ -8,6 +8,7 @@ import {
   useRemoveBinding,
   type Binding,
 } from "../api/hooks/useBindings";
+import { useTimelineGaps } from "../api/hooks/useTimelineGaps";
 import { StatusIndicator } from "./StatusIndicator";
 import { SummaryStats } from "./SummaryStats";
 import { SkeletonCard } from "./Skeleton";
@@ -63,10 +64,18 @@ function getBindingsForSource(
   return allBindings?.filter((b) => b.source_id === sourceId) || [];
 }
 
+function getGapForSource(
+  sourceId: string,
+  gaps: import("../api/hooks/useTimelineGaps").TimelineGap[] | undefined
+): import("../api/hooks/useTimelineGaps").TimelineGap | null {
+  return gaps?.find((g) => g.source_id === sourceId) || null;
+}
+
 export function DashboardView() {
   const { data: status } = useDeliveryStatus();
   const { data: sources, isLoading } = useSources();
   const { data: allBindings } = useAllBindings();
+  const { data: gaps } = useTimelineGaps();
   const queryClient = useQueryClient();
   const createBinding = useCreateBinding();
   const removeBinding = useRemoveBinding();
@@ -149,6 +158,7 @@ export function DashboardView() {
                     source={source}
                     category={category}
                     bindings={getBindingsForSource(source.id, allBindings)}
+                    gap={getGapForSource(source.id, gaps)}
                     trafficLightStatus={flow.getTrafficLightStatus(
                       source.id,
                       source.enabled
@@ -200,6 +210,7 @@ export function DashboardView() {
                     source={source}
                     category={category}
                     bindings={[]}
+                    gap={null}
                     trafficLightStatus="grey"
                     isPushing={false}
                     onAddTarget={flow.handleAddTarget}
