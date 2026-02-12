@@ -1,5 +1,6 @@
 //! Tauri commands exposed to the frontend
 
+use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -997,26 +998,21 @@ pub fn get_retry_history(
 ) -> Result<Vec<serde_json::Value>, String> {
     tracing::info!(command = "get_retry_history", entry_id = %entry_id, "Command invoked");
 
-    // Find the entry
-    let mut entry = None;
-    for status in [DeliveryStatus::Pending, DeliveryStatus::InFlight, DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
-        if let Ok(entries) = state.ledger.get_by_status(status) {
-            if let Some(e) = entries.into_iter().find(|e| e.id == entry_id) {
-                entry = Some(e);
-                break;
-            }
+    // Query retry_log directly from the ledger
+    match state.ledger.get_retry_history(&entry_id) {
+        Ok(history) => {
+            tracing::debug!(
+                entry_id = %entry_id,
+                attempts = history.len(),
+                "Retry history retrieved"
+            );
+            Ok(history)
+        }
+        Err(e) => {
+            tracing::error!(entry_id = %entry_id, error = %e, "Failed to get retry history");
+            Err(e.to_string())
         }
     }
-
-    let _entry = entry.ok_or_else(|| {
-        tracing::error!(entry_id = %entry_id, "Delivery entry not found");
-        format!("Entry {} not found", entry_id)
-    })?;
-
-    // Parse retry_log from the entry (it's stored in last_error for now, we'll need to query it separately)
-    // For now, return empty array - this will be populated when we properly query retry_log from DB
-    // TODO: Query retry_log column from database
-    Ok(vec![])
 }
 
 /// Get count of DLQ entries
@@ -1119,5 +1115,137 @@ pub fn open_feedback() -> Result<(), String> {
             tracing::error!(error = %e, "Failed to open feedback URL");
             format!("Failed to open browser: {}", e)
         })
+}
+
+/// Timeline gap structure for scheduled deliveries that didn't happen
+#[derive(Debug, Serialize)]
+pub struct TimelineGap {
+    pub source_id: String,
+    pub source_name: String,
+    pub binding_id: String,
+    pub expected_at: String,
+    pub delivery_mode: String,
+    pub last_delivered_at: Option<String>,
+}
+
+/// Get timeline gaps for scheduled deliveries
+#[tauri::command]
+pub fn get_timeline_gaps(
+    state: State<'_, AppState>,
+) -> Result<Vec<TimelineGap>, String> {
+    tracing::info!(command = "get_timeline_gaps", "Command invoked");
+
+    let mut gaps = Vec::new();
+    let bindings = state.binding_store.get_scheduled_bindings();
+    let now = chrono::Local::now();
+
+    for binding in bindings {
+        // Parse schedule time
+        let schedule_time = match &binding.schedule_time {
+            Some(t) => t,
+            None => continue,
+        };
+
+        let target_time = match chrono::NaiveTime::parse_from_str(schedule_time, "%H:%M") {
+            Ok(t) => t,
+            Err(_) => {
+                tracing::warn!(
+                    source_id = %binding.source_id,
+                    schedule_time = %schedule_time,
+                    "Invalid schedule_time format"
+                );
+                continue;
+            }
+        };
+
+        // Calculate expected delivery time for today
+        let today_target = now
+            .date_naive()
+            .and_time(target_time);
+        let today_target_ts = match today_target
+            .and_local_timezone(now.timezone())
+            .single()
+        {
+            Some(dt) => dt.timestamp(),
+            None => continue,
+        };
+
+        // Check if we're past the expected delivery time
+        if now.timestamp() < today_target_ts {
+            continue; // Not yet time for today's delivery
+        }
+
+        // For weekly: check day of week
+        if binding.delivery_mode == "weekly" {
+            let target_day = match binding.schedule_day.as_deref() {
+                Some(d) => match parse_weekday_for_gaps(d) {
+                    Some(wd) => wd,
+                    None => continue,
+                },
+                None => continue,
+            };
+
+            if now.weekday() != target_day {
+                continue; // Not the right day for weekly delivery
+            }
+        }
+
+        // Check if delivery happened after today's target time
+        let has_delivered_today = binding.last_scheduled_at
+            .map(|last| last >= today_target_ts)
+            .unwrap_or(false);
+
+        if !has_delivered_today {
+            // There's a gap - expected delivery didn't happen
+            let source = state.source_manager.get_source(&binding.source_id);
+            let source_name = source
+                .map(|s| s.name().to_string())
+                .unwrap_or_else(|| binding.source_id.clone());
+
+            gaps.push(TimelineGap {
+                source_id: binding.source_id.clone(),
+                source_name,
+                binding_id: format!("{}.{}", binding.source_id, binding.endpoint_id),
+                expected_at: chrono::DateTime::from_timestamp(today_target_ts, 0)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_default(),
+                delivery_mode: binding.delivery_mode.clone(),
+                last_delivered_at: binding.last_scheduled_at
+                    .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                    .map(|dt| dt.to_rfc3339()),
+            });
+        }
+    }
+
+    tracing::debug!(gaps_found = gaps.len(), "Timeline gaps retrieved");
+    Ok(gaps)
+}
+
+fn parse_weekday_for_gaps(s: &str) -> Option<chrono::Weekday> {
+    use chrono::Weekday;
+    match s.to_lowercase().as_str() {
+        "monday" => Some(Weekday::Mon),
+        "tuesday" => Some(Weekday::Tue),
+        "wednesday" => Some(Weekday::Wed),
+        "thursday" => Some(Weekday::Thu),
+        "friday" => Some(Weekday::Fri),
+        "saturday" => Some(Weekday::Sat),
+        "sunday" => Some(Weekday::Sun),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_weekday_for_gaps() {
+        use chrono::Weekday;
+        assert_eq!(parse_weekday_for_gaps("monday"), Some(Weekday::Mon));
+        assert_eq!(parse_weekday_for_gaps("TUESDAY"), Some(Weekday::Tue));
+        assert_eq!(parse_weekday_for_gaps("Sunday"), Some(Weekday::Sun));
+        assert_eq!(parse_weekday_for_gaps("invalid"), None);
+    }
 }
 
