@@ -96,6 +96,9 @@ pub trait DeliveryLedgerTrait: Send + Sync {
 
     /// Reset a failed/dlq entry back to pending for manual retry
     fn reset_to_pending(&self, event_id: &str) -> Result<(), LedgerError>;
+
+    /// Get retry history for a specific entry
+    fn get_retry_history(&self, entry_id: &str) -> Result<Vec<serde_json::Value>, LedgerError>;
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
