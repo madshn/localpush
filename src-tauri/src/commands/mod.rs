@@ -63,6 +63,18 @@ pub struct WebhookConfig {
     pub auth: WebhookAuth,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CustomTargetConfig {
+    pub name: String,
+    pub webhook_url: String,
+    pub auth_type: String,
+    pub auth_token: Option<String>,
+    pub auth_header_name: Option<String>,
+    pub auth_header_value: Option<String>,
+    pub auth_username: Option<String>,
+    pub auth_password: Option<String>,
+}
+
 /// Get the current delivery status
 #[tauri::command]
 pub fn get_delivery_status(state: State<'_, AppState>) -> Result<DeliveryStatusResponse, String> {
@@ -599,6 +611,142 @@ pub async fn connect_zapier_target(
         .register(std::sync::Arc::new(target));
 
     tracing::info!(target_id = %target_id, "Zapier target connected successfully");
+    serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
+/// Connect a Custom webhook target (any REST endpoint with configurable auth)
+#[tauri::command]
+pub async fn connect_custom_target(
+    state: State<'_, AppState>,
+    config: CustomTargetConfig,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "connect_custom_target", url = %config.webhook_url, auth_type = %config.auth_type, "Command invoked");
+
+    let target_id = format!(
+        "custom-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("0")
+    );
+
+    // Parse auth type
+    let auth = match config.auth_type.as_str() {
+        "none" => crate::targets::AuthType::None,
+        "bearer" => {
+            let token = config.auth_token.as_ref().ok_or_else(|| {
+                tracing::error!("Bearer auth requires token");
+                "Bearer auth requires token".to_string()
+            })?.clone();
+            crate::targets::AuthType::Bearer { token }
+        }
+        "header" => {
+            let name = config.auth_header_name.as_ref().ok_or_else(|| {
+                tracing::error!("Header auth requires header name");
+                "Header auth requires header name".to_string()
+            })?.clone();
+            let value = config.auth_header_value.as_ref().ok_or_else(|| {
+                tracing::error!("Header auth requires header value");
+                "Header auth requires header value".to_string()
+            })?.clone();
+            crate::targets::AuthType::Header { name, value }
+        }
+        "basic" => {
+            let username = config.auth_username.as_ref().ok_or_else(|| {
+                tracing::error!("Basic auth requires username");
+                "Basic auth requires username".to_string()
+            })?.clone();
+            let password = config.auth_password.as_ref().ok_or_else(|| {
+                tracing::error!("Basic auth requires password");
+                "Basic auth requires password".to_string()
+            })?.clone();
+            crate::targets::AuthType::Basic { username, password }
+        }
+        _ => {
+            tracing::error!(auth_type = %config.auth_type, "Invalid auth type");
+            return Err(format!("Invalid auth type: {}", config.auth_type));
+        }
+    };
+
+    // Create target
+    let target =
+        crate::targets::CustomTarget::new(target_id.clone(), config.name.clone(), config.webhook_url.clone(), auth)
+            .map_err(|e| {
+                tracing::error!(error = %e, "Invalid custom webhook configuration");
+                e.to_string()
+            })?;
+
+    // Test connection before persisting
+    let info = target.test_connection().await.map_err(|e| {
+        tracing::error!(error = %e, "Custom webhook connection test failed");
+        e.to_string()
+    })?;
+
+    // Store specific auth secrets in credential store
+    match config.auth_type.as_str() {
+        "bearer" => {
+            if let Some(ref token) = config.auth_token {
+                let cred_key = format!("custom:{}:token", target_id);
+                if let Err(e) = state.credentials.store(&cred_key, token) {
+                    tracing::warn!(error = %e, "Failed to store bearer token in keychain");
+                }
+            }
+        }
+        "header" => {
+            if let Some(ref value) = config.auth_header_value {
+                let cred_key = format!("custom:{}:header_value", target_id);
+                if let Err(e) = state.credentials.store(&cred_key, value) {
+                    tracing::warn!(error = %e, "Failed to store header value in keychain");
+                }
+            }
+        }
+        "basic" => {
+            if let Some(ref password) = config.auth_password {
+                let cred_key = format!("custom:{}:password", target_id);
+                if let Err(e) = state.credentials.store(&cred_key, password) {
+                    tracing::warn!(error = %e, "Failed to store password in keychain");
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Store URL, name, auth_type, and other metadata in config
+    let _ = state
+        .config
+        .set(&format!("target.{}.url", target_id), &config.webhook_url);
+    let _ = state
+        .config
+        .set(&format!("target.{}.name", target_id), &config.name);
+    let _ = state
+        .config
+        .set(&format!("target.{}.type", target_id), "custom");
+    let _ = state
+        .config
+        .set(&format!("target.{}.auth_type", target_id), &config.auth_type);
+
+    // Store non-secret auth metadata
+    if config.auth_type == "header" {
+        if let Some(ref header_name) = config.auth_header_name {
+            let _ = state
+                .config
+                .set(&format!("target.{}.auth_header_name", target_id), header_name);
+        }
+    } else if config.auth_type == "basic" {
+        if let Some(ref username) = config.auth_username {
+            let _ = state
+                .config
+                .set(&format!("target.{}.auth_username", target_id), username);
+        }
+    }
+
+    // Register target
+    state
+        .target_manager
+        .register(std::sync::Arc::new(target));
+
+    tracing::info!(target_id = %target_id, "Custom webhook target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
 }
 

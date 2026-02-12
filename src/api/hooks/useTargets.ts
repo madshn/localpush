@@ -165,6 +165,53 @@ export function useConnectZapier() {
   });
 }
 
+export function useConnectCustom() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    TargetInfo,
+    Error,
+    {
+      name: string;
+      webhookUrl: string;
+      authType: string;
+      authToken?: string;
+      authHeaderName?: string;
+      authHeaderValue?: string;
+      authUsername?: string;
+      authPassword?: string;
+    }
+  >({
+    mutationFn: async ({
+      name,
+      webhookUrl,
+      authType,
+      authToken,
+      authHeaderName,
+      authHeaderValue,
+      authUsername,
+      authPassword,
+    }) => {
+      logger.debug('Connecting Custom target', { name, webhookUrl, authType });
+      const result = await invoke<TargetInfo>('connect_custom_target', {
+        name,
+        webhookUrl,
+        authType,
+        authToken,
+        authHeaderName,
+        authHeaderValue,
+        authUsername,
+        authPassword,
+      });
+      logger.debug('Custom target connected', { targetId: result.id });
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['targets'] });
+    },
+  });
+}
+
 export function useTestTargetConnection() {
   return useMutation<TargetInfo, Error, string>({
     mutationFn: async (targetId) => {

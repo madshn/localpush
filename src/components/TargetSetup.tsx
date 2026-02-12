@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Webhook, Bell, Plus, X, Zap, Cog, Table } from "lucide-react";
+import { Webhook, Bell, Plus, X, Zap, Cog, Table, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { useTargets, useTestTargetConnection } from "../api/hooks/useTargets";
 import { N8nConnect } from "./N8nConnect";
@@ -8,6 +8,7 @@ import { NtfyConnect } from "./NtfyConnect";
 import { MakeConnect } from "./MakeConnect";
 import { ZapierConnect } from "./ZapierConnect";
 import { GoogleSheetsConnect } from "./GoogleSheetsConnect";
+import { CustomConnect } from "./CustomConnect";
 import { logger } from "../utils/logger";
 
 interface TargetInfo {
@@ -68,6 +69,8 @@ export function TargetSetup() {
                   <Cog size={16} className="text-purple-500 shrink-0" />
                 ) : target.target_type === "google-sheets" ? (
                   <Table size={16} className="text-green-600 shrink-0" />
+                ) : target.target_type === "custom" ? (
+                  <Globe size={16} className="text-blue-500 shrink-0" />
                 ) : (
                   <Zap size={16} className="text-orange-500 shrink-0" />
                 )}
@@ -133,6 +136,10 @@ export function TargetSetup() {
                 <Table size={12} className="shrink-0" />
                 Sheets
               </Tabs.Trigger>
+              <Tabs.Trigger value="custom" className="tab-trigger">
+                <Globe size={12} className="shrink-0" />
+                Custom
+              </Tabs.Trigger>
             </Tabs.List>
 
             <Tabs.Content value="n8n">
@@ -149,6 +156,9 @@ export function TargetSetup() {
             </Tabs.Content>
             <Tabs.Content value="google-sheets">
               <GoogleSheetsConnect onConnected={handleTargetConnected} />
+            </Tabs.Content>
+            <Tabs.Content value="custom">
+              <CustomConnect onConnected={handleTargetConnected} />
             </Tabs.Content>
           </Tabs.Root>
         </div>

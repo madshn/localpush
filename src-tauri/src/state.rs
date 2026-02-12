@@ -168,6 +168,72 @@ impl AppState {
                             Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve Google Sheets tokens"),
                         }
                     }
+                    "custom" => {
+                        let name = config.get(&format!("target.{}.name", tid))
+                            .ok().flatten().unwrap_or_else(|| "Custom Webhook".to_string());
+                        let auth_type_str = config.get(&format!("target.{}.auth_type", tid))
+                            .ok().flatten().unwrap_or_else(|| "none".to_string());
+
+                        // Reconstruct auth from config + credentials
+                        let auth = match auth_type_str.as_str() {
+                            "none" => crate::targets::AuthType::None,
+                            "bearer" => {
+                                match credentials.retrieve(&format!("custom:{}:token", tid)) {
+                                    Ok(Some(token)) if !token.is_empty() => {
+                                        crate::targets::AuthType::Bearer { token }
+                                    }
+                                    _ => {
+                                        tracing::warn!(target_id = %tid, "Bearer token not found for custom target");
+                                        continue;
+                                    }
+                                }
+                            }
+                            "header" => {
+                                let header_name = config.get(&format!("target.{}.auth_header_name", tid))
+                                    .ok().flatten();
+                                let header_value = credentials.retrieve(&format!("custom:{}:header_value", tid))
+                                    .ok().flatten();
+
+                                match (header_name, header_value) {
+                                    (Some(name), Some(value)) if !value.is_empty() => {
+                                        crate::targets::AuthType::Header { name, value }
+                                    }
+                                    _ => {
+                                        tracing::warn!(target_id = %tid, "Header auth incomplete for custom target");
+                                        continue;
+                                    }
+                                }
+                            }
+                            "basic" => {
+                                let username = config.get(&format!("target.{}.auth_username", tid))
+                                    .ok().flatten();
+                                let password = credentials.retrieve(&format!("custom:{}:password", tid))
+                                    .ok().flatten();
+
+                                match (username, password) {
+                                    (Some(username), Some(password)) if !password.is_empty() => {
+                                        crate::targets::AuthType::Basic { username, password }
+                                    }
+                                    _ => {
+                                        tracing::warn!(target_id = %tid, "Basic auth incomplete for custom target");
+                                        continue;
+                                    }
+                                }
+                            }
+                            _ => {
+                                tracing::warn!(target_id = %tid, auth_type = %auth_type_str, "Unknown auth type for custom target");
+                                continue;
+                            }
+                        };
+
+                        match crate::targets::CustomTarget::new(tid.clone(), name, url, auth) {
+                            Ok(target) => {
+                                target_manager.register(Arc::new(target));
+                                tracing::info!(target_id = %tid, "Restored custom target");
+                            }
+                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to restore custom target"),
+                        }
+                    }
                     _ => tracing::warn!(target_id = %tid, target_type = %ttype, "Unknown target type"),
                 }
             }
