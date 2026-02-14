@@ -1,6 +1,6 @@
 {
   "name": "localpush",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Push local file changes to webhooks with guaranteed delivery",
   "type": "module",
   "scripts": {

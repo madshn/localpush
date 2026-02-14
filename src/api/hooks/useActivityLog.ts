@@ -11,6 +11,14 @@ interface DeliveryQueueItem {
   created_at: string;
   delivered_at: string | null;
   payload: unknown;
+  trigger_type: string | null;
+  delivered_to: string | null;
+}
+
+export interface DeliveredToInfo {
+  endpoint_id: string;
+  endpoint_name: string;
+  target_type: string;
 }
 
 export interface ActivityEntry {
@@ -25,6 +33,8 @@ export interface ActivityEntry {
   retryCount: number;
   payload: unknown;
   payloadSummary: string;
+  triggerType: "file_change" | "manual" | "scheduled";
+  deliveredTo: DeliveredToInfo | null;
 }
 
 const prettifyEventType = (eventType: string): string => {
@@ -65,6 +75,17 @@ const summarizePayload = (payload: unknown): string => {
   return summary + extra;
 };
 
+const parseDeliveredTo = (raw: string | null): DeliveredToInfo | null => {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed.endpoint_id && parsed.target_type) return parsed as DeliveredToInfo;
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 const transformToActivityEntry = (item: DeliveryQueueItem): ActivityEntry => {
   return {
     id: item.id,
@@ -78,6 +99,8 @@ const transformToActivityEntry = (item: DeliveryQueueItem): ActivityEntry => {
     retryCount: item.retry_count,
     payload: item.payload,
     payloadSummary: summarizePayload(item.payload),
+    triggerType: (item.trigger_type as ActivityEntry['triggerType']) || 'file_change',
+    deliveredTo: parseDeliveredTo(item.delivered_to),
   };
 };
 

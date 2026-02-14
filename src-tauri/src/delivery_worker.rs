@@ -200,12 +200,13 @@ pub async fn process_batch(
                 "No delivery targets found, skipping"
             );
             // No target is not a failure — mark delivered so it doesn't retry
-            let _ = ledger.mark_delivered(&entry.event_id);
+            let _ = ledger.mark_delivered(&entry.event_id, None);
             continue;
         }
 
         let mut any_success = false;
         let mut last_error = None;
+        let mut successful_target: Option<&ResolvedTarget> = None;
 
         for rt in &targets {
             // Try native delivery first (e.g. Google Sheets appends rows directly)
@@ -215,6 +216,9 @@ pub async fn process_batch(
                         match target.deliver(&rt.endpoint_id, &entry.payload, &entry.event_type, credentials).await {
                             Ok(true) => {
                                 any_success = true;
+                                if successful_target.is_none() {
+                                    successful_target = Some(rt);
+                                }
                                 tracing::debug!(
                                     target_id = %rt.target_id,
                                     endpoint_id = %rt.endpoint_id,
@@ -245,6 +249,9 @@ pub async fn process_batch(
             match webhook.send(&rt.url, &entry.payload, &rt.auth).await {
                 Ok(_) => {
                     any_success = true;
+                    if successful_target.is_none() {
+                        successful_target = Some(rt);
+                    }
                     tracing::debug!(url = %rt.url, event_id = %entry.event_id, "Delivered");
                 }
                 Err(e) => {
@@ -255,7 +262,27 @@ pub async fn process_batch(
         }
 
         if any_success {
-            if ledger.mark_delivered(&entry.event_id).is_ok() {
+            // Build delivered_to JSON from the first successful target
+            let delivered_to_json = successful_target.map(|rt| {
+                // Look up endpoint name from bindings
+                let endpoint_name = binding_store
+                    .get_for_source(&entry.event_type)
+                    .into_iter()
+                    .find(|b| b.endpoint_id == rt.endpoint_id)
+                    .map(|b| b.endpoint_name)
+                    .unwrap_or_default();
+                // Determine target type from target_manager
+                let target_type = target_manager
+                    .and_then(|tm| tm.get(&rt.target_id))
+                    .map(|t| t.target_type().to_string())
+                    .unwrap_or_else(|| "webhook".to_string());
+                serde_json::json!({
+                    "endpoint_id": rt.endpoint_id,
+                    "endpoint_name": endpoint_name,
+                    "target_type": target_type,
+                }).to_string()
+            });
+            if ledger.mark_delivered(&entry.event_id, delivered_to_json).is_ok() {
                 result.delivered += 1;
             }
         } else if let Some(err) = last_error {
@@ -294,14 +321,18 @@ pub fn read_worker_config(config: &AppConfig) -> Option<WorkerConfig> {
 
 /// Update the tray icon to reflect DLQ status.
 ///
-/// Shows a red indicator ("!") next to the tray icon when there are DLQ entries,
-/// clears it when all DLQ entries are resolved.
+/// Swaps the tray icon to a variant with a red dot overlay when there are DLQ entries,
+/// restores the normal icon when all DLQ entries are resolved.
 fn update_tray_for_dlq(app_handle: &tauri::AppHandle, has_dlq: bool) {
     if let Some(tray) = app_handle.tray_by_id("main-tray") {
         if has_dlq {
-            let _ = tray.set_title(Some("!"));
+            let warning_icon = tauri::include_image!("icons/tray-icon-warning.png");
+            let _ = tray.set_icon(Some(warning_icon));
+            let _ = tray.set_icon_as_template(false); // Show in color (red dot visible)
         } else {
-            let _ = tray.set_title(Some(""));
+            let normal_icon = tauri::include_image!("icons/tray-icon.png");
+            let _ = tray.set_icon(Some(normal_icon));
+            let _ = tray.set_icon_as_template(true); // Back to template (adapts to light/dark)
         }
     }
 }

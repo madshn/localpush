@@ -37,6 +37,10 @@ pub use state::AppState;
 
 /// Initialize the application
 pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
+    // Menu bar app: only show in dock when a window is visible, never as a standalone dock icon
+    #[cfg(target_os = "macos")]
+    let _ = app.handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+
     // Initialize logging to both stdout and file
     let log_dir = app.path().app_log_dir()?;
     std::fs::create_dir_all(&log_dir)?;

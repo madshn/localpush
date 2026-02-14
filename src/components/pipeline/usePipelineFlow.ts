@@ -362,17 +362,19 @@ export function usePipelineFlow({
   const handlePushNow = async (sourceId: string) => {
     logger.info("Push Now triggered", { sourceId });
     setPushingSource(sourceId);
-    try {
-      const result = await invoke<string>("trigger_source_push", { sourceId });
-      logger.debug("Push enqueued", { sourceId, result });
-      toast.success("Push enqueued — delivery worker will send within 5s");
-      setTimeout(() => loadDeliveryStatus(), 1000);
-    } catch (error) {
-      logger.error("Manual push failed", { sourceId, error });
-      toast.error(`Push failed: ${error}`);
-    } finally {
-      setPushingSource(null);
-    }
+    toast.success("Push enqueued — delivering shortly");
+    invoke<string>("trigger_source_push", { sourceId })
+      .then((result) => {
+        logger.debug("Push enqueued", { sourceId, result });
+        queryClient.invalidateQueries({ queryKey: ["activityLog"] });
+      })
+      .catch((error) => {
+        logger.error("Manual push failed", { sourceId, error });
+        toast.error(`Push failed: ${error}`);
+      })
+      .finally(() => {
+        setPushingSource(null);
+      });
   };
 
   const getTrafficLightStatus = (

@@ -102,6 +102,16 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
               <span className="text-xs font-medium truncate">
                 {entry.source}
               </span>
+              {entry.deliveredTo && (
+                <span className="text-[10px] text-text-secondary truncate">
+                  → {entry.deliveredTo.endpoint_name}
+                </span>
+              )}
+              {entry.triggerType === "manual" && (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-accent/10 text-accent shrink-0">
+                  Manual
+                </span>
+              )}
               <span className={`text-[10px] ${config.color}`}>
                 {config.label}
               </span>

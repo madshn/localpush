@@ -104,6 +104,7 @@
 
 | ID | Requirement | Status | Notes |
 |----|-------------|--------|-------|
+| REQ-018 | Desktop Presence Monitor source | [ ] | Real-time keyboard/mouse activity → active/idle sessions + top apps. Feeds Goldratt's Cycle human utilization. See `docs/research/spec-desktop-monitor.md` |
 | REQ-020 | Desktop Session Logs source | [ ] | Daily push of active periods + top apps from CoreDuet knowledgeC.db. Requires FDA. See `docs/research/spec-desktop-session-logs.md` |
 | REQ-021 | iMessage History source (chat.db) | [ ] | Metadata-only: conversation counts, contacts, message frequency. Requires FDA. Privacy-sensitive. |
 | REQ-022 | Apple Mail metadata source | [ ] | Inbox stats, sender frequency, unread counts via AppleScript. No body content. |

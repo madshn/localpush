@@ -53,6 +53,12 @@ pub struct DeliveryEntry {
     /// When set, deliver only to this specific endpoint (for scheduled deliveries)
     #[serde(default)]
     pub target_endpoint_id: Option<String>,
+    /// How this entry was triggered: "file_change" (default), "manual", or "scheduled"
+    #[serde(default)]
+    pub trigger_type: Option<String>,
+    /// JSON string describing which target received the delivery (set after successful POST)
+    #[serde(default)]
+    pub delivered_to: Option<String>,
 }
 
 /// Trait for delivery ledger operations
@@ -76,11 +82,18 @@ pub trait DeliveryLedgerTrait: Send + Sync {
         target_endpoint_id: &str,
     ) -> Result<String, LedgerError>;
 
+    /// Enqueue a manual push (trigger_type = "manual")
+    fn enqueue_manual(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<String, LedgerError>;
+
     /// Claim a batch of pending deliveries for processing
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError>;
 
-    /// Mark a delivery as successfully completed
-    fn mark_delivered(&self, event_id: &str) -> Result<(), LedgerError>;
+    /// Mark a delivery as successfully completed, optionally recording which target received it
+    fn mark_delivered(&self, event_id: &str, delivered_to: Option<String>) -> Result<(), LedgerError>;
 
     /// Mark a delivery as failed (will retry or move to DLQ)
     fn mark_failed(&self, event_id: &str, error: &str) -> Result<DeliveryStatus, LedgerError>;

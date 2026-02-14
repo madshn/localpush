@@ -13,6 +13,8 @@ const mockEntry: ActivityEntry = {
   retryCount: 0,
   payload: { tokens: 1500, model: "opus" },
   payloadSummary: "tokens: 1500, model: opus",
+  triggerType: "file_change",
+  deliveredTo: null,
 };
 
 const failedEntry: ActivityEntry = {
@@ -25,6 +27,8 @@ const failedEntry: ActivityEntry = {
   error: "Connection timeout",
   payload: { note_id: "abc123" },
   payloadSummary: "note_id: abc123",
+  triggerType: "file_change",
+  deliveredTo: null,
 };
 
 describe("ActivityCard", () => {

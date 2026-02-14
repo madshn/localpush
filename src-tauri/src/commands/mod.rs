@@ -55,6 +55,8 @@ pub struct DeliveryQueueItem {
     pub created_at: String,
     pub delivered_at: Option<String>,
     pub payload: serde_json::Value,
+    pub trigger_type: Option<String>,
+    pub delivered_to: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,7 +83,7 @@ pub fn get_delivery_status(state: State<'_, AppState>) -> Result<DeliveryStatusR
     tracing::info!(command = "get_delivery_status", "Command invoked");
     match state.ledger.get_stats() {
         Ok(stats) => {
-            let overall = if stats.failed > 0 {
+            let overall = if stats.dlq > 0 || stats.failed > 0 {
                 "error"
             } else if stats.pending > 0 || stats.in_flight > 0 {
                 "pending"
@@ -133,7 +135,7 @@ pub fn get_delivery_queue(state: State<'_, AppState>) -> Result<Vec<DeliveryQueu
     tracing::info!(command = "get_delivery_queue", "Command invoked");
     let mut items = Vec::new();
 
-    for status in [DeliveryStatus::Pending, DeliveryStatus::InFlight, DeliveryStatus::Failed, DeliveryStatus::Delivered] {
+    for status in [DeliveryStatus::Pending, DeliveryStatus::InFlight, DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
         match state.ledger.get_by_status(status) {
             Ok(entries) => {
                 for entry in entries {
@@ -150,6 +152,8 @@ pub fn get_delivery_queue(state: State<'_, AppState>) -> Result<Vec<DeliveryQueu
                             .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
                             .map(|dt| dt.to_rfc3339()),
                         payload: entry.payload,
+                        trigger_type: entry.trigger_type,
+                        delivered_to: entry.delivered_to,
                     });
                 }
             }
@@ -936,7 +940,7 @@ pub fn trigger_source_push(
         e.to_string()
     })?;
 
-    let event_id = state.ledger.enqueue(&source_id, payload).map_err(|e| {
+    let event_id = state.ledger.enqueue_manual(&source_id, payload).map_err(|e| {
         tracing::error!(source_id = %source_id, error = %e, "Ledger enqueue failed");
         e.to_string()
     })?;
@@ -1216,7 +1220,7 @@ pub fn dismiss_dlq_entry(
     })?;
 
     // Mark as delivered to remove from DLQ (dismissed entries are considered "handled")
-    state.ledger.mark_delivered(&event_id).map_err(|e| {
+    state.ledger.mark_delivered(&event_id, None).map_err(|e| {
         tracing::error!(event_id = %event_id, error = %e, "Failed to dismiss DLQ entry");
         e.to_string()
     })?;

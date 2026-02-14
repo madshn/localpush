@@ -126,6 +126,16 @@ export function ActivityCard({ entry }: ActivityCardProps) {
             <span className="text-xs font-medium truncate">
               {entry.source}
             </span>
+            {entry.deliveredTo && (
+              <span className="text-[10px] text-text-secondary truncate">
+                → {entry.deliveredTo.endpoint_name}
+              </span>
+            )}
+            {entry.triggerType === "manual" && (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-accent/10 text-accent shrink-0">
+                Manual
+              </span>
+            )}
             <span className={`text-[10px] ${config.color}`}>
               {statusLabels[entry.status]}
             </span>
@@ -158,6 +168,12 @@ export function ActivityCard({ entry }: ActivityCardProps) {
               <div>
                 <strong className="text-text-primary">Delivered:</strong>{" "}
                 {formatFullTimestamp(entry.deliveredAt)}
+              </div>
+            )}
+            {entry.deliveredTo && (
+              <div>
+                <strong className="text-text-primary">Target:</strong>{" "}
+                {entry.deliveredTo.endpoint_name} ({entry.deliveredTo.target_type})
               </div>
             )}
             {entry.error && (
