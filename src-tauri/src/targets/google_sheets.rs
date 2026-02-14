@@ -424,7 +424,7 @@ impl Target for GoogleSheetsTarget {
             .map(|f| TargetEndpoint {
                 id: f.id.clone(),
                 name: f.name,
-                url: f.id, // endpoint URL = spreadsheet ID for Google Sheets
+                url: format!("https://docs.google.com/spreadsheets/d/{}", f.id),
                 authenticated: true,
                 auth_type: Some("oauth2".to_string()),
                 metadata: serde_json::json!({}),
