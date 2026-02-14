@@ -47,9 +47,9 @@ struct PhotoLabel {
 
 /// Apple Photos library source.
 ///
-/// Reads aggregate statistics (counts only) from the Photos SQLite database.
+/// Reads library statistics and recent photo metadata from the Photos SQLite database.
 /// Requires Full Disk Access (TCC permission) on macOS.
-/// Never exposes individual photo details, filenames, or locations.
+/// Privacy-sensitive properties (locations, faces) are user-configurable.
 pub struct ApplePhotosSource {
     db_path: PathBuf,
 }
@@ -487,9 +487,9 @@ impl Source for ApplePhotosSource {
             PropertyDef {
                 key: "recent_photos".to_string(),
                 label: "Recent Photos".to_string(),
-                description: "New photos with metadata from the last 7 days".to_string(),
-                default_enabled: true,
-                privacy_sensitive: false,
+                description: "New photos with metadata (filenames, dates) from the last 7 days".to_string(),
+                default_enabled: false,
+                privacy_sensitive: true,
             },
             PropertyDef {
                 key: "photo_location".to_string(),
@@ -502,15 +502,15 @@ impl Source for ApplePhotosSource {
                 key: "photo_faces".to_string(),
                 label: "Detected Faces".to_string(),
                 description: "Names of people detected in photos".to_string(),
-                default_enabled: true,
-                privacy_sensitive: false,
+                default_enabled: false,
+                privacy_sensitive: true,
             },
             PropertyDef {
                 key: "photo_labels".to_string(),
                 label: "ML Content Labels".to_string(),
                 description: "Machine learning tags for photo content".to_string(),
-                default_enabled: true,
-                privacy_sensitive: false,
+                default_enabled: false,
+                privacy_sensitive: true,
             },
         ]
     }

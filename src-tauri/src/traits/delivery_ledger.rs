@@ -112,6 +112,9 @@ pub trait DeliveryLedgerTrait: Send + Sync {
 
     /// Get retry history for a specific entry
     fn get_retry_history(&self, entry_id: &str) -> Result<Vec<serde_json::Value>, LedgerError>;
+
+    /// Dismiss a DLQ entry (marks dlq → delivered as "handled")
+    fn dismiss_dlq(&self, event_id: &str) -> Result<(), LedgerError>;
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

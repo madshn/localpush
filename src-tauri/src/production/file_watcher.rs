@@ -15,6 +15,22 @@ pub struct FsEventsWatcher {
 }
 
 impl FsEventsWatcher {
+    fn watch_with_mode(&self, path: PathBuf, mode: RecursiveMode) -> Result<(), FileWatcherError> {
+        if !path.exists() {
+            return Err(FileWatcherError::PathNotFound(path));
+        }
+
+        let mut debouncer = self.debouncer.lock().unwrap();
+        debouncer
+            .watch(&path, mode)
+            .map_err(|e| FileWatcherError::WatchError(e.to_string()))?;
+
+        self.watched_paths.lock().unwrap().push(path.clone());
+        tracing::info!("Watching path: {:?} (recursive: {})", path, mode == RecursiveMode::Recursive);
+
+        Ok(())
+    }
+
     pub fn new() -> Result<Self, FileWatcherError> {
         let (tx, rx) = std::sync::mpsc::channel::<notify_debouncer_full::DebounceEventResult>();
         let event_handler: EventHandler = Arc::new(Mutex::new(None));
@@ -66,19 +82,11 @@ impl FsEventsWatcher {
 
 impl FileWatcher for FsEventsWatcher {
     fn watch(&self, path: PathBuf) -> Result<(), FileWatcherError> {
-        if !path.exists() {
-            return Err(FileWatcherError::PathNotFound(path));
-        }
+        self.watch_with_mode(path, RecursiveMode::NonRecursive)
+    }
 
-        let mut debouncer = self.debouncer.lock().unwrap();
-        debouncer
-            .watch(&path, RecursiveMode::NonRecursive)
-            .map_err(|e| FileWatcherError::WatchError(e.to_string()))?;
-
-        self.watched_paths.lock().unwrap().push(path.clone());
-        tracing::info!("Watching path: {:?}", path);
-
-        Ok(())
+    fn watch_recursive(&self, path: PathBuf) -> Result<(), FileWatcherError> {
+        self.watch_with_mode(path, RecursiveMode::Recursive)
     }
 
     fn unwatch(&self, path: PathBuf) -> Result<(), FileWatcherError> {

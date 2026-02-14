@@ -2,11 +2,11 @@ import { Terminal, Podcast, StickyNote, Image, BarChart3 } from "lucide-react";
 import type { SourceCategory } from "./types";
 
 const sourceIcons: Record<string, { icon: typeof Terminal; color: string }> = {
-  claude_code_stats: { icon: Terminal, color: "text-accent" },
-  claude_code_sessions: { icon: Terminal, color: "text-accent" },
-  apple_podcasts: { icon: Podcast, color: "text-purple-400" },
-  apple_notes: { icon: StickyNote, color: "text-yellow-400" },
-  apple_photos: { icon: Image, color: "text-pink-400" },
+  "claude-stats": { icon: Terminal, color: "text-accent" },
+  "claude-sessions": { icon: Terminal, color: "text-accent" },
+  "apple-podcasts": { icon: Podcast, color: "text-purple-400" },
+  "apple-notes": { icon: StickyNote, color: "text-yellow-400" },
+  "apple-photos": { icon: Image, color: "text-pink-400" },
 };
 
 const fallbackIcon = { icon: BarChart3, color: "text-text-secondary" };

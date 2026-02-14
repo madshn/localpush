@@ -96,7 +96,7 @@ export function DashboardPipelineRow({
                 <div key={binding.endpoint_id} className="flex items-center gap-1">
                   <div className="flex-1 min-w-0">
                     <TargetCard
-                      targetType={binding.target_id.split("_")[0] || "n8n"}
+                      targetType={binding.target_id.split("-")[0] || "n8n"}
                       endpointName={binding.endpoint_name}
                       endpointUrl={binding.endpoint_url}
                     />

@@ -194,13 +194,35 @@ pub async fn process_batch(
         let targets = resolve_targets(&entry.event_type, entry.target_endpoint_id.as_deref(), binding_store, legacy_config, credentials);
 
         if targets.is_empty() {
-            tracing::debug!(
-                event_type = %entry.event_type,
-                event_id = %entry.event_id,
-                "No delivery targets found, skipping"
-            );
-            // No target is not a failure — mark delivered so it doesn't retry
-            let _ = ledger.mark_delivered(&entry.event_id, None);
+            if entry.target_endpoint_id.is_some() {
+                // Targeted delivery with missing binding — this is a real failure,
+                // not a "no targets configured" situation. Mark failed so it enters
+                // retry/DLQ flow and the user can see the problem.
+                tracing::warn!(
+                    event_type = %entry.event_type,
+                    event_id = %entry.event_id,
+                    target_endpoint_id = ?entry.target_endpoint_id,
+                    "Targeted delivery binding not found — marking failed"
+                );
+                if let Ok(new_status) = ledger.mark_failed(&entry.event_id, "Targeted binding not found — endpoint may have been removed") {
+                    if new_status == crate::traits::DeliveryStatus::Dlq {
+                        result.dlq_transitions.push(DlqTransition {
+                            source_id: entry.event_type.clone(),
+                            error: "Targeted binding not found".to_string(),
+                        });
+                    }
+                }
+                result.failed += 1;
+            } else {
+                // Fan-out with no bindings and no legacy webhook — mark delivered
+                // so it doesn't retry forever (no targets were ever configured)
+                tracing::debug!(
+                    event_type = %entry.event_type,
+                    event_id = %entry.event_id,
+                    "No delivery targets found, skipping"
+                );
+                let _ = ledger.mark_delivered(&entry.event_id, None);
+            }
             continue;
         }
 
@@ -866,5 +888,23 @@ mod tests {
         assert_eq!(result.delivered, 1, "Entry should be delivered via webhook");
         assert_eq!(result.failed, 0);
         assert_eq!(webhook.call_count(), 1, "Webhook SHOULD be called when target returns Ok(false)");
+    }
+
+    #[tokio::test]
+    async fn test_targeted_delivery_missing_binding_marks_failed() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+        let webhook = RecordedWebhookClient::success();
+        let bs = test_binding_store(); // no bindings
+        let creds = test_credentials();
+
+        // Enqueue a targeted delivery to a non-existent endpoint
+        ledger.enqueue_targeted("my-source", serde_json::json!({"data": 1}), "missing-ep").unwrap();
+
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
+
+        assert_eq!(result.delivered, 0, "Should NOT be marked delivered");
+        assert_eq!(result.failed, 1, "Should be marked failed");
+        assert_eq!(webhook.call_count(), 0, "No webhook call for missing target");
+        assert_eq!(ledger.get_by_status(DeliveryStatus::Failed).unwrap().len(), 1);
     }
 }

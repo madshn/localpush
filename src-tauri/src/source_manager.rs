@@ -57,6 +57,8 @@ pub struct SourceManager {
     sources: Mutex<HashMap<String, Arc<dyn Source>>>,
     enabled: Mutex<HashSet<String>>,
     path_to_source: Mutex<HashMap<PathBuf, String>>,
+    /// Sources whose watch paths should use prefix (directory) matching
+    recursive_sources: Mutex<HashSet<String>>,
     ledger: Arc<dyn DeliveryLedgerTrait>,
     file_watcher: Arc<dyn FileWatcher>,
     config: Arc<AppConfig>,
@@ -73,6 +75,7 @@ impl SourceManager {
             sources: Mutex::new(HashMap::new()),
             enabled: Mutex::new(HashSet::new()),
             path_to_source: Mutex::new(HashMap::new()),
+            recursive_sources: Mutex::new(HashSet::new()),
             ledger,
             file_watcher,
             config,
@@ -88,6 +91,9 @@ impl SourceManager {
                 .unwrap()
                 .insert(path, id.clone());
         }
+        if source.watch_recursive() {
+            self.recursive_sources.lock().unwrap().insert(id.clone());
+        }
         self.sources.lock().unwrap().insert(id, source);
     }
 
@@ -99,7 +105,11 @@ impl SourceManager {
             .ok_or_else(|| SourceManagerError::SourceNotFound(source_id.to_string()))?;
 
         if let Some(path) = source.watch_path() {
-            self.file_watcher.watch(path)?;
+            if source.watch_recursive() {
+                self.file_watcher.watch_recursive(path)?;
+            } else {
+                self.file_watcher.watch(path)?;
+            }
         }
 
         drop(sources);
@@ -188,7 +198,13 @@ impl SourceManager {
     pub fn handle_file_event(&self, path: &PathBuf) -> Result<(), SourceManagerError> {
         let source_id = {
             let path_map = self.path_to_source.lock().unwrap();
-            path_map.get(path).cloned()
+            // Try exact match first, then prefix match for directory-backed sources
+            path_map.get(path).cloned().or_else(|| {
+                let recursive = self.recursive_sources.lock().unwrap();
+                path_map.iter()
+                    .find(|(watch_path, sid)| recursive.contains(*sid) && path.starts_with(watch_path))
+                    .map(|(_, sid)| sid.clone())
+            })
         };
 
         let source_id =

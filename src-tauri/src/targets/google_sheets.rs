@@ -278,16 +278,17 @@ impl GoogleSheetsTarget {
             .await
             .map_err(|e| TargetError::DeliveryError(format!("Sheets API append failed: {}", e)))?;
 
-        if resp.status() == 429 {
+        let status = resp.status();
+        if status == 429 {
             return Err(TargetError::DeliveryError(
                 "Google Sheets rate limit exceeded (429). Will retry.".to_string(),
             ));
         }
-        if !resp.status().is_success() {
+        if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             return Err(TargetError::DeliveryError(format!(
                 "Sheets API append HTTP {}: {}",
-                400, body
+                status, body
             )));
         }
 
@@ -325,16 +326,17 @@ impl GoogleSheetsTarget {
             .await
             .map_err(|e| TargetError::DeliveryError(format!("Sheets API append failed: {}", e)))?;
 
-        if resp.status() == 429 {
+        let status = resp.status();
+        if status == 429 {
             return Err(TargetError::DeliveryError(
                 "Google Sheets rate limit exceeded (429). Will retry.".to_string(),
             ));
         }
-        if !resp.status().is_success() {
+        if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             return Err(TargetError::DeliveryError(format!(
                 "Sheets API append HTTP {}: {}",
-                400, body
+                status, body
             )));
         }
 

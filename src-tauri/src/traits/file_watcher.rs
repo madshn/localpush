@@ -34,8 +34,14 @@ pub enum FileEventKind {
 /// Production: FSEvents via `notify` crate
 /// Testing: Manual event emission
 pub trait FileWatcher: Send + Sync {
-    /// Start watching a path
+    /// Start watching a path (non-recursive)
     fn watch(&self, path: PathBuf) -> Result<(), FileWatcherError>;
+
+    /// Start watching a path recursively (for directory-backed sources)
+    fn watch_recursive(&self, path: PathBuf) -> Result<(), FileWatcherError> {
+        // Default: fall back to non-recursive watch
+        self.watch(path)
+    }
 
     /// Stop watching a path
     fn unwatch(&self, path: PathBuf) -> Result<(), FileWatcherError>;

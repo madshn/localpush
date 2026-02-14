@@ -56,7 +56,15 @@ async function createBinding(params: {
   scheduleTime?: string;
   scheduleDay?: string;
 }): Promise<void> {
-  logger.debug("Creating binding", params);
+  logger.debug("Creating binding", {
+    sourceId: params.sourceId,
+    targetId: params.targetId,
+    endpointId: params.endpointId,
+    endpointUrl: params.endpointUrl,
+    endpointName: params.endpointName,
+    hasAuth: !!params.authHeaderName,
+    deliveryMode: params.deliveryMode,
+  });
   try {
     await invoke("create_binding", {
       sourceId: params.sourceId,
@@ -78,7 +86,11 @@ async function createBinding(params: {
       hasAuth: !!params.authHeaderName,
     });
   } catch (error) {
-    logger.error("Failed to create binding", { ...params, error });
+    logger.error("Failed to create binding", {
+      sourceId: params.sourceId,
+      endpointId: params.endpointId,
+      error,
+    });
     throw error;
   }
 }

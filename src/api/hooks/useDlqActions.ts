@@ -17,7 +17,7 @@ async function dismissDlqEntry(entryId: string): Promise<void> {
 async function replayDelivery(entryId: string): Promise<void> {
   logger.debug("Replaying delivery", { entryId });
   try {
-    await invoke("replay_delivery", { entryId });
+    await invoke("replay_delivery_by_id", { entryId });
     logger.info("Delivery replayed", { entryId });
   } catch (error) {
     logger.error("Failed to replay delivery", { entryId, error });

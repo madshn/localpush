@@ -39,20 +39,20 @@ export interface ActivityEntry {
 
 const prettifyEventType = (eventType: string): string => {
   const prettyNames: Record<string, string> = {
-    'claude_code_stats': 'Claude Stats',
-    'claude_code_sessions': 'Claude Sessions',
-    'apple_podcasts': 'Apple Podcasts',
-    'apple_notes': 'Apple Notes',
-    'apple_photos': 'Apple Photos',
+    'claude-stats': 'Claude Stats',
+    'claude-sessions': 'Claude Sessions',
+    'apple-podcasts': 'Apple Podcasts',
+    'apple-notes': 'Apple Notes',
+    'apple-photos': 'Apple Photos',
   };
 
   if (prettyNames[eventType]) {
     return prettyNames[eventType];
   }
 
-  // Default: capitalize and replace underscores
+  // Default: capitalize and replace hyphens/underscores
   return eventType
-    .split('_')
+    .split(/[-_]/)
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 };

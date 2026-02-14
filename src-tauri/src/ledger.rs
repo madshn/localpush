@@ -421,6 +421,24 @@ impl DeliveryLedgerTrait for DeliveryLedger {
 
         Ok(retry_log)
     }
+
+    fn dismiss_dlq(&self, event_id: &str) -> Result<(), LedgerError> {
+        let now = chrono::Utc::now().timestamp();
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE delivery_ledger
+             SET status = 'delivered', delivered_at = ?1
+             WHERE event_id = ?2 AND status = 'dlq'",
+            params![now, event_id],
+        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        if rows == 0 {
+            return Err(LedgerError::NotFound(event_id.to_string()));
+        }
+
+        tracing::info!("DLQ entry dismissed: {}", event_id);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

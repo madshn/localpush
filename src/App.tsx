@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Workflow, Activity, Settings, ExternalLink, AlertTriangle } from "lucide-react";
 import { Toaster, toast } from "sonner";
-import { listen } from "@tauri-apps/api/event";
-import { useQueryClient } from "@tanstack/react-query";
+
+
 import { useDeliveryStatus } from "./api/hooks/useDeliveryStatus";
 import { useDlqCount } from "./api/hooks/useErrorDiagnosis";
 import { StatusIndicator } from "./components/StatusIndicator";
@@ -54,29 +54,10 @@ async function handleOpenDashboard() {
 function App() {
   const { data: status } = useDeliveryStatus();
   const { data: dlqCount } = useDlqCount();
-  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("pipeline");
 
-  // Listen for DLQ events from backend
-  useEffect(() => {
-    const unlisten = listen("delivery:dlq", (event) => {
-      logger.warn("Delivery moved to DLQ", { payload: event.payload });
-
-      // Invalidate relevant queries to update UI
-      queryClient.invalidateQueries({ queryKey: ["activityLog"] });
-      queryClient.invalidateQueries({ queryKey: ["dlqCount"] });
-      queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
-
-      // Show toast notification (optional - backend will handle macOS notification)
-      toast.error("Delivery failed after all retries", {
-        description: "Check the Activity tab for details",
-      });
-    });
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [queryClient]);
+  // DLQ state is polled via useDlqCount hook (5s interval).
+  // Backend notifies via macOS native notification on DLQ transitions.
 
   if (isDashboard) {
     return (

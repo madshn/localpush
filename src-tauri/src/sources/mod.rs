@@ -70,6 +70,12 @@ pub trait Source: Send + Sync {
     /// Generate transparency preview showing what user will see
     fn preview(&self) -> Result<SourcePreview, SourceError>;
 
+    /// Whether the watch path should be watched recursively.
+    /// Override to return true for directory-backed sources (e.g., Claude Sessions).
+    fn watch_recursive(&self) -> bool {
+        false
+    }
+
     /// List of configurable properties for this source.
     /// Default implementation returns empty (no configurable properties).
     fn available_properties(&self) -> Vec<PropertyDef> {

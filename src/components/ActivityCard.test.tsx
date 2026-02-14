@@ -6,7 +6,7 @@ import type { ActivityEntry } from "../api/hooks/useActivityLog";
 const mockEntry: ActivityEntry = {
   id: "test-1",
   source: "claude-stats",
-  sourceId: "claude_code_stats",
+  sourceId: "claude-stats",
   status: "delivered",
   timestamp: new Date("2026-02-09T10:30:00"),
   deliveredAt: new Date("2026-02-09T10:30:05"),

@@ -512,6 +512,10 @@ impl Source for ClaudeSessionsSource {
         Some(self.claude_projects_dir.clone())
     }
 
+    fn watch_recursive(&self) -> bool {
+        true
+    }
+
     fn parse(&self) -> Result<serde_json::Value, SourceError> {
         let recent = self.recent_sessions();
 

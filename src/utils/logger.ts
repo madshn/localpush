@@ -7,7 +7,7 @@ function timestamp(): string {
 }
 
 class Logger {
-  private level: LogLevel = 'debug';
+  private level: LogLevel = 'info';
 
   private shouldLog(level: LogLevel): boolean {
     return LOG_LEVELS[level] >= LOG_LEVELS[this.level];

@@ -1219,8 +1219,8 @@ pub fn dismiss_dlq_entry(
         format!("DLQ entry {} not found", entry_id)
     })?;
 
-    // Mark as delivered to remove from DLQ (dismissed entries are considered "handled")
-    state.ledger.mark_delivered(&event_id, None).map_err(|e| {
+    // Dismiss DLQ entry (transitions dlq → delivered)
+    state.ledger.dismiss_dlq(&event_id).map_err(|e| {
         tracing::error!(event_id = %event_id, error = %e, "Failed to dismiss DLQ entry");
         e.to_string()
     })?;
