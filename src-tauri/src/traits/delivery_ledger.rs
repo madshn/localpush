@@ -115,6 +115,9 @@ pub trait DeliveryLedgerTrait: Send + Sync {
 
     /// Dismiss a DLQ entry (marks dlq → delivered as "handled")
     fn dismiss_dlq(&self, event_id: &str) -> Result<(), LedgerError>;
+
+    /// Record which target was attempted (so the UI can show it even on failure)
+    fn set_attempted_target(&self, event_id: &str, target_json: &str) -> Result<(), LedgerError>;
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -439,6 +439,15 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         tracing::info!("DLQ entry dismissed: {}", event_id);
         Ok(())
     }
+
+    fn set_attempted_target(&self, event_id: &str, target_json: &str) -> Result<(), LedgerError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE delivery_ledger SET delivered_to = ?1 WHERE event_id = ?2",
+            params![target_json, event_id],
+        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

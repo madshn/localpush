@@ -226,6 +226,27 @@ pub async fn process_batch(
             continue;
         }
 
+        // Record which target is being attempted (so the UI can show it even on failure)
+        let first_target = &targets[0];
+        let attempted_target_json = {
+            let endpoint_name = binding_store
+                .get_for_source(&entry.event_type)
+                .into_iter()
+                .find(|b| b.endpoint_id == first_target.endpoint_id)
+                .map(|b| b.endpoint_name)
+                .unwrap_or_default();
+            let target_type = target_manager
+                .and_then(|tm| tm.get(&first_target.target_id))
+                .map(|t| t.target_type().to_string())
+                .unwrap_or_else(|| "webhook".to_string());
+            serde_json::json!({
+                "endpoint_id": first_target.endpoint_id,
+                "endpoint_name": endpoint_name,
+                "target_type": target_type,
+            }).to_string()
+        };
+        let _ = ledger.set_attempted_target(&entry.event_id, &attempted_target_json);
+
         let mut any_success = false;
         let mut last_error = None;
         let mut successful_target: Option<&ResolvedTarget> = None;
