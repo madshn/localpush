@@ -111,6 +111,18 @@ export function ActivityCard({ entry }: ActivityCardProps) {
     }
   };
 
+  const targetLabel = (targetType: string): string => {
+    const labels: Record<string, string> = {
+      "google-sheets": "Google Sheets",
+      n8n: "n8n",
+      ntfy: "ntfy",
+      make: "Make",
+      zapier: "Zapier",
+      webhook: "Webhook",
+    };
+    return labels[targetType] || targetType;
+  };
+
   const payloadJson = payloadExpanded
     ? JSON.stringify(entry.payload, null, 2)
     : "";
@@ -138,7 +150,7 @@ export function ActivityCard({ entry }: ActivityCardProps) {
                   }
                 }}
               >
-                → {entry.deliveredTo.endpoint_name}
+                → {targetLabel(entry.deliveredTo.target_type)}
                 {entry.deliveredTo.target_url && (
                   <ExternalLink size={9} className="inline ml-0.5 -mt-0.5" />
                 )}

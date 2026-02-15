@@ -53,6 +53,18 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
   const config = statusConfig[entry.status as "failed" | "dlq"];
   const Icon = config.icon;
 
+  const targetLabel = (targetType: string): string => {
+    const labels: Record<string, string> = {
+      "google-sheets": "Google Sheets",
+      n8n: "n8n",
+      ntfy: "ntfy",
+      make: "Make",
+      zapier: "Zapier",
+      webhook: "Webhook",
+    };
+    return labels[targetType] || targetType;
+  };
+
   const formatTime = (date: Date): string =>
     date.toLocaleTimeString("en-US", {
       hour12: false,
@@ -114,7 +126,7 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
                     }
                   }}
                 >
-                  → {entry.deliveredTo.endpoint_name}
+                  → {targetLabel(entry.deliveredTo.target_type)}
                   {entry.deliveredTo.target_url && (
                     <ExternalLink size={9} className="inline ml-0.5 -mt-0.5" />
                   )}
