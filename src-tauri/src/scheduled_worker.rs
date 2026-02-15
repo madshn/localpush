@@ -11,6 +11,7 @@ use chrono::{Datelike, Local, NaiveTime, Weekday};
 
 use crate::bindings::{BindingStore, SourceBinding};
 use crate::source_manager::SourceManager;
+use crate::target_manager::TargetManager;
 use crate::traits::DeliveryLedgerTrait;
 
 /// Check if a scheduled binding is due for delivery
@@ -101,6 +102,7 @@ pub fn spawn_scheduler(
     ledger: Arc<dyn DeliveryLedgerTrait>,
     binding_store: Arc<BindingStore>,
     source_manager: Arc<SourceManager>,
+    target_manager: Arc<TargetManager>,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         tracing::info!("Scheduled delivery worker started (60s interval)");
@@ -161,6 +163,15 @@ pub fn spawn_scheduler(
                     &binding.endpoint_id,
                 ) {
                     Ok(event_id) => {
+                        // Write target display info immediately for activity log
+                        let (tt, bu) = target_manager
+                            .get(&binding.target_id)
+                            .map(|t| (t.target_type().to_string(), t.base_url().to_string()))
+                            .unwrap_or_else(|| ("webhook".to_string(), String::new()));
+                        let _ = ledger.set_attempted_target(
+                            &event_id,
+                            &binding.build_delivered_to_json(&tt, &bu),
+                        );
                         tracing::info!(
                             source_id = %binding.source_id,
                             endpoint_id = %binding.endpoint_id,

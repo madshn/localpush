@@ -95,6 +95,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         state.ledger.clone(),
         state.binding_store.clone(),
         state.source_manager.clone(),
+        state.target_manager.clone(),
     );
 
     app.manage(state);

@@ -969,6 +969,15 @@ pub fn trigger_source_push(
             tracing::error!(source_id = %source_id, endpoint = %binding.endpoint_id, error = %e, "Ledger enqueue failed");
             e.to_string()
         })?;
+
+        // Write target display info immediately so the activity log shows it
+        let (target_type, base_url) = state.target_manager
+            .get(&binding.target_id)
+            .map(|t| (t.target_type().to_string(), t.base_url().to_string()))
+            .unwrap_or_else(|| ("webhook".to_string(), String::new()));
+        let target_json = binding.build_delivered_to_json(&target_type, &base_url);
+        let _ = state.ledger.set_attempted_target(&event_id, &target_json);
+
         tracing::info!(
             source_id = %source_id,
             endpoint_id = %binding.endpoint_id,
@@ -1298,6 +1307,23 @@ pub fn replay_delivery_by_id(
         tracing::error!(entry_id = %entry_id, error = %e, "Failed to replay delivery");
         e.to_string()
     })?;
+
+    // Carry forward target display info from original entry if available
+    if let Some(ref target_ep_id) = entry.target_endpoint_id {
+        // Look up binding for this source+endpoint to build display JSON
+        let binding = state.binding_store
+            .get_for_source(&entry.event_type)
+            .into_iter()
+            .find(|b| b.endpoint_id == *target_ep_id);
+        if let Some(binding) = binding {
+            let (target_type, base_url) = state.target_manager
+                .get(&binding.target_id)
+                .map(|t| (t.target_type().to_string(), t.base_url().to_string()))
+                .unwrap_or_else(|| ("webhook".to_string(), String::new()));
+            let target_json = binding.build_delivered_to_json(&target_type, &base_url);
+            let _ = state.ledger.set_attempted_target(&new_event_id, &target_json);
+        }
+    }
 
     tracing::info!(
         entry_id = %entry_id,

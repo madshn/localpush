@@ -44,6 +44,29 @@ fn default_delivery_mode() -> String {
     "on_change".to_string()
 }
 
+impl SourceBinding {
+    /// Build JSON for the `delivered_to` column (target display info for the activity log).
+    /// Caller provides target_type and base_url from the TargetManager.
+    pub fn build_delivered_to_json(&self, target_type: &str, base_url: &str) -> String {
+        let target_url = match target_type {
+            "google-sheets" => {
+                format!("https://docs.google.com/spreadsheets/d/{}", self.endpoint_id)
+            }
+            "n8n" => {
+                let workflow_id = self.endpoint_id.split(':').next().unwrap_or(&self.endpoint_id);
+                format!("{}/workflow/{}/executions", base_url.trim_end_matches('/'), workflow_id)
+            }
+            _ => self.endpoint_url.clone(),
+        };
+        serde_json::json!({
+            "endpoint_id": self.endpoint_id,
+            "endpoint_name": self.endpoint_name,
+            "target_type": target_type,
+            "target_url": target_url,
+        }).to_string()
+    }
+}
+
 /// Manages source-to-target bindings, persisted in config SQLite
 pub struct BindingStore {
     config: Arc<AppConfig>,

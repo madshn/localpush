@@ -38,37 +38,26 @@ fn build_target_json(
     event_type: &str,
     target_manager: Option<&TargetManager>,
 ) -> String {
-    let endpoint_name = binding_store
-        .get_for_source(event_type)
-        .into_iter()
-        .find(|b| b.endpoint_id == rt.endpoint_id)
-        .map(|b| b.endpoint_name)
-        .unwrap_or_default();
-
     let (target_type, base_url) = target_manager
         .and_then(|tm| tm.get(&rt.target_id))
         .map(|t| (t.target_type().to_string(), t.base_url().to_string()))
         .unwrap_or_else(|| ("webhook".to_string(), String::new()));
 
-    // Build a user-facing URL for the target
-    let target_url = match target_type.as_str() {
-        "google-sheets" => {
-            // endpoint_id is the spreadsheet ID
-            format!("https://docs.google.com/spreadsheets/d/{}", rt.endpoint_id)
-        }
-        "n8n" => {
-            // endpoint_id is "workflowId:nodeName" — extract workflow ID
-            let workflow_id = rt.endpoint_id.split(':').next().unwrap_or(&rt.endpoint_id);
-            format!("{}/workflow/{}/executions", base_url.trim_end_matches('/'), workflow_id)
-        }
-        _ => rt.url.clone(),
-    };
+    // Try to use the shared SourceBinding helper; fall back if binding not found
+    if let Some(binding) = binding_store
+        .get_for_source(event_type)
+        .into_iter()
+        .find(|b| b.endpoint_id == rt.endpoint_id)
+    {
+        return binding.build_delivered_to_json(&target_type, &base_url);
+    }
 
+    // Fallback for entries without a matching binding (e.g. legacy webhook)
     serde_json::json!({
         "endpoint_id": rt.endpoint_id,
-        "endpoint_name": endpoint_name,
+        "endpoint_name": "",
         "target_type": target_type,
-        "target_url": target_url,
+        "target_url": rt.url,
     }).to_string()
 }
 
