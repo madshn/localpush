@@ -26,6 +26,52 @@ pub struct ResolvedTarget {
     pub endpoint_id: String,
 }
 
+/// Build a target info JSON string for the activity log.
+///
+/// Includes a `target_url` field that the frontend can render as a clickable link:
+/// - Google Sheets: direct link to the spreadsheet
+/// - n8n: link to the workflow executions page
+/// - Other webhooks: the endpoint URL
+fn build_target_json(
+    rt: &ResolvedTarget,
+    binding_store: &BindingStore,
+    event_type: &str,
+    target_manager: Option<&TargetManager>,
+) -> String {
+    let endpoint_name = binding_store
+        .get_for_source(event_type)
+        .into_iter()
+        .find(|b| b.endpoint_id == rt.endpoint_id)
+        .map(|b| b.endpoint_name)
+        .unwrap_or_default();
+
+    let (target_type, base_url) = target_manager
+        .and_then(|tm| tm.get(&rt.target_id))
+        .map(|t| (t.target_type().to_string(), t.base_url().to_string()))
+        .unwrap_or_else(|| ("webhook".to_string(), String::new()));
+
+    // Build a user-facing URL for the target
+    let target_url = match target_type.as_str() {
+        "google-sheets" => {
+            // endpoint_id is the spreadsheet ID
+            format!("https://docs.google.com/spreadsheets/d/{}", rt.endpoint_id)
+        }
+        "n8n" => {
+            // endpoint_id is "workflowId:nodeName" — extract workflow ID
+            let workflow_id = rt.endpoint_id.split(':').next().unwrap_or(&rt.endpoint_id);
+            format!("{}/workflow/{}/executions", base_url.trim_end_matches('/'), workflow_id)
+        }
+        _ => rt.url.clone(),
+    };
+
+    serde_json::json!({
+        "endpoint_id": rt.endpoint_id,
+        "endpoint_name": endpoint_name,
+        "target_type": target_type,
+        "target_url": target_url,
+    }).to_string()
+}
+
 /// Resolve auth for a single binding by combining headers_json with credential store secret.
 fn resolve_binding_auth(binding: &SourceBinding, credentials: &dyn CredentialStore) -> WebhookAuth {
     let headers_json = match &binding.headers_json {
@@ -228,23 +274,7 @@ pub async fn process_batch(
 
         // Record which target is being attempted (so the UI can show it even on failure)
         let first_target = &targets[0];
-        let attempted_target_json = {
-            let endpoint_name = binding_store
-                .get_for_source(&entry.event_type)
-                .into_iter()
-                .find(|b| b.endpoint_id == first_target.endpoint_id)
-                .map(|b| b.endpoint_name)
-                .unwrap_or_default();
-            let target_type = target_manager
-                .and_then(|tm| tm.get(&first_target.target_id))
-                .map(|t| t.target_type().to_string())
-                .unwrap_or_else(|| "webhook".to_string());
-            serde_json::json!({
-                "endpoint_id": first_target.endpoint_id,
-                "endpoint_name": endpoint_name,
-                "target_type": target_type,
-            }).to_string()
-        };
+        let attempted_target_json = build_target_json(first_target, binding_store, &entry.event_type, target_manager);
         let _ = ledger.set_attempted_target(&entry.event_id, &attempted_target_json);
 
         let mut any_success = false;
@@ -305,25 +335,8 @@ pub async fn process_batch(
         }
 
         if any_success {
-            // Build delivered_to JSON from the first successful target
             let delivered_to_json = successful_target.map(|rt| {
-                // Look up endpoint name from bindings
-                let endpoint_name = binding_store
-                    .get_for_source(&entry.event_type)
-                    .into_iter()
-                    .find(|b| b.endpoint_id == rt.endpoint_id)
-                    .map(|b| b.endpoint_name)
-                    .unwrap_or_default();
-                // Determine target type from target_manager
-                let target_type = target_manager
-                    .and_then(|tm| tm.get(&rt.target_id))
-                    .map(|t| t.target_type().to_string())
-                    .unwrap_or_else(|| "webhook".to_string());
-                serde_json::json!({
-                    "endpoint_id": rt.endpoint_id,
-                    "endpoint_name": endpoint_name,
-                    "target_type": target_type,
-                }).to_string()
+                build_target_json(rt, binding_store, &entry.event_type, target_manager)
             });
             if ledger.mark_delivered(&entry.event_id, delivered_to_json).is_ok() {
                 result.delivered += 1;

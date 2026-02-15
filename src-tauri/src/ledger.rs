@@ -159,6 +159,29 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         Ok(event_id)
     }
 
+    fn enqueue_manual_targeted(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+        target_endpoint_id: &str,
+    ) -> Result<String, LedgerError> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let event_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().timestamp();
+        let payload_str = serde_json::to_string(&payload)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO delivery_ledger (id, event_id, event_type, payload, available_at, created_at, trigger_type, target_endpoint_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'manual', ?6)",
+            params![id, event_id, event_type, payload_str, now, target_endpoint_id],
+        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        tracing::debug!("Enqueued manual targeted delivery: {} ({}) -> {}", event_id, event_type, target_endpoint_id);
+        Ok(event_id)
+    }
+
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError> {
         let now = chrono::Utc::now().timestamp();
 

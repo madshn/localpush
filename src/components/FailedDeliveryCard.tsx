@@ -6,6 +6,7 @@ import {
   ChevronRight,
   RotateCcw,
   Trash2,
+  ExternalLink,
 } from "lucide-react";
 import type { ActivityEntry } from "../api/hooks/useActivityLog";
 import {
@@ -14,6 +15,7 @@ import {
 } from "../api/hooks/useErrorDiagnosis";
 import { useDismissDlq, useReplayDelivery } from "../api/hooks/useDlqActions";
 import { ReplayConfirmDialog } from "./ReplayConfirmDialog";
+import { openUrl } from "../utils/openUrl";
 
 interface FailedDeliveryCardProps {
   entry: ActivityEntry;
@@ -103,8 +105,19 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
                 {entry.source}
               </span>
               {entry.deliveredTo && (
-                <span className="text-[10px] text-text-secondary truncate">
+                <span
+                  className={`text-[10px] truncate ${entry.deliveredTo.target_url ? "text-accent hover:underline cursor-pointer" : "text-text-secondary"}`}
+                  onClick={(e) => {
+                    if (entry.deliveredTo?.target_url) {
+                      e.stopPropagation();
+                      openUrl(entry.deliveredTo.target_url);
+                    }
+                  }}
+                >
                   → {entry.deliveredTo.endpoint_name}
+                  {entry.deliveredTo.target_url && (
+                    <ExternalLink size={9} className="inline ml-0.5 -mt-0.5" />
+                  )}
                 </span>
               )}
               {entry.triggerType === "manual" && (

@@ -88,7 +88,7 @@ function App() {
       </header>
 
       {/* DLQ failure banner */}
-      {dlqCount && dlqCount > 0 && (
+      {dlqCount != null && dlqCount > 0 && (
         <div
           onClick={() => setActiveTab("activity")}
           className="mx-4 mt-3 px-3 py-2 bg-error-bg border border-error/20 rounded-lg cursor-pointer hover:bg-error-bg/80 transition-colors"
@@ -114,7 +114,7 @@ function App() {
           <Tabs.Trigger value="activity" className="tab-trigger relative">
             <Activity size={14} />
             Activity
-            {dlqCount && dlqCount > 0 && (
+            {dlqCount != null && dlqCount > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 flex items-center justify-center bg-error text-[9px] font-semibold text-white rounded-full">
                 {dlqCount}
               </span>

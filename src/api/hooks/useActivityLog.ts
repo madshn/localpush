@@ -19,6 +19,7 @@ export interface DeliveredToInfo {
   endpoint_id: string;
   endpoint_name: string;
   target_type: string;
+  target_url?: string;
 }
 
 export interface ActivityEntry {

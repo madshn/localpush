@@ -53,6 +53,7 @@ fn main() {
             commands::get_dlq_count,
             commands::dismiss_dlq_entry,
             commands::replay_delivery_by_id,
+            commands::open_url,
             commands::open_feedback,
             commands::get_timeline_gaps,
         ])

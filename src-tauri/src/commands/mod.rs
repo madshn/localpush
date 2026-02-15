@@ -27,6 +27,12 @@ pub fn get_app_info() -> AppInfoResponse {
     }
 }
 
+/// Open a URL in the user's default browser
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    open::that(&url).map_err(|e| format!("Failed to open URL: {}", e))
+}
+
 #[derive(Debug, Serialize)]
 pub struct DeliveryStatusResponse {
     pub overall: String,
@@ -940,13 +946,43 @@ pub fn trigger_source_push(
         e.to_string()
     })?;
 
-    let event_id = state.ledger.enqueue_manual(&source_id, payload).map_err(|e| {
-        tracing::error!(source_id = %source_id, error = %e, "Ledger enqueue failed");
-        e.to_string()
-    })?;
+    // "Push Now" delivers to ALL bindings (including scheduled ones), not just on_change.
+    // Create one targeted delivery per binding for independent tracking.
+    let bindings = state.binding_store.get_for_source(&source_id);
+    if bindings.is_empty() {
+        // No bindings — fall back to legacy fan-out (global webhook)
+        let event_id = state.ledger.enqueue_manual(&source_id, payload).map_err(|e| {
+            tracing::error!(source_id = %source_id, error = %e, "Ledger enqueue failed");
+            e.to_string()
+        })?;
+        tracing::info!(source_id = %source_id, event_id = %event_id, "Manual push enqueued (legacy fan-out)");
+        return Ok(event_id);
+    }
 
-    tracing::info!(source_id = %source_id, event_id = %event_id, "Manual push enqueued");
-    Ok(event_id)
+    let mut first_event_id = String::new();
+    for binding in &bindings {
+        let event_id = state.ledger.enqueue_manual_targeted(
+            &source_id,
+            payload.clone(),
+            &binding.endpoint_id,
+        ).map_err(|e| {
+            tracing::error!(source_id = %source_id, endpoint = %binding.endpoint_id, error = %e, "Ledger enqueue failed");
+            e.to_string()
+        })?;
+        tracing::info!(
+            source_id = %source_id,
+            endpoint_id = %binding.endpoint_id,
+            endpoint_name = %binding.endpoint_name,
+            event_id = %event_id,
+            "Manual push enqueued (targeted)"
+        );
+        if first_event_id.is_empty() {
+            first_event_id = event_id;
+        }
+    }
+
+    tracing::info!(source_id = %source_id, binding_count = bindings.len(), "Manual push enqueued to all bindings");
+    Ok(first_event_id)
 }
 
 /// Replay a delivery: re-enqueue the exact same payload for redelivery

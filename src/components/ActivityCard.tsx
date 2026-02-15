@@ -7,12 +7,14 @@ import {
   RotateCcw,
   Copy,
   Check,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ActivityEntry } from "../api/hooks/useActivityLog";
 import { logger } from "../utils/logger";
+import { openUrl } from "../utils/openUrl";
 import { FailedDeliveryCard } from "./FailedDeliveryCard";
 
 interface ActivityCardProps {
@@ -127,8 +129,19 @@ export function ActivityCard({ entry }: ActivityCardProps) {
               {entry.source}
             </span>
             {entry.deliveredTo && (
-              <span className="text-[10px] text-text-secondary truncate">
+              <span
+                className={`text-[10px] truncate ${entry.deliveredTo.target_url ? "text-accent hover:underline cursor-pointer" : "text-text-secondary"}`}
+                onClick={(e) => {
+                  if (entry.deliveredTo?.target_url) {
+                    e.stopPropagation();
+                    openUrl(entry.deliveredTo.target_url);
+                  }
+                }}
+              >
                 → {entry.deliveredTo.endpoint_name}
+                {entry.deliveredTo.target_url && (
+                  <ExternalLink size={9} className="inline ml-0.5 -mt-0.5" />
+                )}
               </span>
             )}
             {entry.triggerType === "manual" && (
@@ -173,7 +186,20 @@ export function ActivityCard({ entry }: ActivityCardProps) {
             {entry.deliveredTo && (
               <div>
                 <strong className="text-text-primary">Target:</strong>{" "}
-                {entry.deliveredTo.endpoint_name} ({entry.deliveredTo.target_type})
+                {entry.deliveredTo.target_url ? (
+                  <span
+                    className="text-accent hover:underline cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openUrl(entry.deliveredTo!.target_url!);
+                    }}
+                  >
+                    {entry.deliveredTo.endpoint_name} ({entry.deliveredTo.target_type})
+                    <ExternalLink size={10} className="inline ml-1 -mt-0.5" />
+                  </span>
+                ) : (
+                  <>{entry.deliveredTo.endpoint_name} ({entry.deliveredTo.target_type})</>
+                )}
               </div>
             )}
             {entry.error && (

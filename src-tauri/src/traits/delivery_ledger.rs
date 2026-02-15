@@ -89,6 +89,14 @@ pub trait DeliveryLedgerTrait: Send + Sync {
         payload: serde_json::Value,
     ) -> Result<String, LedgerError>;
 
+    /// Enqueue a manual push targeted to a specific endpoint
+    fn enqueue_manual_targeted(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+        target_endpoint_id: &str,
+    ) -> Result<String, LedgerError>;
+
     /// Claim a batch of pending deliveries for processing
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError>;
 
