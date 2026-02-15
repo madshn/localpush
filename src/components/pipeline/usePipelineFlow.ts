@@ -362,17 +362,22 @@ export function usePipelineFlow({
   const handlePushNow = async (sourceId: string) => {
     logger.info("Push Now triggered", { sourceId });
     setPushingSource(sourceId);
-    toast.success("Push enqueued — delivering shortly");
+    const pushedAt = Date.now();
     invoke<string>("trigger_source_push", { sourceId })
       .then((result) => {
         logger.debug("Push enqueued", { sourceId, result });
         queryClient.invalidateQueries({ queryKey: ["activityLog"] });
+        // Keep "Pushing..." visible for at least 800ms so the state change is perceptible
+        const elapsed = Date.now() - pushedAt;
+        const remaining = Math.max(0, 800 - elapsed);
+        setTimeout(() => {
+          toast.success("Push enqueued — delivering shortly");
+          setPushingSource(null);
+        }, remaining);
       })
       .catch((error) => {
         logger.error("Manual push failed", { sourceId, error });
         toast.error(`Push failed: ${error}`);
-      })
-      .finally(() => {
         setPushingSource(null);
       });
   };
