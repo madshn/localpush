@@ -5,19 +5,93 @@ import {
   type ActivityEntry,
 } from "../api/hooks/useActivityLog";
 import { ActivityCard } from "./ActivityCard";
+import { HourlyGroupCard, type HourlyGroupData } from "./HourlyGroupCard";
 import { DateDivider } from "./DateDivider";
 
-function groupByDate(
-  entries: ActivityEntry[]
-): Map<string, ActivityEntry[]> {
-  const groups = new Map<string, ActivityEntry[]>();
+type ActivityItem =
+  | { type: "entry"; entry: ActivityEntry }
+  | { type: "hourGroup"; group: HourlyGroupData };
+
+/** Group key for collapsible hourly buckets: source + target + date + hour */
+function buildGroupKey(entry: ActivityEntry): string | null {
+  if (entry.triggerType !== "file_change") return null;
+  if (entry.status !== "delivered") return null;
+  if (!entry.deliveredTo) return null;
+  const hour = entry.timestamp.getHours();
+  const dateKey = entry.timestamp.toDateString();
+  return `${entry.sourceId}|${entry.deliveredTo.target_type}|${dateKey}|${hour}`;
+}
+
+/** Collapse file_change delivered entries into hourly groups.
+ *  Manual, scheduled, failed, pending entries stay ungrouped. */
+function groupIntoHourlyBuckets(entries: ActivityEntry[]): ActivityItem[] {
+  const groups = new Map<string, HourlyGroupData>();
+  const entryGroupKey = new Map<string, string>();
+
+  // First pass: collect groups
   for (const entry of entries) {
-    const key = entry.timestamp.toDateString();
+    const key = buildGroupKey(entry);
+    if (!key) continue;
+    entryGroupKey.set(entry.id, key);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.entries.push(entry);
+      if (entry.timestamp < existing.earliestTime) {
+        existing.earliestTime = entry.timestamp;
+      }
+    } else {
+      groups.set(key, {
+        key,
+        source: entry.source,
+        targetType: entry.deliveredTo!.target_type,
+        targetUrl: entry.deliveredTo!.target_url,
+        entries: [entry],
+        latestTime: entry.timestamp,
+        earliestTime: entry.timestamp,
+      });
+    }
+  }
+
+  // Second pass: build item list preserving chronological position
+  const seenGroups = new Set<string>();
+  const items: ActivityItem[] = [];
+
+  for (const entry of entries) {
+    const key = entryGroupKey.get(entry.id);
+    if (key) {
+      if (!seenGroups.has(key)) {
+        seenGroups.add(key);
+        const group = groups.get(key)!;
+        if (group.entries.length === 1) {
+          items.push({ type: "entry", entry: group.entries[0] });
+        } else {
+          items.push({ type: "hourGroup", group });
+        }
+      }
+      // Skip subsequent entries — they're inside the group
+    } else {
+      items.push({ type: "entry", entry });
+    }
+  }
+
+  return items;
+}
+
+function groupByDate(
+  items: ActivityItem[]
+): Map<string, ActivityItem[]> {
+  const groups = new Map<string, ActivityItem[]>();
+  for (const item of items) {
+    const ts =
+      item.type === "entry"
+        ? item.entry.timestamp
+        : item.group.latestTime;
+    const key = ts.toDateString();
     const group = groups.get(key);
     if (group) {
-      group.push(entry);
+      group.push(item);
     } else {
-      groups.set(key, [entry]);
+      groups.set(key, [item]);
     }
   }
   return groups;
@@ -51,7 +125,8 @@ export function ActivityLog() {
       )
     : entries;
 
-  const dateGroups = groupByDate(filtered);
+  const items = groupIntoHourlyBuckets(filtered);
+  const dateGroups = groupByDate(items);
 
   return (
     <div>
@@ -80,14 +155,24 @@ export function ActivityLog() {
 
       {/* Date-grouped entries */}
       <div className="flex flex-col gap-1">
-        {Array.from(dateGroups.entries()).map(([dateKey, groupEntries]) => (
-          <div key={dateKey}>
-            <DateDivider date={groupEntries[0].timestamp} />
-            {groupEntries.map((entry) => (
-              <ActivityCard key={entry.id} entry={entry} />
-            ))}
-          </div>
-        ))}
+        {Array.from(dateGroups.entries()).map(([dateKey, groupItems]) => {
+          const firstDate =
+            groupItems[0].type === "entry"
+              ? groupItems[0].entry.timestamp
+              : groupItems[0].group.latestTime;
+          return (
+            <div key={dateKey}>
+              <DateDivider date={firstDate} />
+              {groupItems.map((item) =>
+                item.type === "entry" ? (
+                  <ActivityCard key={item.entry.id} entry={item.entry} />
+                ) : (
+                  <HourlyGroupCard key={item.group.key} group={item.group} />
+                )
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {searchFilter && filtered.length === 0 && (
