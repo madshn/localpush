@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Plus, X, Copy, Check } from "lucide-react";
 import { logger } from "../utils/logger";
 
-type DeliveryMode = "on_change" | "daily" | "weekly";
+type DeliveryMode = "on_change" | "interval" | "daily" | "weekly";
 
 interface DeliveryConfigProps {
   sourceId: string;
@@ -60,6 +60,11 @@ export function DeliveryConfig({
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>(initialDeliveryMode || "on_change");
   const [scheduleTime, setScheduleTime] = useState(initialScheduleTime || "00:01");
   const [scheduleDay, setScheduleDay] = useState(initialScheduleDay || "monday");
+  const [intervalMinutes, setIntervalMinutes] = useState(
+    initialDeliveryMode === "interval" && initialScheduleTime
+      ? parseInt(initialScheduleTime, 10) || 15
+      : 15
+  );
 
   const addHeader = () => {
     setHeaders([...headers, ["", ""]]);
@@ -76,6 +81,12 @@ export function DeliveryConfig({
     setHeaders(headers.filter((_, i) => i !== index));
   };
 
+  const resolveScheduleTime = (): string | undefined => {
+    if (deliveryMode === "on_change") return undefined;
+    if (deliveryMode === "interval") return String(intervalMinutes);
+    return scheduleTime;
+  };
+
   const handleConfirm = () => {
     const nonEmptyHeaders = headers.filter(([k]) => k.trim() !== "");
     onConfirm(
@@ -83,14 +94,14 @@ export function DeliveryConfig({
       authName,
       authValue,
       deliveryMode,
-      deliveryMode !== "on_change" ? scheduleTime : undefined,
+      resolveScheduleTime(),
       deliveryMode === "weekly" ? scheduleDay : undefined
     );
   };
 
   const handleSkip = () => {
     onConfirm([], "", "", deliveryMode,
-      deliveryMode !== "on_change" ? scheduleTime : undefined,
+      resolveScheduleTime(),
       deliveryMode === "weekly" ? scheduleDay : undefined
     );
   };
@@ -257,10 +268,43 @@ export function DeliveryConfig({
               className="mt-0.5 accent-accent"
             />
             <div>
-              <div className="text-xs font-medium">On change</div>
+              <div className="text-xs font-medium">Real-time</div>
               <div className="text-[10px] text-text-secondary">
                 Push immediately when file updates
               </div>
+            </div>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="deliveryMode"
+              value="interval"
+              checked={deliveryMode === "interval"}
+              onChange={() => setDeliveryMode("interval")}
+              className="mt-0.5 accent-accent"
+            />
+            <div className="flex-1">
+              <div className="text-xs font-medium">Every x minutes</div>
+              <div className="text-[10px] text-text-secondary">
+                Push at a regular interval
+              </div>
+              {deliveryMode === "interval" && (
+                <div className="flex items-center gap-1.5 mt-1">
+                  <span className="text-[10px] text-text-secondary">Every</span>
+                  <select
+                    value={intervalMinutes}
+                    onChange={(e) => setIntervalMinutes(parseInt(e.target.value, 10))}
+                    className={`${inputClass} !w-[70px]`}
+                  >
+                    <option value={5}>5</option>
+                    <option value={10}>10</option>
+                    <option value={15}>15</option>
+                    <option value={30}>30</option>
+                    <option value={60}>60</option>
+                  </select>
+                  <span className="text-[10px] text-text-secondary">minutes</span>
+                </div>
+              )}
             </div>
           </label>
           <label className="flex items-start gap-2 cursor-pointer">

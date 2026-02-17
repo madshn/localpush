@@ -19,7 +19,7 @@ export type FlowStep =
   | "configure_delivery"
   | "security_check";
 
-export type DeliveryMode = "on_change" | "daily" | "weekly";
+export type DeliveryMode = "on_change" | "interval" | "daily" | "weekly";
 
 export interface FlowState {
   sourceId: string;

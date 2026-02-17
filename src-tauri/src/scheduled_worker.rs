@@ -16,6 +16,21 @@ use crate::traits::DeliveryLedgerTrait;
 
 /// Check if a scheduled binding is due for delivery
 fn is_due(binding: &SourceBinding, now: chrono::DateTime<Local>) -> bool {
+    // Interval mode: check elapsed time since last delivery
+    if binding.delivery_mode == "interval" {
+        let interval_mins: i64 = match &binding.schedule_time {
+            Some(t) => t.parse().unwrap_or(15),
+            None => 15,
+        };
+        let interval_secs = interval_mins * 60;
+
+        return match binding.last_scheduled_at {
+            Some(last) => now.timestamp() - last >= interval_secs,
+            None => true, // Never delivered — due immediately
+        };
+    }
+
+    // Daily/weekly mode: check if target time has passed today
     let schedule_time = match &binding.schedule_time {
         Some(t) => t,
         None => return false,
@@ -281,6 +296,31 @@ mod tests {
         // (they're filtered out by get_scheduled_bindings). But is_due doesn't reject
         // based on delivery_mode — that filtering happens upstream.
         assert!(is_due(&binding, now)); // is_due is mode-agnostic for daily
+    }
+
+    #[test]
+    fn test_interval_due_never_delivered() {
+        let binding = make_binding("interval", "15", None, None);
+        let now = Local.with_ymd_and_hms(2026, 2, 10, 9, 30, 0).unwrap();
+        assert!(is_due(&binding, now)); // Never delivered → due immediately
+    }
+
+    #[test]
+    fn test_interval_due_after_elapsed() {
+        // Last delivered 20 minutes ago, interval is 15 minutes
+        let now = Local.with_ymd_and_hms(2026, 2, 10, 9, 30, 0).unwrap();
+        let last = now.timestamp() - 20 * 60; // 20 mins ago
+        let binding = make_binding("interval", "15", None, Some(last));
+        assert!(is_due(&binding, now));
+    }
+
+    #[test]
+    fn test_interval_not_due_before_elapsed() {
+        // Last delivered 5 minutes ago, interval is 15 minutes
+        let now = Local.with_ymd_and_hms(2026, 2, 10, 9, 30, 0).unwrap();
+        let last = now.timestamp() - 5 * 60; // 5 mins ago
+        let binding = make_binding("interval", "15", None, Some(last));
+        assert!(!is_due(&binding, now));
     }
 
     #[test]

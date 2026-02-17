@@ -16,7 +16,7 @@ interface SourcePreview {
   lastUpdated: string | null;
 }
 
-type DeliveryMode = "on_change" | "daily" | "weekly";
+type DeliveryMode = "on_change" | "interval" | "daily" | "weekly";
 
 type FlowStep =
   | "idle"
@@ -119,6 +119,10 @@ const statusConfig = {
 
 function deliveryModeBadge(binding: Binding): string | null {
   if (!binding.delivery_mode || binding.delivery_mode === "on_change") return null;
+  if (binding.delivery_mode === "interval") {
+    const mins = binding.schedule_time || "15";
+    return `Every ${mins}m`;
+  }
   if (binding.delivery_mode === "daily") {
     return `Daily ${binding.schedule_time || "00:01"}`;
   }
@@ -243,6 +247,15 @@ export function PipelineCard({
                   <Info size={13} />
                 </button>
               )}
+              {source.enabled && !isAvailable && (
+                <button
+                  onClick={() => setShowProperties(!showProperties)}
+                  className="p-0.5 text-text-secondary/50 hover:text-accent transition-colors rounded"
+                  title="Data Properties"
+                >
+                  <Pencil size={13} />
+                </button>
+              )}
             </div>
             <p className="text-xs text-text-secondary">{source.description}</p>
           </div>
@@ -327,22 +340,26 @@ export function PipelineCard({
                 </div>
               )}
             </div>
-            {source.enabled && (
+            {source.enabled && !showProperties && (
               <button
                 onClick={() => setShowProperties(!showProperties)}
                 className="mt-2 flex items-center gap-1.5 text-[11px] text-text-secondary hover:text-accent transition-colors"
               >
                 <SlidersHorizontal size={11} />
-                {showProperties ? "Hide Data Properties" : "Data Properties"}
+                Data Properties
               </button>
             )}
-            {showProperties && source.enabled && (
-              <SourceSettings
-                sourceId={source.id}
-                sourceName={source.name}
-                onClose={() => setShowProperties(false)}
-              />
-            )}
+          </div>
+        )}
+
+        {/* Data Properties panel (accessible from header pencil or info panel) */}
+        {showProperties && source.enabled && (
+          <div className="mt-2">
+            <SourceSettings
+              sourceId={source.id}
+              sourceName={source.name}
+              onClose={() => setShowProperties(false)}
+            />
           </div>
         )}
 
