@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>LocalPush - Pipeline View</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Noto+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#348af4",
+                        "background-light": "#f5f7f8",
+                        "background-dark": "#1a1a1a", /* User requested specific dark gray */
+                        "card-dark": "#262626",
+                        "card-lighter": "#333333",
+                        "success": "#0bda5e",
+                        "warning": "#f59e0b",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"],
+                        "body": ["Noto Sans", "sans-serif"],
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "2xl": "1rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .font-display { font-family: 'Space Grotesk', sans-serif; }
+        .font-body { font-family: 'Noto Sans', sans-serif; }
+        /* Smooth scrolling for horizontal areas */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white antialiased min-h-screen font-body selection:bg-primary/30">
+<!-- Main Container -->
+<div class="relative flex flex-col mx-auto w-full max-w-md min-h-screen bg-background-light dark:bg-background-dark overflow-hidden shadow-2xl">
+<!-- Header -->
+<header class="flex items-center justify-between p-5 pt-6 bg-background-light dark:bg-background-dark sticky top-0 z-20">
+<div class="flex items-center gap-3">
+<div class="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/20 text-primary">
+<span class="material-symbols-outlined text-2xl">hub</span>
+</div>
+<div>
+<h1 class="text-xl font-bold font-display tracking-tight leading-none">LocalPush</h1>
+<p class="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">MacBook Pro • Online</p>
+</div>
+</div>
+<button class="flex items-center justify-center w-10 h-10 rounded-full hover:bg-slate-200 dark:hover:bg-white/10 transition-colors">
+<span class="material-symbols-outlined text-slate-600 dark:text-slate-300">notifications</span>
+</button>
+</header>
+<!-- Segmented Control / Tabs -->
+<div class="px-5 pb-2">
+<div class="flex p-1 bg-slate-200 dark:bg-card-dark rounded-xl">
+<button class="flex-1 py-2 px-3 text-sm font-semibold rounded-lg bg-white dark:bg-primary text-slate-900 dark:text-white shadow-sm transition-all font-display">
+                    Pipeline
+                </button>
+<button class="flex-1 py-2 px-3 text-sm font-medium rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all font-display">
+                    Activity
+                </button>
+<button class="flex-1 py-2 px-3 text-sm font-medium rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all font-display">
+                    Settings
+                </button>
+</div>
+</div>
+<!-- Dashboard Content -->
+<main class="flex-1 flex flex-col gap-6 p-5 pb-24 overflow-y-auto no-scrollbar">
+<!-- Summary Stats Block -->
+<section>
+<div class="grid grid-cols-2 gap-3">
+<div class="p-4 bg-white dark:bg-card-dark rounded-2xl shadow-sm border border-slate-100 dark:border-white/5">
+<div class="flex items-start justify-between mb-2">
+<span class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Deliveries</span>
+<span class="material-symbols-outlined text-primary text-lg">bolt</span>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-3xl font-bold font-display text-slate-900 dark:text-white">847</span>
+<span class="text-xs font-bold text-success mb-1.5">+12%</span>
+</div>
+<!-- Micro Sparkline -->
+<div class="h-1 w-full mt-3 bg-slate-100 dark:bg-white/10 rounded-full overflow-hidden">
+<div class="h-full bg-primary w-3/4 rounded-full"></div>
+</div>
+</div>
+<div class="p-4 bg-white dark:bg-card-dark rounded-2xl shadow-sm border border-slate-100 dark:border-white/5">
+<div class="flex items-start justify-between mb-2">
+<span class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">System Status</span>
+<span class="material-symbols-outlined text-success text-lg">check_circle</span>
+</div>
+<div class="mt-1">
+<span class="text-xl font-bold font-display text-slate-900 dark:text-white">Operational</span>
+<p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Uptime: 14d 2h</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Active Pipelines Header -->
+<div class="flex items-center justify-between mt-2">
+<h2 class="text-lg font-bold font-display text-slate-900 dark:text-white">Active Pipelines</h2>
+<button class="text-primary text-sm font-bold flex items-center gap-0.5">
+<span class="material-symbols-outlined text-lg">add</span> New
+                </button>
+</div>
+<!-- Pipeline Card 1: Claude Code Stats -->
+<div class="group relative bg-white dark:bg-card-dark rounded-2xl p-0 border border-slate-100 dark:border-white/5 shadow-sm overflow-hidden">
+<!-- Status Stripe -->
+<div class="absolute left-0 top-0 bottom-0 w-1.5 bg-primary"></div>
+<div class="p-5">
+<!-- Header -->
+<div class="flex justify-between items-start mb-4 pl-2">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400 flex items-center justify-center">
+<span class="material-symbols-outlined">description</span>
+</div>
+<div>
+<h3 class="text-base font-bold text-slate-900 dark:text-white leading-tight font-display">Claude Code Stats</h3>
+<p class="text-xs text-slate-500 dark:text-slate-400 font-medium">JSON File Source</p>
+</div>
+</div>
+<div class="px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold flex items-center gap-1.5">
+<span class="relative flex h-2 w-2">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+</span>
+                            Flowing
+                        </div>
+</div>
+<!-- Flow Visual -->
+<div class="relative py-4 pl-2">
+<!-- Curved connection line -->
+<div class="absolute left-[19px] top-0 bottom-0 w-0.5 border-l-2 border-dashed border-slate-200 dark:border-white/10"></div>
+<!-- Target Item -->
+<div class="flex items-center gap-3 relative z-10 mt-1">
+<div class="w-8 h-8 rounded-full bg-slate-100 dark:bg-card-lighter border-2 border-slate-200 dark:border-slate-600 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-slate-500 dark:text-slate-400 text-sm">arrow_downward</span>
+</div>
+<div class="flex-1 bg-slate-50 dark:bg-white/5 p-3 rounded-lg border border-slate-100 dark:border-white/5 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="p-1.5 bg-blue-500/20 rounded text-blue-400">
+<span class="material-symbols-outlined text-sm">webhook</span>
+</div>
+<div>
+<p class="text-xs font-bold text-slate-700 dark:text-slate-200">Metrick Ingest</p>
+<p class="text-[10px] text-slate-400">n8n Webhook</p>
+</div>
+</div>
+<div class="text-right">
+<p class="text-xs font-bold font-display text-slate-900 dark:text-white">847</p>
+<p class="text-[10px] text-slate-500 dark:text-slate-400">Deliveries</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Metrics / Sparkline Area -->
+<div class="mt-3 pl-2 pt-3 border-t border-slate-100 dark:border-white/5">
+<div class="flex justify-between items-end">
+<div class="flex flex-col gap-1">
+<span class="text-[10px] uppercase font-semibold text-slate-400 dark:text-slate-500 tracking-wider">Throughput</span>
+<span class="text-sm font-medium text-slate-600 dark:text-slate-300">12 req/min</span>
+</div>
+<!-- Fake Sparkline SVG -->
+<svg class="w-24 h-8 text-primary" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 100 30">
+<path d="M0 25 L10 20 L20 22 L30 15 L40 18 L50 10 L60 12 L70 5 L80 15 L90 10 L100 20" stroke-linecap="round" stroke-linejoin="round"></path>
+<defs>
+<lineargradient id="gradient" x1="0" x2="0" y1="0" y2="1">
+<stop offset="0%" stop-color="#348af4" stop-opacity="0.2"></stop>
+<stop offset="100%" stop-color="#348af4" stop-opacity="0"></stop>
+</lineargradient>
+</defs>
+<path d="M0 25 L10 20 L20 22 L30 15 L40 18 L50 10 L60 12 L70 5 L80 15 L90 10 L100 20 V 30 H 0 Z" fill="url(#gradient)" stroke="none"></path>
+</svg>
+</div>
+</div>
+</div>
+</div>
+<!-- Pipeline Card 2: Apple Podcasts -->
+<div class="group relative bg-white dark:bg-card-dark rounded-2xl p-0 border border-slate-100 dark:border-white/5 shadow-sm overflow-hidden">
+<!-- Status Stripe (Green/Healthy) -->
+<div class="absolute left-0 top-0 bottom-0 w-1.5 bg-success"></div>
+<div class="p-5">
+<!-- Header -->
+<div class="flex justify-between items-start mb-4 pl-2">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+<span class="material-symbols-outlined">podcasts</span>
+</div>
+<div>
+<h3 class="text-base font-bold text-slate-900 dark:text-white leading-tight font-display">Apple Podcasts</h3>
+<p class="text-xs text-slate-500 dark:text-slate-400 font-medium">SQLite Database</p>
+</div>
+</div>
+<div class="px-2.5 py-1 rounded-full bg-success/10 border border-success/20 text-success text-xs font-bold flex items-center gap-1.5">
+<span class="relative inline-flex rounded-full h-2 w-2 bg-success"></span>
+                            Healthy
+                        </div>
+</div>
+<!-- Flow Visual -->
+<div class="relative py-4 pl-2">
+<!-- Curved connection line -->
+<div class="absolute left-[19px] top-0 bottom-0 w-0.5 border-l-2 border-dashed border-slate-200 dark:border-white/10"></div>
+<!-- Target Item -->
+<div class="flex items-center gap-3 relative z-10 mt-1">
+<div class="w-8 h-8 rounded-full bg-slate-100 dark:bg-card-lighter border-2 border-slate-200 dark:border-slate-600 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-slate-500 dark:text-slate-400 text-sm">arrow_downward</span>
+</div>
+<div class="flex-1 bg-slate-50 dark:bg-white/5 p-3 rounded-lg border border-slate-100 dark:border-white/5 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="p-1.5 bg-emerald-500/20 rounded text-emerald-400">
+<span class="material-symbols-outlined text-sm">notifications_active</span>
+</div>
+<div>
+<p class="text-xs font-bold text-slate-700 dark:text-slate-200">Mobile Alerts</p>
+<p class="text-[10px] text-slate-400">ntfy Service</p>
+</div>
+</div>
+<div class="text-right">
+<p class="text-xs font-bold font-display text-slate-900 dark:text-white">Idle</p>
+<p class="text-[10px] text-slate-500 dark:text-slate-400">Last: 2m ago</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Metrics -->
+<div class="mt-3 pl-2 pt-3 border-t border-slate-100 dark:border-white/5">
+<div class="flex justify-between items-center">
+<div class="flex flex-col gap-1">
+<span class="text-[10px] uppercase font-semibold text-slate-400 dark:text-slate-500 tracking-wider">Last Sync</span>
+<span class="text-sm font-medium text-slate-600 dark:text-slate-300">Today, 10:42 AM</span>
+</div>
+<button class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 text-xs font-medium text-slate-600 dark:text-slate-300 transition-colors">
+                                View Logs
+                            </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Pipeline Card 3: System Logs (Inactive/Paused Example) -->
+<div class="group relative bg-white dark:bg-card-dark rounded-2xl p-0 border border-slate-100 dark:border-white/5 shadow-sm overflow-hidden opacity-80">
+<!-- Status Stripe (Gray/Paused) -->
+<div class="absolute left-0 top-0 bottom-0 w-1.5 bg-slate-400 dark:bg-slate-600"></div>
+<div class="p-5">
+<!-- Header -->
+<div class="flex justify-between items-start mb-4 pl-2">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 flex items-center justify-center">
+<span class="material-symbols-outlined">terminal</span>
+</div>
+<div>
+<h3 class="text-base font-bold text-slate-900 dark:text-white leading-tight font-display">System Logs</h3>
+<p class="text-xs text-slate-500 dark:text-slate-400 font-medium">Text File Stream</p>
+</div>
+</div>
+<div class="px-2.5 py-1 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-300 text-xs font-bold flex items-center gap-1.5">
+<span class="relative inline-flex rounded-full h-2 w-2 bg-slate-400"></span>
+                             Paused
+                         </div>
+</div>
+<!-- Flow Visual -->
+<div class="relative py-4 pl-2">
+<div class="absolute left-[19px] top-0 bottom-0 w-0.5 border-l-2 border-dashed border-slate-200 dark:border-white/10"></div>
+<div class="flex items-center gap-3 relative z-10 mt-1">
+<div class="w-8 h-8 rounded-full bg-slate-100 dark:bg-card-lighter border-2 border-slate-200 dark:border-slate-600 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-slate-400 text-sm">pause</span>
+</div>
+<div class="flex-1 bg-slate-50 dark:bg-white/5 p-3 rounded-lg border border-slate-100 dark:border-white/5 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="p-1.5 bg-slate-200 dark:bg-slate-700 rounded text-slate-500">
+<span class="material-symbols-outlined text-sm">storage</span>
+</div>
+<div>
+<p class="text-xs font-bold text-slate-700 dark:text-slate-200">S3 Backup</p>
+<p class="text-[10px] text-slate-400">AWS Bucket</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom spacer to clear the nav bar visual area -->
+<div class="h-6"></div>
+</main>
+<!-- Bottom Navigation Bar (Mobile) -->
+<nav class="absolute bottom-0 w-full bg-white/90 dark:bg-[#1a1a1a]/95 backdrop-blur-md border-t border-slate-200 dark:border-white/5 pb-6 pt-2 px-6 flex justify-between items-center z-30">
+<button class="flex flex-col items-center gap-1 p-2 text-primary group">
+<span class="material-symbols-outlined text-2xl group-hover:scale-110 transition-transform">hub</span>
+<span class="text-[10px] font-bold">Pipeline</span>
+</button>
+<button class="flex flex-col items-center gap-1 p-2 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition-colors group">
+<span class="material-symbols-outlined text-2xl group-hover:scale-110 transition-transform">monitoring</span>
+<span class="text-[10px] font-medium">Activity</span>
+</button>
+<button class="flex flex-col items-center gap-1 p-2 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition-colors group">
+<span class="material-symbols-outlined text-2xl group-hover:scale-110 transition-transform">settings</span>
+<span class="text-[10px] font-medium">Settings</span>
+</button>
+</nav>
+<!-- Background decorative gradient element -->
+<div class="absolute top-[-100px] right-[-100px] w-64 h-64 bg-primary/20 rounded-full blur-[100px] pointer-events-none opacity-50 z-0"></div>
+<div class="absolute bottom-[-50px] left-[-50px] w-48 h-48 bg-purple-500/10 rounded-full blur-[80px] pointer-events-none opacity-30 z-0"></div>
+</div>
+</body></html>

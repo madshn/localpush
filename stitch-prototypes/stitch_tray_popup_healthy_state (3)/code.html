@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>LocalPush - Activity Log</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#52a0ff",
+                        "background-light": "#f5f7f8",
+                        "background-dark": "#1a1a1a",
+                        "surface-dark": "#252525",
+                        "border-dark": "#333333",
+                        "text-secondary": "#8daace",
+                        "success": "#4ade80",
+                        "error": "#f87171"
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"],
+                        "mono": ["SF Mono", "Menlo", "Monaco", "Courier New", "monospace"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "2xl": "1rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark min-h-screen text-slate-900 dark:text-white font-display selection:bg-primary/30">
+<div class="relative flex h-full w-full flex-col max-w-md mx-auto min-h-screen bg-background-light dark:bg-background-dark overflow-hidden shadow-2xl border-x border-slate-200 dark:border-border-dark/50">
+<div class="sticky top-0 z-20 bg-background-light/95 dark:bg-background-dark/95 backdrop-blur-md border-b border-slate-200 dark:border-border-dark">
+<div class="flex items-center p-4 pb-2 justify-between">
+<h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] flex-1">LocalPush</h2>
+<div class="flex items-center justify-end gap-3">
+<button class="flex items-center justify-center rounded-lg h-10 w-10 text-slate-500 dark:text-text-secondary hover:bg-slate-100 dark:hover:bg-surface-dark transition-colors">
+<span class="material-symbols-outlined text-2xl">filter_list</span>
+</button>
+<button class="flex items-center justify-center rounded-lg h-10 w-10 text-slate-500 dark:text-text-secondary hover:bg-slate-100 dark:hover:bg-surface-dark transition-colors">
+<span class="material-symbols-outlined text-2xl">settings</span>
+</button>
+</div>
+</div>
+<div class="px-2 pb-0">
+<div class="flex px-2 justify-between gap-1">
+<button class="flex flex-col items-center justify-center border-b-[3px] border-b-transparent text-slate-500 dark:text-text-secondary pb-[13px] pt-3 flex-1 hover:text-primary transition-colors">
+<p class="text-sm font-bold leading-normal tracking-[0.015em]">Sources</p>
+</button>
+<button class="flex flex-col items-center justify-center border-b-[3px] border-primary text-primary dark:text-white pb-[13px] pt-3 flex-1">
+<p class="text-sm font-bold leading-normal tracking-[0.015em]">Activity</p>
+</button>
+<button class="flex flex-col items-center justify-center border-b-[3px] border-b-transparent text-slate-500 dark:text-text-secondary pb-[13px] pt-3 flex-1 hover:text-primary transition-colors">
+<p class="text-sm font-bold leading-normal tracking-[0.015em]">Settings</p>
+</button>
+</div>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto">
+<div class="px-4 py-4 sticky top-[108px] z-10 bg-background-light dark:bg-background-dark">
+<label class="flex flex-col w-full h-11">
+<div class="flex w-full flex-1 items-stretch rounded-xl h-full shadow-sm">
+<div class="text-slate-400 dark:text-text-secondary flex bg-white dark:bg-surface-dark items-center justify-center pl-4 rounded-l-xl border border-r-0 border-slate-200 dark:border-transparent">
+<span class="material-symbols-outlined">search</span>
+</div>
+<input class="flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-r-xl text-slate-900 dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-l-0 border-slate-200 dark:border-transparent bg-white dark:bg-surface-dark h-full placeholder:text-slate-400 dark:placeholder:text-text-secondary px-4 pl-2 text-base font-normal leading-normal" placeholder="Search logs..."/>
+</div>
+</label>
+</div>
+<div class="flex flex-col px-4 gap-3 pb-8">
+<div class="flex items-center gap-4 py-2">
+<div class="h-px bg-slate-200 dark:bg-border-dark flex-1"></div>
+<span class="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-text-secondary">Today</span>
+<div class="h-px bg-slate-200 dark:bg-border-dark flex-1"></div>
+</div>
+<div class="group relative flex flex-col gap-0 bg-white dark:bg-surface-dark/50 border border-slate-200 dark:border-border-dark rounded-xl overflow-hidden hover:border-slate-300 dark:hover:border-primary/30 transition-all">
+<div class="flex items-center gap-4 p-4 justify-between cursor-pointer">
+<div class="flex items-center gap-4 min-w-0">
+<div class="relative flex items-center justify-center shrink-0 size-10 rounded-full bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-success">
+<span class="material-symbols-outlined text-[20px]">check_circle</span>
+<div class="absolute inset-0 rounded-full ring-1 ring-inset ring-green-600/20 dark:ring-success/20"></div>
+</div>
+<div class="flex flex-col justify-center min-w-0">
+<p class="text-slate-900 dark:text-white text-base font-semibold leading-tight truncate">Claude Code Stats delivered</p>
+<p class="text-slate-500 dark:text-text-secondary text-sm font-normal leading-normal truncate">Source: VS Code Extension</p>
+</div>
+</div>
+<div class="flex items-center gap-3 shrink-0">
+<span class="text-slate-400 dark:text-text-secondary text-xs font-mono">10:42 AM</span>
+<span class="material-symbols-outlined text-slate-400 dark:text-text-secondary text-xl">chevron_right</span>
+</div>
+</div>
+</div>
+<div class="group relative flex flex-col gap-0 bg-white dark:bg-surface-dark border border-red-200 dark:border-red-900/30 rounded-xl overflow-hidden shadow-lg shadow-black/20 ring-1 ring-red-500/10 dark:ring-red-500/20">
+<div class="flex items-start gap-4 p-4 justify-between cursor-pointer border-b border-slate-100 dark:border-border-dark/50 bg-red-50/50 dark:bg-red-900/5">
+<div class="flex items-start gap-4 min-w-0">
+<div class="relative flex items-center justify-center shrink-0 size-10 rounded-full bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-error mt-0.5">
+<span class="material-symbols-outlined text-[20px]">error</span>
+<div class="absolute inset-0 rounded-full ring-1 ring-inset ring-red-600/20 dark:ring-error/20"></div>
+</div>
+<div class="flex flex-col justify-center min-w-0">
+<p class="text-slate-900 dark:text-white text-base font-semibold leading-tight">Apple Podcasts delivery failed</p>
+<div class="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-sm text-slate-500 dark:text-text-secondary">
+<span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600"></span> ID: lp_8823</span>
+<span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600"></span> Retry: 0</span>
+</div>
+</div>
+</div>
+<div class="flex flex-col items-end gap-1 shrink-0">
+<span class="text-slate-400 dark:text-text-secondary text-xs font-mono">10:40 AM</span>
+<span class="material-symbols-outlined text-slate-400 dark:text-text-secondary text-xl transform rotate-90 transition-transform">chevron_right</span>
+</div>
+</div>
+<div class="p-4 bg-slate-50 dark:bg-[#16202e]">
+<div class="flex items-center justify-between mb-2">
+<p class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-text-secondary">Payload Data</p>
+<button class="text-xs font-medium text-primary hover:text-primary/80 transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">content_copy</span> Copy JSON
+                            </button>
+</div>
+<div class="w-full overflow-x-auto rounded-lg bg-slate-900 border border-slate-800 shadow-inner">
+<pre class="p-3 text-xs font-mono leading-relaxed text-slate-300"><code><span class="text-purple-400">{</span>
+  <span class="text-blue-400">"event"</span>: <span class="text-green-400">"podcast_status"</span>,
+  <span class="text-blue-400">"status"</span>: <span class="text-orange-400">503</span>,
+  <span class="text-blue-400">"timestamp"</span>: <span class="text-green-400">"2023-10-27T10:40:01Z"</span>,
+  <span class="text-blue-400">"error"</span>: <span class="text-green-400">"Service Unavailable"</span>
+<span class="text-purple-400">}</span></code></pre>
+</div>
+<div class="mt-4 flex gap-3">
+<button class="flex-1 h-9 rounded-lg bg-red-600/10 dark:bg-red-500/10 text-red-700 dark:text-red-400 text-sm font-semibold hover:bg-red-600/20 dark:hover:bg-red-500/20 transition-colors border border-red-200 dark:border-red-900/30 flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-lg">refresh</span>
+                                Retry
+                            </button>
+<button class="flex-1 h-9 rounded-lg bg-white dark:bg-surface-dark border border-slate-200 dark:border-border-dark text-slate-700 dark:text-white text-sm font-semibold hover:bg-slate-50 dark:hover:bg-border-dark/50 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-lg">bug_report</span>
+                                Debug
+                            </button>
+</div>
+</div>
+</div>
+<div class="group relative flex flex-col gap-0 bg-white dark:bg-surface-dark/50 border border-slate-200 dark:border-border-dark rounded-xl overflow-hidden hover:border-slate-300 dark:hover:border-primary/30 transition-all">
+<div class="flex items-center gap-4 p-4 justify-between cursor-pointer">
+<div class="flex items-center gap-4 min-w-0">
+<div class="relative flex items-center justify-center shrink-0 size-10 rounded-full bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-success">
+<span class="material-symbols-outlined text-[20px]">check_circle</span>
+<div class="absolute inset-0 rounded-full ring-1 ring-inset ring-green-600/20 dark:ring-success/20"></div>
+</div>
+<div class="flex flex-col justify-center min-w-0">
+<p class="text-slate-900 dark:text-white text-base font-semibold leading-tight truncate">Backup Completed</p>
+<p class="text-slate-500 dark:text-text-secondary text-sm font-normal leading-normal truncate">Source: Time Machine Monitor</p>
+</div>
+</div>
+<div class="flex items-center gap-3 shrink-0">
+<span class="text-slate-400 dark:text-text-secondary text-xs font-mono">09:15 AM</span>
+<span class="material-symbols-outlined text-slate-400 dark:text-text-secondary text-xl">chevron_right</span>
+</div>
+</div>
+</div>
+<div class="group relative flex flex-col gap-0 bg-white dark:bg-surface-dark/50 border border-slate-200 dark:border-border-dark rounded-xl overflow-hidden hover:border-slate-300 dark:hover:border-primary/30 transition-all">
+<div class="flex items-center gap-4 p-4 justify-between cursor-pointer">
+<div class="flex items-center gap-4 min-w-0">
+<div class="relative flex items-center justify-center shrink-0 size-10 rounded-full bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-success">
+<span class="material-symbols-outlined text-[20px]">check_circle</span>
+<div class="absolute inset-0 rounded-full ring-1 ring-inset ring-green-600/20 dark:ring-success/20"></div>
+</div>
+<div class="flex flex-col justify-center min-w-0">
+<p class="text-slate-900 dark:text-white text-base font-semibold leading-tight truncate">Network Status</p>
+<p class="text-slate-500 dark:text-text-secondary text-sm font-normal leading-normal truncate">SSID: Office_5G Connected</p>
+</div>
+</div>
+<div class="flex items-center gap-3 shrink-0">
+<span class="text-slate-400 dark:text-text-secondary text-xs font-mono">08:59 AM</span>
+<span class="material-symbols-outlined text-slate-400 dark:text-text-secondary text-xl">chevron_right</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-4 py-2 mt-2">
+<div class="h-px bg-slate-200 dark:bg-border-dark flex-1"></div>
+<span class="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-text-secondary">Yesterday</span>
+<div class="h-px bg-slate-200 dark:bg-border-dark flex-1"></div>
+</div>
+<div class="group relative flex flex-col gap-0 bg-white dark:bg-surface-dark/50 border border-slate-200 dark:border-border-dark rounded-xl overflow-hidden hover:border-slate-300 dark:hover:border-primary/30 transition-all opacity-80">
+<div class="flex items-center gap-4 p-4 justify-between cursor-pointer">
+<div class="flex items-center gap-4 min-w-0">
+<div class="relative flex items-center justify-center shrink-0 size-10 rounded-full bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-success">
+<span class="material-symbols-outlined text-[20px]">check_circle</span>
+<div class="absolute inset-0 rounded-full ring-1 ring-inset ring-green-600/20 dark:ring-success/20"></div>
+</div>
+<div class="flex flex-col justify-center min-w-0">
+<p class="text-slate-900 dark:text-white text-base font-semibold leading-tight truncate">Safari History Sync</p>
+<p class="text-slate-500 dark:text-text-secondary text-sm font-normal leading-normal truncate">iCloud Sync</p>
+</div>
+</div>
+<div class="flex items-center gap-3 shrink-0">
+<span class="text-slate-400 dark:text-text-secondary text-xs font-mono">11:30 PM</span>
+<span class="material-symbols-outlined text-slate-400 dark:text-text-secondary text-xl">chevron_right</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+</body></html>

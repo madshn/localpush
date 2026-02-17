@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#4f9eff",
+              "background-light": "#f5f7f8",
+              "background-dark": "#0a0a0a",
+              "border-muted": "#222222",
+              "text-muted": "#a0a0a0",
+              "problem": "#f87171",
+              "solution": "#4ade80",
+            },
+            fontFamily: {
+              "display": ["Inter", "sans-serif"],
+              "mono": ["JetBrains Mono", "monospace"],
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<title>LocalPush | Unlock your Mac data</title>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-white selection:bg-primary/30">
+<nav class="sticky top-0 z-50 border-b border-border-muted bg-background-dark/80 backdrop-blur-md">
+<div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+<span class="material-icons text-background-dark text-xl">shortcut</span>
+</div>
+<span class="font-bold text-xl tracking-tight">LocalPush</span>
+</div>
+<span class="px-2 py-0.5 bg-primary/10 text-primary text-[10px] font-mono font-bold border border-primary/20 rounded-full tracking-wider uppercase">Beta</span>
+</div>
+<div class="flex items-center gap-8">
+<a class="flex items-center gap-1 text-sm text-text-muted hover:text-white transition-colors font-mono" href="#">
+<span class="material-icons text-sm">star</span>
+                Star on GitHub
+            </a>
+</div>
+</div>
+</nav>
+<header class="relative overflow-hidden pt-20 pb-24 border-b border-border-muted">
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/10 rounded-full blur-[120px] pointer-events-none"></div>
+<div class="max-w-7xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-2 gap-16 items-center relative z-10">
+<div>
+<div class="inline-flex items-center px-3 py-1 rounded-full bg-white/5 border border-white/10 text-text-muted text-xs font-mono mb-6">
+<span class="w-2 h-2 rounded-full bg-primary mr-2 animate-pulse"></span>
+                v0.8.5-beta Available
+            </div>
+<h1 class="text-6xl font-bold leading-[1.1] tracking-tight mb-6">
+                Unlock your <br/>
+<span class="text-primary">Mac data.</span>
+</h1>
+<p class="text-xl text-text-muted leading-relaxed max-w-lg mb-10">
+                A macOS menu bar app for developers and power users to unlock and automate local data from apps, logs, and databases.
+            </p>
+<div class="flex items-center gap-6">
+<button class="px-8 py-3.5 bg-primary hover:bg-primary/90 text-background-dark font-semibold rounded-lg transition-all transform hover:scale-[1.02]">
+                    Become an Early Tester
+                </button>
+<a class="group flex items-center gap-2 text-white font-medium hover:text-primary transition-colors" href="#">
+                    Star on GitHub 
+                    <span class="material-icons text-sm transition-transform group-hover:translate-x-1">arrow_forward</span>
+</a>
+</div>
+</div>
+<div class="relative">
+<div class="bg-[#1a1a1a] rounded-xl border border-white/10 shadow-2xl overflow-hidden p-1">
+<div class="bg-[#121212] rounded-lg overflow-hidden border border-white/5">
+<div class="h-10 bg-[#1e1e1e] flex items-center justify-between px-4 border-b border-white/5">
+<div class="flex gap-2">
+<div class="w-3 h-3 rounded-full bg-white/10"></div>
+<div class="w-3 h-3 rounded-full bg-white/10"></div>
+<div class="w-3 h-3 rounded-full bg-white/10"></div>
+</div>
+<div class="text-[10px] font-mono text-white/40 uppercase tracking-widest">LocalPush Status</div>
+<div class="w-12"></div>
+</div>
+<div class="p-4 space-y-3 font-mono">
+<div class="flex items-center justify-between p-3 bg-white/[0.03] rounded border border-white/5">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-solution"></div>
+<span class="text-sm">Claude Code Stats</span>
+</div>
+<span class="text-[10px] text-text-muted italic">Last delivery: 2m ago</span>
+</div>
+<div class="flex items-center justify-between p-3 bg-white/[0.03] rounded border border-white/5">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-solution"></div>
+<span class="text-sm">Apple Podcasts</span>
+</div>
+<span class="text-[10px] text-text-muted italic">Last delivery: 14m ago</span>
+</div>
+<div class="flex items-center justify-between p-3 bg-white/[0.03] rounded border border-white/5">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-solution"></div>
+<span class="text-sm">Apple Notes</span>
+</div>
+<span class="text-[10px] text-text-muted italic">Last delivery: 5m ago</span>
+</div>
+<div class="flex items-center justify-between p-3 bg-white/[0.03] rounded border border-white/5">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-solution"></div>
+<span class="text-sm">Apple Photos</span>
+</div>
+<span class="text-[10px] text-text-muted italic">Last delivery: Just now</span>
+</div>
+</div>
+</div>
+</div>
+<div class="absolute -bottom-6 -right-6 w-32 h-32 bg-primary/20 blur-3xl rounded-full"></div>
+</div>
+</div>
+</header>
+<div class="bg-background-dark py-12 border-b border-border-muted">
+<div class="max-w-7xl mx-auto px-6">
+<div class="flex flex-wrap items-center justify-center gap-8 md:gap-16 text-[10px] font-mono uppercase tracking-[0.2em] text-text-muted">
+<span class="flex items-center gap-2">Open Source (MIT)</span>
+<span class="w-1 h-1 bg-border-muted rounded-full"></span>
+<span class="flex items-center gap-2">Guaranteed Delivery</span>
+<span class="w-1 h-1 bg-border-muted rounded-full"></span>
+<span class="flex items-center gap-2">See Your Data First</span>
+<span class="w-1 h-1 bg-border-muted rounded-full"></span>
+<span class="flex items-center gap-2 text-primary font-bold">Built for macOS</span>
+</div>
+</div>
+</div>
+<section class="py-24 border-b border-border-muted">
+<div class="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-12 lg:gap-24">
+<div class="space-y-6">
+<h3 class="text-problem text-lg font-mono font-medium tracking-tight uppercase">The Problem</h3>
+<h2 class="text-4xl font-bold leading-tight">Your Mac is full of data you can't reach.</h2>
+<p class="text-text-muted text-lg leading-relaxed">
+                Valuable insights from your local development environment and personal apps are trapped. Manual extraction is a productivity killer.
+            </p>
+<div class="pt-4 border-t border-border-muted">
+<ul class="space-y-4 font-mono text-sm text-text-muted">
+<li class="flex items-start gap-3"><span class="text-problem font-bold">×</span> Claude Code token stats locked in ~/.claude/</li>
+<li class="flex items-start gap-3"><span class="text-problem font-bold">×</span> Apple Podcasts history trapped in SQLite</li>
+<li class="flex items-start gap-3"><span class="text-problem font-bold">×</span> Notes/Photos metadata invisible</li>
+<li class="flex items-start gap-3"><span class="text-problem font-bold">×</span> Fragile cron jobs</li>
+</ul>
+</div>
+</div>
+<div class="space-y-6">
+<h3 class="text-solution text-lg font-mono font-medium tracking-tight uppercase">The Solution</h3>
+<h2 class="text-4xl font-bold leading-tight">LocalPush unlocks it.</h2>
+<p class="text-text-muted text-lg leading-relaxed">
+                LocalPush bridges the gap between your system and your automation tools. Securely push data to your workflows with zero friction.
+            </p>
+<div class="pt-4 border-t border-border-muted">
+<ul class="space-y-4 font-mono text-sm text-text-muted">
+<li class="flex items-start gap-3"><span class="text-solution font-bold">✓</span> Pushes to n8n/Make/Zapier/Sheets</li>
+<li class="flex items-start gap-3"><span class="text-solution font-bold">✓</span> WAL-backed guaranteed delivery</li>
+<li class="flex items-start gap-3"><span class="text-solution font-bold">✓</span> See YOUR real data before it leaves</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section class="py-24 border-b border-border-muted">
+<div class="max-w-7xl mx-auto px-6">
+<div class="text-center mb-16">
+<h2 class="text-3xl font-bold mb-4">How it Works</h2>
+<p class="text-text-muted max-w-2xl mx-auto">Streamline your local data automation in four simple steps.</p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+<div class="group p-8 rounded-xl bg-white/[0.02] border border-border-muted hover:border-primary/50 transition-all">
+<div class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-6 group-hover:bg-primary/20 transition-colors">
+<span class="material-icons text-primary">visibility</span>
+</div>
+<div class="font-mono text-[10px] text-primary uppercase mb-2 tracking-widest">Step 01</div>
+<h4 class="text-xl font-bold mb-3">Watch</h4>
+<p class="text-sm text-text-muted leading-relaxed">Monitor local directories, log files, or specific SQLite databases for any changes.</p>
+</div>
+<div class="group p-8 rounded-xl bg-white/[0.02] border border-border-muted hover:border-primary/50 transition-all">
+<div class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-6 group-hover:bg-primary/20 transition-colors">
+<span class="material-icons text-primary">preview</span>
+</div>
+<div class="font-mono text-[10px] text-primary uppercase mb-2 tracking-widest">Step 02</div>
+<h4 class="text-xl font-bold mb-3">Preview</h4>
+<p class="text-sm text-text-muted leading-relaxed">Before anything is sent, you see YOUR actual data. Not samples. Your real token counts, your real podcast history.</p>
+</div>
+<div class="group p-8 rounded-xl bg-white/[0.02] border border-border-muted hover:border-primary/50 transition-all">
+<div class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-6 group-hover:bg-primary/20 transition-colors">
+<span class="material-icons text-primary">hub</span>
+</div>
+<div class="font-mono text-[10px] text-primary uppercase mb-2 tracking-widest">Step 03</div>
+<h4 class="text-xl font-bold mb-3">Connect</h4>
+<p class="text-sm text-text-muted leading-relaxed mb-4">Pipe data to your destination. Supports webhooks, n8n, Zapier, and Google Sheets.</p>
+<div class="flex gap-3 opacity-60">
+<div class="w-5 h-5 bg-white/10 rounded flex items-center justify-center text-[8px] font-bold">N8N</div>
+<div class="w-5 h-5 bg-white/10 rounded flex items-center justify-center text-[8px] font-bold">GS</div>
+<div class="w-5 h-5 bg-white/10 rounded flex items-center justify-center text-[8px] font-bold">ZP</div>
+</div>
+</div>
+<div class="group p-8 rounded-xl bg-white/[0.02] border border-border-muted hover:border-primary/50 transition-all">
+<div class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-6 group-hover:bg-primary/20 transition-colors">
+<span class="material-icons text-primary">update</span>
+</div>
+<div class="font-mono text-[10px] text-primary uppercase mb-2 tracking-widest">Step 04</div>
+<h4 class="text-xl font-bold mb-3">Your Cadence</h4>
+<p class="text-sm text-text-muted leading-relaxed mb-4">Set automated triggers based on your needs.</p>
+<div class="flex items-center gap-3 font-mono text-[9px] uppercase tracking-tighter">
+<span class="text-primary font-bold">Real-time</span>
+<span class="text-text-muted">Daily</span>
+<span class="text-text-muted">Weekly</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section class="py-24 bg-white/[0.01]">
+<div class="max-w-7xl mx-auto px-6">
+<h2 class="text-3xl font-bold mb-12 text-center">What will you unlock?</h2>
+<div class="grid grid-cols-1 md:grid-cols-6 gap-6">
+<div class="md:col-span-2 p-8 rounded-xl bg-white/[0.03] border border-border-muted">
+<div class="text-primary mb-4"><span class="material-symbols-outlined">analytics</span></div>
+<h5 class="text-lg font-bold mb-2">Claude Usage Tracker</h5>
+<p class="text-sm text-text-muted">Sync your token usage to a spreadsheet to track LLM costs automatically.</p>
+</div>
+<div class="md:col-span-2 p-8 rounded-xl bg-white/[0.03] border border-border-muted">
+<div class="text-primary mb-4"><span class="material-symbols-outlined">podcasts</span></div>
+<h5 class="text-lg font-bold mb-2">Podcast Logbook</h5>
+<p class="text-sm text-text-muted">Archive every episode you finish from Apple Podcasts into your personal CMS.</p>
+</div>
+<div class="md:col-span-2 p-8 rounded-xl bg-white/[0.03] border border-border-muted">
+<div class="text-primary mb-4"><span class="material-symbols-outlined">description</span></div>
+<h5 class="text-lg font-bold mb-2">Notes Backup</h5>
+<p class="text-sm text-text-muted">Push specific folder tags from Apple Notes to your webhooks for automation.</p>
+</div>
+<div class="md:col-span-3 p-8 rounded-xl bg-white/[0.03] border border-border-muted">
+<div class="text-primary mb-4"><span class="material-symbols-outlined">photo_library</span></div>
+<h5 class="text-lg font-bold mb-2">Photos Exporter</h5>
+<p class="text-sm text-text-muted">Trigger workflow actions whenever you take a screenshot or add a new photo to a specific album.</p>
+</div>
+<div class="md:col-span-3 p-8 rounded-xl bg-white/[0.03] border border-border-muted">
+<div class="text-primary mb-4"><span class="material-symbols-outlined">terminal</span></div>
+<h5 class="text-lg font-bold mb-2">Dev Log Sync</h5>
+<p class="text-sm text-text-muted">Watch any log file and stream errors directly to a private Discord channel.</p>
+</div>
+</div>
+</div>
+</section>
+<section class="py-24 border-y border-border-muted overflow-hidden">
+<div class="max-w-7xl mx-auto px-6">
+<h2 class="text-2xl font-bold mb-10 text-center text-text-muted uppercase tracking-widest text-sm">Did you know?</h2>
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+<div class="p-6 rounded-lg border-l-4 border-solution bg-white/[0.02]">
+<p class="text-sm font-mono"><span class="text-solution font-bold">Podcasts:</span> SQLite db stores every second you've listened to since 2018.</p>
+</div>
+<div class="p-6 rounded-lg border-l-4 border-primary bg-white/[0.02]">
+<p class="text-sm font-mono"><span class="text-primary font-bold">Claude:</span> Every prompt and token count is logged in a local JSONL file.</p>
+</div>
+<div class="p-6 rounded-lg border-l-4 border-yellow-500 bg-white/[0.02]">
+<p class="text-sm font-mono"><span class="text-yellow-500 font-bold">Notes:</span> All metadata and body text are queryable via local SQL.</p>
+</div>
+<div class="p-6 rounded-lg border-l-4 border-pink-500 bg-white/[0.02]">
+<p class="text-sm font-mono"><span class="text-pink-500 font-bold">Photos:</span> Location and face tags are indexed locally and accessible.</p>
+</div>
+</div>
+<div class="mt-12 text-center text-xl">
+            Don't let it sit there. <span class="text-primary font-bold">LocalPush it.</span>
+</div>
+</div>
+</section>
+<section class="py-24 bg-primary/5">
+<div class="max-w-3xl mx-auto px-6 text-center">
+<h2 class="text-4xl font-bold mb-6 tracking-tight">Ready to bridge your local context?</h2>
+<p class="text-lg text-text-muted mb-10">Join the beta today and start unlocking your data. Available now for macOS.</p>
+<div class="flex items-center justify-center">
+<button class="px-12 py-4 bg-primary text-background-dark font-bold rounded-lg hover:bg-primary/90 transition-all shadow-xl shadow-primary/20">
+                Join the beta.
+            </button>
+</div>
+<p class="mt-8 text-xs text-text-muted font-mono uppercase tracking-widest">No credit card required · MIT Licensed Core</p>
+</div>
+</section>
+<footer class="py-12 border-t border-border-muted">
+<div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-8">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 bg-primary rounded flex items-center justify-center">
+<span class="material-icons text-background-dark text-sm">shortcut</span>
+</div>
+<span class="font-bold tracking-tight">LocalPush</span>
+</div>
+<div class="text-text-muted text-sm font-mono">
+            Built by Right Aim · © 2026
+        </div>
+<div class="flex items-center gap-6">
+<a class="text-text-muted hover:text-white transition-colors text-xl font-bold" href="#">𝕏</a>
+<a class="text-text-muted hover:text-white transition-colors text-xl font-bold" href="#">GitHub</a>
+</div>
+</div>
+</footer>
+
+</body></html>

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Settings - Manage Targets | LocalPush</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#338fff",
+                        "background-light": "#f5f7f8",
+                        "background-dark": "#0f1823",
+                        "macos-card": "#2a2a2a",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .ios-blur {
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display min-h-screen flex flex-col">
+<!-- iOS Top Status Bar Space -->
+<div class="h-12 w-full bg-background-light dark:bg-background-dark sticky top-0 z-50 flex items-center justify-between px-6">
+<span class="text-sm font-semibold">9:41</span>
+<div class="flex items-center gap-1.5">
+<span class="material-icons text-xs">signal_cellular_alt</span>
+<span class="material-icons text-xs">wifi</span>
+<span class="material-icons text-xs rotate-90">battery_full</span>
+</div>
+</div>
+<!-- Navigation Header -->
+<header class="px-6 py-4 flex flex-col gap-1 sticky top-12 z-40 bg-background-light/80 dark:bg-background-dark/80 ios-blur">
+<h1 class="text-3xl font-bold tracking-tight">Settings</h1>
+<p class="text-slate-500 dark:text-slate-400 text-sm">Manage your automation targets</p>
+</header>
+<!-- Main Content Area -->
+<main class="flex-1 px-4 pb-32 space-y-8 max-w-md mx-auto w-full">
+<!-- Connected Targets Section -->
+<section class="space-y-3">
+<div class="flex items-center justify-between px-2">
+<h2 class="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-500">Connected Targets</h2>
+<span class="text-[11px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">2 Active</span>
+</div>
+<div class="space-y-2">
+<!-- Target Card 1: n8n -->
+<div class="bg-white dark:bg-macos-card p-4 rounded-xl shadow-sm border border-slate-200 dark:border-white/5 flex items-center gap-4">
+<div class="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
+<span class="material-icons text-orange-500">alt_route</span>
+</div>
+<div class="flex-1 min-w-0">
+<h3 class="font-semibold text-sm truncate">Primary n8n Instance</h3>
+<p class="text-xs text-slate-500 truncate">https://n8n.local.network/webhook/...</p>
+</div>
+<div class="flex items-center gap-2">
+<button class="px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 rounded-lg transition-colors">
+                            Test
+                        </button>
+<button class="p-1.5 text-slate-400 hover:text-red-500 transition-colors">
+<span class="material-icons text-lg">delete_outline</span>
+</button>
+</div>
+</div>
+<!-- Target Card 2: ntfy -->
+<div class="bg-white dark:bg-macos-card p-4 rounded-xl shadow-sm border border-slate-200 dark:border-white/5 flex items-center gap-4">
+<div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+<span class="material-icons text-blue-500">notifications_active</span>
+</div>
+<div class="flex-1 min-w-0">
+<h3 class="font-semibold text-sm truncate">Mobile Alerts</h3>
+<p class="text-xs text-slate-500 truncate">ntfy.sh/localpush_alerts_main</p>
+</div>
+<div class="flex items-center gap-2">
+<button class="px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 rounded-lg transition-colors">
+                            Test
+                        </button>
+<button class="p-1.5 text-slate-400 hover:text-red-500 transition-colors">
+<span class="material-icons text-lg">delete_outline</span>
+</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Add New Target Section -->
+<section class="space-y-4">
+<h2 class="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-500 px-2">Add New Target</h2>
+<div class="bg-white dark:bg-macos-card p-5 rounded-xl shadow-sm border border-slate-200 dark:border-white/5 space-y-5">
+<!-- Segmented Control -->
+<div class="bg-slate-100 dark:bg-black/20 p-1 rounded-lg flex items-center">
+<button class="flex-1 py-1.5 text-xs font-semibold rounded-md bg-white dark:bg-primary shadow-sm text-slate-900 dark:text-white">
+                        n8n
+                    </button>
+<button class="flex-1 py-1.5 text-xs font-semibold rounded-md text-slate-500 dark:text-slate-400">
+                        ntfy
+                    </button>
+<button class="flex-1 py-1.5 text-xs font-semibold rounded-md text-slate-500 dark:text-slate-400">
+                        Custom
+                    </button>
+</div>
+<!-- Form Fields -->
+<div class="space-y-4">
+<div class="space-y-1.5">
+<label class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 ml-1">TARGET NAME</label>
+<input class="w-full bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none" placeholder="e.g. Production Webhook" type="text"/>
+</div>
+<div class="space-y-1.5">
+<label class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 ml-1">WEBHOOK URL</label>
+<input class="w-full bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none" placeholder="https://..." type="url"/>
+</div>
+<div class="space-y-1.5">
+<label class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 ml-1">API TOKEN (OPTIONAL)</label>
+<div class="relative">
+<input class="w-full bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none" type="password" value="••••••••••••••••"/>
+<button class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary">
+<span class="material-icons text-sm">visibility</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Save Button -->
+<button class="w-full bg-primary hover:bg-primary/90 text-white font-bold py-3 rounded-lg shadow-lg shadow-primary/20 transition-all flex items-center justify-center gap-2">
+<span class="material-icons text-sm">add</span>
+                    Save Target
+                </button>
+</div>
+</section>
+<!-- Illustration / Contextual Help -->
+<div class="flex flex-col items-center justify-center py-6 text-center space-y-3">
+<div class="w-24 h-24 bg-primary/5 rounded-full flex items-center justify-center relative">
+<img alt="Security Pattern" class="w-16 h-16 object-cover rounded-xl opacity-50 grayscale hover:grayscale-0 transition-all" data-alt="Abstract blue glowing circuit security pattern" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBNBNoq6QZrc2TBKeCl9zNxravRP2KTw-YXJj_jX0nS7CzAmpLzXfjg2EToa5Cm5tGSndd12unTsSM7m1omJXWlCO-m-SUK8trJKssVhWqui6tpwTL3_pRySEQLMrsaH9_RLIR__FEhPWYetnlRqFi5k6JF9udj50QIBgbJltgwqLQTlOUBjouOXUepAmsegIJC131dwtUl3ThwyUTAUCt1FH5sbuTNy5VslZoTlb9idiTuZqY_oqKMW67R9VnDVNzmTE_EBlOuX_LU"/>
+<div class="absolute -bottom-1 -right-1 bg-green-500 w-4 h-4 rounded-full border-2 border-background-dark"></div>
+</div>
+<p class="text-[11px] text-slate-500 max-w-[200px]">All credentials are encrypted and stored in your macOS Keychain</p>
+</div>
+</main>
+<!-- Bottom Tab Bar -->
+<nav class="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-background-dark/80 ios-blur border-t border-slate-200 dark:border-white/5 px-6 pt-2 pb-8 flex justify-between items-center z-50">
+<button class="flex flex-col items-center gap-1 text-slate-400 hover:text-primary transition-colors">
+<span class="material-icons">storage</span>
+<span class="text-[10px] font-medium">Sources</span>
+</button>
+<button class="flex flex-col items-center gap-1 text-slate-400 hover:text-primary transition-colors">
+<span class="material-icons">history</span>
+<span class="text-[10px] font-medium">Activity</span>
+</button>
+<button class="flex flex-col items-center gap-1 text-primary">
+<span class="material-icons">settings</span>
+<span class="text-[10px] font-medium">Settings</span>
+</button>
+<div class="w-24 h-1 bg-slate-300 dark:bg-white/20 rounded-full absolute bottom-2 left-1/2 -translate-x-1/2"></div>
+</nav>
+</body></html>

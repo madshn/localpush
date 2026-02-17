@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Tray Popup - Degraded State</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#3b82f6",
+                        "background-light": "#f5f7f8",
+                        "background-dark": "#0f1823",
+                        "surface-dark": "#1a1a1a",
+                        "warning-bg": "rgba(234, 179, 8, 0.15)",
+                        "warning-text": "#fbbf24",
+                        "error-bg": "rgba(239, 68, 68, 0.15)",
+                        "error-text": "#f87171",
+                        "success-text": "#4ade80",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        body {
+            min-height: max(884px, 100dvh);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-black min-h-screen flex items-center justify-center font-display antialiased p-4">
+<div class="relative w-[300px] mx-auto">
+<div class="bg-white dark:bg-surface-dark rounded-xl shadow-[0_20px_40px_rgba(0,0,0,0.6)] border border-slate-200 dark:border-white/10 overflow-hidden flex flex-col backdrop-blur-md bg-opacity-90 dark:bg-opacity-90">
+<div class="bg-warning-bg border-b border-warning-text/20 px-3 py-3 flex items-start gap-2.5">
+<span class="material-symbols-outlined text-warning-text shrink-0" style="font-size: 18px;">warning</span>
+<div class="flex flex-col">
+<h3 class="text-slate-900 dark:text-white text-xs font-bold leading-tight">1 delivery needs attention</h3>
+<p class="text-slate-600 dark:text-slate-400 text-[11px] mt-0.5 font-normal">Check your connection settings</p>
+</div>
+</div>
+<div class="px-3 pt-3 pb-1">
+<h4 class="text-slate-500 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">Active Sources</h4>
+</div>
+<div class="flex flex-col">
+<div class="group flex items-center justify-between px-3 py-2.5 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-default">
+<div class="flex items-center gap-3">
+<div class="relative flex items-center justify-center shrink-0">
+<div class="w-2 h-2 rounded-full bg-success-text shadow-[0_0_8px_rgba(74,222,128,0.4)]"></div>
+</div>
+<div class="flex flex-col">
+<span class="text-slate-900 dark:text-slate-200 text-sm font-medium leading-none">Claude Code Stats</span>
+<span class="text-slate-500 text-[11px] mt-1 leading-none">Last sent 1m ago</span>
+</div>
+</div>
+</div>
+<div class="group flex items-center justify-between px-3 py-2.5 bg-error-bg/10 hover:bg-error-bg/20 transition-colors cursor-pointer border-l-2 border-error-text -ml-[1px]">
+<div class="flex items-center gap-3 pl-[9px]"> 
+<div class="relative flex items-center justify-center shrink-0">
+<div class="w-2 h-2 rounded-full bg-error-text shadow-[0_0_8px_rgba(248,113,113,0.4)]"></div>
+</div>
+<div class="flex flex-col">
+<span class="text-slate-900 dark:text-white text-sm font-medium leading-none">Apple Podcasts</span>
+<span class="text-error-text text-[11px] mt-1 leading-none font-medium">Delivery failed</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-slate-500 hover:text-white transition-colors" style="font-size: 16px;">refresh</span>
+</div>
+</div>
+<div class="h-px w-full bg-slate-200 dark:bg-white/10 my-1 mx-3 w-[calc(100%-24px)]"></div>
+<div class="grid grid-cols-3 gap-2 px-3 py-2">
+<div class="flex flex-col items-center justify-center py-2 rounded-md hover:bg-white/5 transition-colors">
+<span class="text-base font-bold text-slate-900 dark:text-white leading-none">1</span>
+<span class="text-[9px] uppercase tracking-wide text-slate-500 font-bold mt-1">Delivered</span>
+</div>
+<div class="flex flex-col items-center justify-center py-2 rounded-md hover:bg-white/5 transition-colors">
+<span class="text-base font-bold text-slate-400 dark:text-slate-600 leading-none">0</span>
+<span class="text-[9px] uppercase tracking-wide text-slate-500 font-bold mt-1">Pending</span>
+</div>
+<div class="flex flex-col items-center justify-center py-2 rounded-md bg-error-bg border border-error-text/10">
+<span class="text-base font-bold text-error-text leading-none">1</span>
+<span class="text-[9px] uppercase tracking-wide text-error-text/80 font-bold mt-1">Failed</span>
+</div>
+</div>
+<div class="p-3">
+<button class="w-full flex items-center justify-center gap-2 bg-primary hover:bg-blue-600 text-white font-medium text-xs py-2 rounded-[6px] transition-all shadow-md active:scale-[0.98]">
+<span>Open LocalPush</span>
+</button>
+</div>
+</div>
+<div class="absolute -top-[8px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-b-[8px] border-b-warning-bg filter drop-shadow-sm"></div>
+</div>
+
+</body></html>
