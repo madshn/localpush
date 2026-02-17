@@ -42,7 +42,7 @@ src-tauri/icons/
 *.db-wal
 
 # Worktrees
-.trees/
+.worktrees/
 
 # Temporary
 tmp/
