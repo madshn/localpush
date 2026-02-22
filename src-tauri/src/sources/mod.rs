@@ -10,12 +10,14 @@ pub mod claude_sessions;
 pub mod apple_podcasts;
 pub mod apple_notes;
 pub mod apple_photos;
+pub mod desktop_activity;
 
 pub use claude_stats::ClaudeStatsSource;
 pub use claude_sessions::ClaudeSessionsSource;
 pub use apple_podcasts::ApplePodcastsSource;
 pub use apple_notes::AppleNotesSource;
 pub use apple_photos::ApplePhotosSource;
+pub use desktop_activity::DesktopActivitySource;
 
 /// Errors that can occur when parsing or accessing sources
 #[derive(Debug, Error)]

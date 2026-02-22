@@ -27,6 +27,8 @@ pub mod delivery_worker;
 pub mod scheduled_worker;
 pub mod error_diagnosis;
 pub mod target_health;
+pub mod iokit_idle;
+pub mod desktop_activity_worker;
 
 use std::sync::Arc;
 use tauri::{App, Manager};
@@ -111,6 +113,12 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         state.binding_store.clone(),
         state.source_manager.clone(),
         state.target_manager.clone(),
+    );
+
+    // Spawn desktop activity worker (polls IOKit idle time every 30s)
+    let _desktop_worker = desktop_activity_worker::spawn_worker(
+        state.source_manager.clone(),
+        state.ledger.clone(),
     );
 
     app.manage(state);
