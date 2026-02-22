@@ -244,7 +244,7 @@ impl AppState {
         }
 
         // Register sources
-        use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource};
+        use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource, DesktopActivitySource};
 
         match ClaudeStatsSource::new() {
             Ok(source) => {
@@ -285,6 +285,11 @@ impl AppState {
             }
             Err(e) => tracing::warn!("Apple Photos source unavailable: {}", e),
         }
+
+        // Register Desktop Activity source (non-file, polled by worker)
+        let desktop_activity = DesktopActivitySource::new();
+        tracing::info!("Registered DesktopActivitySource");
+        source_manager.register(Arc::new(desktop_activity));
 
         // Restore enabled sources from config
         let restored = source_manager.restore_enabled();
