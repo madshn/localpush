@@ -22,6 +22,7 @@ pub enum DeliveryStatus {
     Delivered,
     Failed,
     Dlq, // Dead Letter Queue
+    TargetPaused, // Target is degraded — delivery queued until reconnect
 }
 
 impl DeliveryStatus {
@@ -32,6 +33,7 @@ impl DeliveryStatus {
             DeliveryStatus::Delivered => "delivered",
             DeliveryStatus::Failed => "failed",
             DeliveryStatus::Dlq => "dlq",
+            DeliveryStatus::TargetPaused => "target_paused",
         }
     }
 }
@@ -65,7 +67,6 @@ pub struct DeliveryEntry {
 ///
 /// Production: SQLite with WAL mode
 /// Testing: In-memory storage
-#[cfg_attr(test, mockall::automock)]
 pub trait DeliveryLedgerTrait: Send + Sync {
     /// Enqueue a new delivery
     fn enqueue(
@@ -97,6 +98,16 @@ pub trait DeliveryLedgerTrait: Send + Sync {
         target_endpoint_id: &str,
     ) -> Result<String, LedgerError>;
 
+    /// Enqueue a targeted delivery with a custom available_at timestamp.
+    /// Used by coalescing flush to stagger deliveries across targets.
+    fn enqueue_targeted_at(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+        target_endpoint_id: &str,
+        available_at: i64,
+    ) -> Result<String, LedgerError>;
+
     /// Claim a batch of pending deliveries for processing
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError>;
 
@@ -126,6 +137,17 @@ pub trait DeliveryLedgerTrait: Send + Sync {
 
     /// Record which target was attempted (so the UI can show it even on failure)
     fn set_attempted_target(&self, event_id: &str, target_json: &str) -> Result<(), LedgerError>;
+
+    /// Pause all pending/failed deliveries targeting any of the given endpoint IDs.
+    /// Called when a target degrades — entries move to `target_paused` status.
+    fn pause_target_deliveries(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError>;
+
+    /// Resume paused deliveries for the given endpoint IDs back to pending.
+    /// Called when a degraded target reconnects successfully.
+    fn resume_target_deliveries(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError>;
+
+    /// Count deliveries paused for any of the given endpoint IDs.
+    fn count_paused_for_target(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError>;
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -135,4 +157,5 @@ pub struct LedgerStats {
     pub delivered_today: usize,
     pub failed: usize,
     pub dlq: usize,
+    pub target_paused: usize,
 }

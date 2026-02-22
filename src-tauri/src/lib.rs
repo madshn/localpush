@@ -26,6 +26,7 @@ mod state;
 pub mod delivery_worker;
 pub mod scheduled_worker;
 pub mod error_diagnosis;
+pub mod target_health;
 
 use std::sync::Arc;
 use tauri::{App, Manager};
@@ -79,7 +80,20 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         }
     }));
 
-    // Spawn background delivery worker (binding-aware routing + native delivery)
+    // Spawn coalescing worker (flushes buffered file events every 5s after 90s window expires)
+    let source_manager_for_coalescing = state.source_manager.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let flushed = source_manager_for_coalescing.flush_expired();
+            if flushed > 0 {
+                tracing::debug!(sources_flushed = flushed, "Coalescing worker flushed expired events");
+            }
+        }
+    });
+
+    // Spawn background delivery worker (binding-aware routing + native delivery + health tracking)
     let _worker = delivery_worker::spawn_worker(
         state.ledger.clone(),
         state.webhook_client.clone(),
@@ -87,6 +101,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         state.binding_store.clone(),
         state.credentials.clone(),
         state.target_manager.clone(),
+        state.health_tracker.clone(),
         app.handle().clone(),
     );
 

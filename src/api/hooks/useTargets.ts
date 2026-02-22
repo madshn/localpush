@@ -222,3 +222,49 @@ export function useTestTargetConnection() {
     },
   });
 }
+
+// --- Target Health ---
+
+export interface TargetHealth {
+  target_id: string;
+  target_name: string;
+  target_type: string;
+  status: 'healthy' | 'degraded';
+  reason?: string;
+  degraded_at?: number;
+  queued_count: number;
+}
+
+export function useTargetHealth() {
+  return useQuery<TargetHealth[]>({
+    queryKey: ['target-health'],
+    queryFn: async () => {
+      const health = await invoke<TargetHealth[]>('get_target_health');
+      return health;
+    },
+    refetchInterval: 5000,
+  });
+}
+
+interface ReconnectResult {
+  target_id: string;
+  status: string;
+  resumed_count: number;
+}
+
+export function useReconnectTarget() {
+  const queryClient = useQueryClient();
+
+  return useMutation<ReconnectResult, Error, string>({
+    mutationFn: async (targetId) => {
+      logger.debug('Reconnecting target', { targetId });
+      const result = await invoke<ReconnectResult>('reconnect_target', { targetId });
+      logger.debug('Target reconnected', { targetId, resumed: result.resumed_count });
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['target-health'] });
+      queryClient.invalidateQueries({ queryKey: ['delivery-status'] });
+    },
+  });
+}

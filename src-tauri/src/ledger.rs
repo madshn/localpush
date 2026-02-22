@@ -182,6 +182,33 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         Ok(event_id)
     }
 
+    fn enqueue_targeted_at(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+        target_endpoint_id: &str,
+        available_at: i64,
+    ) -> Result<String, LedgerError> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let event_id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().timestamp();
+        let payload_str = serde_json::to_string(&payload)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO delivery_ledger (id, event_id, event_type, payload, available_at, created_at, target_endpoint_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, event_id, event_type, payload_str, available_at, now, target_endpoint_id],
+        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        tracing::debug!(
+            "Enqueued targeted delivery: {} ({}) -> {} available_at={}",
+            event_id, event_type, target_endpoint_id, available_at
+        );
+        Ok(event_id)
+    }
+
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
@@ -204,6 +231,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
                 "delivered" => DeliveryStatus::Delivered,
                 "failed" => DeliveryStatus::Failed,
                 "dlq" => DeliveryStatus::Dlq,
+                "target_paused" => DeliveryStatus::TargetPaused,
                 _ => DeliveryStatus::Pending,
             };
 
@@ -365,7 +393,8 @@ impl DeliveryLedgerTrait for DeliveryLedger {
                 SUM(CASE WHEN status = 'in_flight' THEN 1 ELSE 0 END) as in_flight,
                 SUM(CASE WHEN status = 'delivered' AND delivered_at >= ?1 THEN 1 ELSE 0 END) as delivered_today,
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-                SUM(CASE WHEN status = 'dlq' THEN 1 ELSE 0 END) as dlq
+                SUM(CASE WHEN status = 'dlq' THEN 1 ELSE 0 END) as dlq,
+                SUM(CASE WHEN status = 'target_paused' THEN 1 ELSE 0 END) as target_paused
              FROM delivery_ledger",
             params![today_start],
             |row| {
@@ -375,6 +404,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
                     delivered_today: row.get::<_, i64>(2).unwrap_or(0) as usize,
                     failed: row.get::<_, i64>(3).unwrap_or(0) as usize,
                     dlq: row.get::<_, i64>(4).unwrap_or(0) as usize,
+                    target_paused: row.get::<_, i64>(5).unwrap_or(0) as usize,
                 })
             }
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
@@ -470,6 +500,108 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             params![target_json, event_id],
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
         Ok(())
+    }
+
+    fn pause_target_deliveries(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError> {
+        if endpoint_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = endpoint_ids.iter().enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect();
+        let sql = format!(
+            "UPDATE delivery_ledger SET status = 'target_paused'
+             WHERE status IN ('pending', 'failed')
+             AND target_endpoint_id IN ({})",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = conn.prepare(&sql)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = endpoint_ids.iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt.execute(params.as_slice())
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        if rows > 0 {
+            tracing::info!(
+                count = rows,
+                endpoints = ?endpoint_ids,
+                "Paused deliveries for degraded target"
+            );
+        }
+        Ok(rows)
+    }
+
+    fn resume_target_deliveries(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError> {
+        if endpoint_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let now = chrono::Utc::now().timestamp();
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = endpoint_ids.iter().enumerate()
+            .map(|(i, _)| format!("?{}", i + 2)) // +2 because ?1 is `now`
+            .collect();
+        let sql = format!(
+            "UPDATE delivery_ledger SET status = 'pending', available_at = ?1
+             WHERE status = 'target_paused'
+             AND target_endpoint_id IN ({})",
+            placeholders.join(", ")
+        );
+
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        params.push(Box::new(now));
+        for id in endpoint_ids {
+            params.push(Box::new(id.to_string()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter()
+            .map(|p| p.as_ref())
+            .collect();
+
+        let mut stmt = conn.prepare(&sql)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        let rows = stmt.execute(param_refs.as_slice())
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        if rows > 0 {
+            tracing::info!(
+                count = rows,
+                endpoints = ?endpoint_ids,
+                "Resumed paused deliveries after target reconnect"
+            );
+        }
+        Ok(rows)
+    }
+
+    fn count_paused_for_target(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError> {
+        if endpoint_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = endpoint_ids.iter().enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect();
+        let sql = format!(
+            "SELECT COUNT(*) FROM delivery_ledger
+             WHERE status = 'target_paused'
+             AND target_endpoint_id IN ({})",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = conn.prepare(&sql)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = endpoint_ids.iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        let count: i64 = stmt.query_row(params.as_slice(), |row| row.get(0))
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        Ok(count as usize)
     }
 }
 

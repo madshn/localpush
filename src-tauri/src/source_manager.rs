@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::bindings::BindingStore;
 use crate::config::AppConfig;
 use crate::source_config::SourceConfigStore;
 use crate::sources::{Source, SourceError};
@@ -52,6 +53,12 @@ const METADATA_KEYS: &[&str] = &[
     "summary",
 ];
 
+/// How long to buffer file events before flushing (seconds)
+const COALESCE_WINDOW_SECS: i64 = 90;
+
+/// Stagger offset between target deliveries (seconds)
+const STAGGER_OFFSET_SECS: i64 = 10;
+
 /// Registry and orchestrator for data sources
 pub struct SourceManager {
     sources: Mutex<HashMap<String, Arc<dyn Source>>>,
@@ -62,6 +69,9 @@ pub struct SourceManager {
     ledger: Arc<dyn DeliveryLedgerTrait>,
     file_watcher: Arc<dyn FileWatcher>,
     config: Arc<AppConfig>,
+    binding_store: Arc<BindingStore>,
+    /// Coalescing state: source_id → timestamp of last file event (epoch seconds)
+    pending_events: Mutex<HashMap<String, i64>>,
 }
 
 impl SourceManager {
@@ -70,6 +80,7 @@ impl SourceManager {
         ledger: Arc<dyn DeliveryLedgerTrait>,
         file_watcher: Arc<dyn FileWatcher>,
         config: Arc<AppConfig>,
+        binding_store: Arc<BindingStore>,
     ) -> Self {
         Self {
             sources: Mutex::new(HashMap::new()),
@@ -79,6 +90,8 @@ impl SourceManager {
             ledger,
             file_watcher,
             config,
+            binding_store,
+            pending_events: Mutex::new(HashMap::new()),
         }
     }
 
@@ -194,7 +207,11 @@ impl SourceManager {
         Ok(serde_json::Value::Object(obj))
     }
 
-    /// Handle a file event: lookup source, parse, filter properties, enqueue to ledger
+    /// Handle a file event: resolve source, record for coalescing.
+    ///
+    /// Instead of immediately parsing and enqueuing, this records the event timestamp.
+    /// A background coalescing worker calls `flush_expired()` to process buffered events
+    /// after the coalesce window (90s) expires.
     pub fn handle_file_event(&self, path: &PathBuf) -> Result<(), SourceManagerError> {
         let source_id = {
             let path_map = self.path_to_source.lock().unwrap();
@@ -216,23 +233,114 @@ impl SourceManager {
             return Ok(());
         }
 
-        let source = {
-            let sources = self.sources.lock().unwrap();
-            sources.get(&source_id).cloned()
+        // Record event for coalescing (resets the 90s window)
+        let now = chrono::Utc::now().timestamp();
+        self.pending_events
+            .lock()
+            .unwrap()
+            .insert(source_id.clone(), now);
+
+        tracing::debug!(source_id = %source_id, "File event recorded for coalescing (90s window)");
+        Ok(())
+    }
+
+    /// Flush a specific source: parse once, resolve bindings, enqueue with staggered offsets.
+    ///
+    /// For N on_change bindings, creates N ledger entries with available_at staggered 10s apart.
+    /// If no bindings exist, falls back to a single untargeted enqueue (legacy compat).
+    pub fn flush_source(&self, source_id: &str) -> Result<usize, SourceManagerError> {
+        // Remove from pending events
+        self.pending_events.lock().unwrap().remove(source_id);
+
+        // Only process if still enabled (may have been disabled during coalesce window)
+        if !self.is_enabled(source_id) {
+            tracing::debug!(source_id = %source_id, "Skipping flush for disabled source");
+            return Ok(0);
+        }
+
+        // Parse and filter payload
+        let filtered_payload = self.parse_and_filter(source_id)?;
+
+        // Resolve on_change bindings for this source
+        let bindings = self.binding_store.get_for_source(source_id);
+        let on_change_bindings: Vec<_> = bindings
+            .into_iter()
+            .filter(|b| b.delivery_mode == "on_change")
+            .collect();
+
+        let now = chrono::Utc::now().timestamp();
+
+        if on_change_bindings.is_empty() {
+            // No bindings — fall back to untargeted enqueue (delivery worker resolves at delivery time)
+            self.ledger.enqueue(source_id, filtered_payload)?;
+            tracing::info!(source_id = %source_id, "Flushed coalesced event (legacy fallback, no bindings)");
+            return Ok(1);
+        }
+
+        // Enqueue one targeted entry per binding with staggered available_at
+        let mut enqueued = 0;
+        for (i, binding) in on_change_bindings.iter().enumerate() {
+            let available_at = now + (i as i64 * STAGGER_OFFSET_SECS);
+            self.ledger.enqueue_targeted_at(
+                source_id,
+                filtered_payload.clone(),
+                &binding.endpoint_id,
+                available_at,
+            )?;
+            enqueued += 1;
+            tracing::debug!(
+                source_id = %source_id,
+                endpoint_id = %binding.endpoint_id,
+                stagger_offset = i as i64 * STAGGER_OFFSET_SECS,
+                "Enqueued staggered delivery"
+            );
+        }
+
+        tracing::info!(
+            source_id = %source_id,
+            targets = enqueued,
+            "Flushed coalesced event with staggered delivery"
+        );
+        Ok(enqueued)
+    }
+
+    /// Flush all sources whose coalesce window has expired (>90s since last event).
+    ///
+    /// Called periodically by the coalescing background worker.
+    /// Returns the number of sources flushed.
+    pub fn flush_expired(&self) -> usize {
+        let now = chrono::Utc::now().timestamp();
+        let expired: Vec<String> = {
+            let pending = self.pending_events.lock().unwrap();
+            pending
+                .iter()
+                .filter(|(_, &timestamp)| now - timestamp >= COALESCE_WINDOW_SECS)
+                .map(|(source_id, _)| source_id.clone())
+                .collect()
         };
 
-        let source =
-            source.ok_or_else(|| SourceManagerError::SourceNotFound(source_id.clone()))?;
+        let mut flushed = 0;
+        for source_id in expired {
+            match self.flush_source(&source_id) {
+                Ok(count) => {
+                    if count > 0 {
+                        flushed += 1;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(source_id = %source_id, error = %e, "Failed to flush coalesced source");
+                    // Remove from pending to avoid infinite retry
+                    self.pending_events.lock().unwrap().remove(&source_id);
+                }
+            }
+        }
 
-        tracing::debug!(source_id = %source_id, "Parsing source data for enqueue");
-        let payload = source.parse()?;
+        flushed
+    }
 
-        // Filter payload based on enabled properties
-        let filtered_payload = self.filter_payload(&source_id, payload, &source)?;
-
-        self.ledger.enqueue(&source_id, filtered_payload)?;
-        tracing::info!(source_id = %source_id, "Enqueued delivery from source");
-        Ok(())
+    /// Check if a source has a pending coalesced event (for testing).
+    pub fn has_pending_event(&self, source_id: &str) -> bool {
+        self.pending_events.lock().unwrap().contains_key(source_id)
     }
 
     /// Get a source by ID (for preview commands)
@@ -292,7 +400,8 @@ mod tests {
         let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
         let watcher = Arc::new(ManualFileWatcher::new());
         let config = Arc::new(AppConfig::open_in_memory().unwrap());
-        let mgr = SourceManager::new(ledger, watcher.clone(), config);
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher.clone(), config, binding_store);
         (mgr, watcher)
     }
 
@@ -347,14 +456,15 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_file_event_enqueues() {
+    fn test_handle_file_event_coalesces() {
         let stats_file = fake_stats_file();
         let path = stats_file.path().to_path_buf();
 
         let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
         let watcher = Arc::new(ManualFileWatcher::new());
         let config = Arc::new(AppConfig::open_in_memory().unwrap());
-        let mgr = SourceManager::new(ledger.clone(), watcher, config);
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger.clone(), watcher, config, binding_store);
 
         let source = Arc::new(ClaudeStatsSource::new_with_path(&path));
         mgr.register(source);
@@ -362,8 +472,169 @@ mod tests {
 
         mgr.handle_file_event(&path).unwrap();
 
+        // Event is buffered, not immediately enqueued
+        let stats = ledger.get_stats().unwrap();
+        assert_eq!(stats.pending, 0, "coalescing should buffer events");
+        assert!(mgr.has_pending_event("claude-stats"), "source should have pending coalesce event");
+    }
+
+    #[test]
+    fn test_flush_source_enqueues() {
+        let stats_file = fake_stats_file();
+        let path = stats_file.path().to_path_buf();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger.clone(), watcher, config, binding_store);
+
+        let source = Arc::new(ClaudeStatsSource::new_with_path(&path));
+        mgr.register(source);
+        mgr.enable("claude-stats").unwrap();
+
+        // Record event, then flush immediately
+        mgr.handle_file_event(&path).unwrap();
+        let count = mgr.flush_source("claude-stats").unwrap();
+
+        // No bindings → falls back to single untargeted enqueue
+        assert_eq!(count, 1);
         let stats = ledger.get_stats().unwrap();
         assert_eq!(stats.pending, 1);
+        assert!(!mgr.has_pending_event("claude-stats"), "flush should clear pending event");
+    }
+
+    #[test]
+    fn test_flush_source_with_bindings_staggers() {
+        let stats_file = fake_stats_file();
+        let path = stats_file.path().to_path_buf();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger.clone(), watcher, config, binding_store.clone());
+
+        let source = Arc::new(ClaudeStatsSource::new_with_path(&path));
+        mgr.register(source);
+        mgr.enable("claude-stats").unwrap();
+
+        // Create two bindings for this source
+        let binding1 = crate::bindings::SourceBinding {
+            source_id: "claude-stats".to_string(),
+            target_id: "n8n-1".to_string(),
+            endpoint_id: "ep1".to_string(),
+            endpoint_url: "https://example.com/wh1".to_string(),
+            endpoint_name: "Workflow 1".to_string(),
+            active: true,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            headers_json: None,
+            auth_credential_key: None,
+            last_scheduled_at: None,
+            created_at: chrono::Utc::now().timestamp(),
+        };
+        let mut binding2 = binding1.clone();
+        binding2.target_id = "ntfy-1".to_string();
+        binding2.endpoint_id = "ep2".to_string();
+        binding2.endpoint_url = "https://example.com/wh2".to_string();
+        binding2.endpoint_name = "Workflow 2".to_string();
+
+        binding_store.save(&binding1).unwrap();
+        binding_store.save(&binding2).unwrap();
+
+        // Flush (no need for handle_file_event first — flush_source works independently)
+        let count = mgr.flush_source("claude-stats").unwrap();
+        assert_eq!(count, 2, "should create one entry per binding");
+
+        let stats = ledger.get_stats().unwrap();
+        assert_eq!(stats.pending, 2);
+    }
+
+    #[test]
+    fn test_coalesce_resets_on_new_events() {
+        let stats_file = fake_stats_file();
+        let path = stats_file.path().to_path_buf();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger.clone(), watcher, config, binding_store);
+
+        let source = Arc::new(ClaudeStatsSource::new_with_path(&path));
+        mgr.register(source);
+        mgr.enable("claude-stats").unwrap();
+
+        // Fire multiple events
+        mgr.handle_file_event(&path).unwrap();
+        mgr.handle_file_event(&path).unwrap();
+        mgr.handle_file_event(&path).unwrap();
+
+        // Should still be just one pending event (latest timestamp)
+        assert!(mgr.has_pending_event("claude-stats"));
+        let stats = ledger.get_stats().unwrap();
+        assert_eq!(stats.pending, 0, "multiple events should not create multiple enqueues");
+    }
+
+    #[test]
+    fn test_flush_expired_respects_window() {
+        let stats_file = fake_stats_file();
+        let path = stats_file.path().to_path_buf();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger.clone(), watcher, config, binding_store);
+
+        let source = Arc::new(ClaudeStatsSource::new_with_path(&path));
+        mgr.register(source);
+        mgr.enable("claude-stats").unwrap();
+
+        // Record event with current timestamp
+        mgr.handle_file_event(&path).unwrap();
+
+        // flush_expired should NOT flush (event is fresh, within 90s window)
+        let flushed = mgr.flush_expired();
+        assert_eq!(flushed, 0, "fresh events should not be flushed");
+        assert!(mgr.has_pending_event("claude-stats"), "event should still be pending");
+
+        // Manually backdate the event to simulate 90s passing
+        {
+            let mut pending = mgr.pending_events.lock().unwrap();
+            let old_ts = chrono::Utc::now().timestamp() - 91;
+            pending.insert("claude-stats".to_string(), old_ts);
+        }
+
+        // Now flush_expired should flush
+        let flushed = mgr.flush_expired();
+        assert_eq!(flushed, 1, "expired events should be flushed");
+        assert!(!mgr.has_pending_event("claude-stats"), "event should be cleared after flush");
+
+        let stats = ledger.get_stats().unwrap();
+        assert_eq!(stats.pending, 1);
+    }
+
+    #[test]
+    fn test_disabled_source_not_coalesced() {
+        let stats_file = fake_stats_file();
+        let path = stats_file.path().to_path_buf();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger.clone(), watcher, config, binding_store);
+
+        let source = Arc::new(ClaudeStatsSource::new_with_path(&path));
+        mgr.register(source);
+        // Do NOT enable
+
+        mgr.handle_file_event(&path).unwrap();
+
+        assert!(!mgr.has_pending_event("claude-stats"), "disabled sources should not coalesce");
     }
 
     #[test]
@@ -393,7 +664,8 @@ mod tests {
             .set("source.claude-stats.enabled", "true")
             .unwrap();
 
-        let mgr = SourceManager::new(ledger, watcher, config);
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config, binding_store);
         let source = Arc::new(ClaudeStatsSource::new_with_path("/tmp/fake.json"));
         mgr.register(source);
 
@@ -410,7 +682,8 @@ mod tests {
         let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
         let watcher = Arc::new(ManualFileWatcher::new());
         let config = Arc::new(AppConfig::open_in_memory().unwrap());
-        let mgr = SourceManager::new(ledger, watcher, config.clone());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config.clone(), binding_store);
         let source: Arc<dyn Source> = Arc::new(ClaudeStatsSource::new_with_path("/tmp/fake.json"));
         mgr.register(source.clone());
 
@@ -449,7 +722,8 @@ mod tests {
         let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
         let watcher = Arc::new(ManualFileWatcher::new());
         let config = Arc::new(AppConfig::open_in_memory().unwrap());
-        let mgr = SourceManager::new(ledger, watcher, config);
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config, binding_store);
         let source: Arc<dyn Source> = Arc::new(ClaudeStatsSource::new_with_path("/tmp/fake.json"));
         mgr.register(source.clone());
 
@@ -479,7 +753,8 @@ mod tests {
         let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
         let watcher = Arc::new(ManualFileWatcher::new());
         let config = Arc::new(AppConfig::open_in_memory().unwrap());
-        let mgr = SourceManager::new(ledger, watcher, config.clone());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config.clone(), binding_store);
         let source: Arc<dyn Source> = Arc::new(ClaudeStatsSource::new_with_path("/tmp/fake.json"));
         mgr.register(source.clone());
 
@@ -515,7 +790,8 @@ mod tests {
         let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
         let watcher = Arc::new(ManualFileWatcher::new());
         let config = Arc::new(AppConfig::open_in_memory().unwrap());
-        let mgr = SourceManager::new(ledger, watcher, config);
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config, binding_store);
 
         // Create a mock source with no configurable properties
         use crate::sources::{Source, SourcePreview, SourceError};
@@ -568,7 +844,8 @@ mod tests {
         let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
         let watcher = Arc::new(ManualFileWatcher::new());
         let config = Arc::new(AppConfig::open_in_memory().unwrap());
-        let mgr = SourceManager::new(ledger, watcher, config.clone());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config.clone(), binding_store);
         let source = Arc::new(ClaudeStatsSource::new_with_path(stats_file.path()));
         mgr.register(source);
 
