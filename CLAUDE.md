@@ -215,6 +215,30 @@ cargo build --release         # Final sanity check
 
 ---
 
+## superpowers Integration
+
+This project uses superpowers plugin for developer workflows.
+
+| Skill | When to Use |
+|-------|-------------|
+| `superpowers:brainstorming` | Before ANY creative work, features, modifications |
+| `superpowers:test-driven-development` | Before implementing any feature or bugfix |
+| `superpowers:systematic-debugging` | When encountering any bug or unexpected behavior |
+| `superpowers:verification-before-completion` | Before claiming work is complete |
+| `superpowers:writing-plans` | When you have a spec for multi-step work |
+| `superpowers:using-git-worktrees` | For feature work needing isolation |
+| `superpowers:dispatching-parallel-agents` | For 2+ independent tasks |
+
+### TDD Iron Law
+
+**Write tests before implementation.** If you haven't written a failing test, don't write implementation code.
+
+### Verification Before Completion
+
+**Run verification commands before claiming success.** Evidence before assertions.
+
+---
+
 ## Communication Standards
 
 ### Question Formatting
