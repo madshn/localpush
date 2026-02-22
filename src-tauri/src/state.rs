@@ -70,15 +70,16 @@ impl AppState {
         tracing::info!("Webhook client initialized");
         let webhook_client = Arc::new(ReqwestWebhookClient::new()?);
 
+        // Initialize target manager, binding store, and health tracker
+        let target_manager = Arc::new(TargetManager::new(config.clone()));
+        let binding_store = Arc::new(BindingStore::new(config.clone()));
+
         let source_manager = Arc::new(SourceManager::new(
             ledger.clone(),
             file_watcher.clone(),
             config.clone(),
+            binding_store.clone(),
         ));
-
-        // Initialize target manager, binding store, and health tracker
-        let target_manager = Arc::new(TargetManager::new(config.clone()));
-        let binding_store = Arc::new(BindingStore::new(config.clone()));
         let health_tracker = Arc::new(TargetHealthTracker::new());
 
         // Restore persisted targets from config
@@ -323,15 +324,16 @@ impl AppState {
         let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
         let config = Arc::new(AppConfig::open_in_memory().unwrap());
 
+        let target_manager = Arc::new(TargetManager::new(config.clone()));
+        let binding_store = Arc::new(BindingStore::new(config.clone()));
+        let health_tracker = Arc::new(TargetHealthTracker::new());
+
         let source_manager = Arc::new(SourceManager::new(
             ledger.clone(),
             file_watcher.clone(),
             config.clone(),
+            binding_store.clone(),
         ));
-
-        let target_manager = Arc::new(TargetManager::new(config.clone()));
-        let binding_store = Arc::new(BindingStore::new(config.clone()));
-        let health_tracker = Arc::new(TargetHealthTracker::new());
 
         // Register test source
         match ClaudeStatsSource::new() {

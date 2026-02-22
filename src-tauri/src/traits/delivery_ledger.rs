@@ -98,6 +98,16 @@ pub trait DeliveryLedgerTrait: Send + Sync {
         target_endpoint_id: &str,
     ) -> Result<String, LedgerError>;
 
+    /// Enqueue a targeted delivery with a custom available_at timestamp.
+    /// Used by coalescing flush to stagger deliveries across targets.
+    fn enqueue_targeted_at(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+        target_endpoint_id: &str,
+        available_at: i64,
+    ) -> Result<String, LedgerError>;
+
     /// Claim a batch of pending deliveries for processing
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError>;
 

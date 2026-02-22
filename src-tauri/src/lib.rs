@@ -80,6 +80,19 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         }
     }));
 
+    // Spawn coalescing worker (flushes buffered file events every 5s after 90s window expires)
+    let source_manager_for_coalescing = state.source_manager.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let flushed = source_manager_for_coalescing.flush_expired();
+            if flushed > 0 {
+                tracing::debug!(sources_flushed = flushed, "Coalescing worker flushed expired events");
+            }
+        }
+    });
+
     // Spawn background delivery worker (binding-aware routing + native delivery + health tracking)
     let _worker = delivery_worker::spawn_worker(
         state.ledger.clone(),
