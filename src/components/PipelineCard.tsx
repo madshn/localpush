@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Plus, Pencil, Info, X, Zap, SlidersHorizontal } from "lucide-react";
+import { Plus, Pencil, Info, X, Zap, SlidersHorizontal, AlertTriangle, RefreshCw } from "lucide-react";
 import { useBindings, type Binding } from "../api/hooks/useBindings";
+import { useTargetHealth, useReconnectTarget } from "../api/hooks/useTargets";
 import { TransparencyPreview } from "./TransparencyPreview";
 import { EndpointPicker } from "./EndpointPicker";
 import { SecurityCoaching } from "./SecurityCoaching";
@@ -157,9 +158,17 @@ export function PipelineCard({
   isPushing,
 }: PipelineCardProps) {
   const { data: bindings } = useBindings(source.id);
+  const { data: healthData } = useTargetHealth();
+  const reconnectTarget = useReconnectTarget();
   const [showInfo, setShowInfo] = useState(false);
   const [showProperties, setShowProperties] = useState(false);
   const [showDisableConfirm, setShowDisableConfirm] = useState(false);
+
+  const degradedMap = new Map(
+    (healthData ?? [])
+      .filter((h) => h.status === "degraded")
+      .map((h) => [h.target_id, h])
+  );
 
   const effectiveStatus =
     category === "paused"
@@ -388,34 +397,57 @@ export function PipelineCard({
               <div className="flex flex-col gap-1.5">
                 {bindings.map((binding) => {
                   const modeBadge = deliveryModeBadge(binding);
+                  const degraded = degradedMap.get(binding.target_id);
                   return (
-                  <div
-                    key={binding.endpoint_id}
-                    className="flex items-center justify-between bg-bg-primary rounded-md px-3 py-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-medium truncate">
-                          {binding.endpoint_name}
-                        </span>
-                        {modeBadge && (
-                          <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-accent/10 text-accent">
-                            {modeBadge}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-text-secondary font-mono truncate">
-                        {binding.endpoint_url}
-                      </div>
-                    </div>
-                    <button
-                      className="ml-2 shrink-0 p-1.5 text-text-secondary hover:text-accent transition-colors rounded hover:bg-bg-tertiary"
-                      onClick={() => onEditBinding(source.id, binding.endpoint_id)}
-                      disabled={isFlowActive}
-                      title="Edit binding"
+                  <div key={binding.endpoint_id}>
+                    <div
+                      className={`flex items-center justify-between bg-bg-primary rounded-md px-3 py-2 ${degraded ? "border border-warning/30" : ""}`}
                     >
-                      <Pencil size={12} />
-                    </button>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          {degraded && (
+                            <AlertTriangle size={12} className="shrink-0 text-warning" />
+                          )}
+                          <span className="text-xs font-medium truncate">
+                            {binding.endpoint_name}
+                          </span>
+                          {modeBadge && (
+                            <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-accent/10 text-accent">
+                              {modeBadge}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-text-secondary font-mono truncate">
+                          {binding.endpoint_url}
+                        </div>
+                      </div>
+                      <button
+                        className="ml-2 shrink-0 p-1.5 text-text-secondary hover:text-accent transition-colors rounded hover:bg-bg-tertiary"
+                        onClick={() => onEditBinding(source.id, binding.endpoint_id)}
+                        disabled={isFlowActive}
+                        title="Edit binding"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    </div>
+                    {degraded && (
+                      <div className="flex items-center justify-between px-3 py-1.5 bg-warning-bg rounded-b-md -mt-0.5 border border-t-0 border-warning/20">
+                        <span className="text-[10px] text-warning">
+                          {degraded.queued_count > 0
+                            ? `${degraded.queued_count} deliveries queued`
+                            : "Target unreachable"}
+                          {degraded.reason ? ` — ${degraded.reason}` : ""}
+                        </span>
+                        <button
+                          className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-warning text-bg-primary hover:bg-warning/90 transition-colors disabled:opacity-50"
+                          onClick={() => reconnectTarget.mutate(degraded.target_id)}
+                          disabled={reconnectTarget.isPending}
+                        >
+                          <RefreshCw size={9} className={reconnectTarget.isPending ? "animate-spin" : ""} />
+                          Reconnect
+                        </button>
+                      </div>
+                    )}
                   </div>
                   );
                 })}

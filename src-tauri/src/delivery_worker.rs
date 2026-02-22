@@ -8,8 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use crate::bindings::{BindingStore, SourceBinding};
 use crate::config::AppConfig;
+use crate::target_health::TargetHealthTracker;
 use crate::target_manager::TargetManager;
-use crate::traits::{CredentialStore, DeliveryLedgerTrait, WebhookClient, WebhookAuth};
+use crate::traits::{CredentialStore, DeliveryLedgerTrait, TargetError, WebhookClient, WebhookAuth};
 
 /// Legacy worker configuration derived from AppConfig (v0.1 fallback)
 pub struct WorkerConfig {
@@ -198,6 +199,21 @@ pub struct BatchResult {
     pub delivered: usize,
     pub failed: usize,
     pub dlq_transitions: Vec<DlqTransition>,
+    /// Targets that transitioned to Degraded during this batch.
+    pub degraded_targets: Vec<String>,
+}
+
+/// Classify a webhook error into a TargetError for health tracking.
+fn classify_webhook_error(err: &crate::traits::WebhookError) -> TargetError {
+    match err {
+        crate::traits::WebhookError::HttpError(code) if *code == 401 || *code == 403 => {
+            TargetError::AuthFailed(err.to_string())
+        }
+        crate::traits::WebhookError::NetworkError(_) | crate::traits::WebhookError::Timeout => {
+            TargetError::ConnectionFailed(err.to_string())
+        }
+        _ => TargetError::DeliveryError(err.to_string()),
+    }
 }
 
 /// Process one batch of deliveries with binding-aware routing.
@@ -206,6 +222,10 @@ pub struct BatchResult {
 /// falling back to legacy global webhook if no bindings exist.
 /// Native targets (e.g. Google Sheets) get first chance via `deliver()`;
 /// if they return `Ok(true)`, webhook POST is skipped.
+///
+/// When `health_tracker` is provided, degraded targets are skipped and
+/// delivery failures are reported for automatic degradation detection.
+#[allow(clippy::too_many_arguments)]
 pub async fn process_batch(
     ledger: &dyn DeliveryLedgerTrait,
     webhook: &dyn WebhookClient,
@@ -213,6 +233,7 @@ pub async fn process_batch(
     legacy_config: Option<&WorkerConfig>,
     credentials: &dyn CredentialStore,
     target_manager: Option<&TargetManager>,
+    health_tracker: Option<&TargetHealthTracker>,
     batch_size: usize,
 ) -> BatchResult {
     let entries = match ledger.claim_batch(batch_size) {
@@ -271,6 +292,22 @@ pub async fn process_batch(
         let mut successful_target: Option<&ResolvedTarget> = None;
 
         for rt in &targets {
+            // Skip delivery to degraded targets
+            if !rt.target_id.is_empty() {
+                if let Some(ht) = health_tracker {
+                    if let Some(info) = ht.is_degraded(&rt.target_id) {
+                        tracing::debug!(
+                            target_id = %rt.target_id,
+                            event_id = %entry.event_id,
+                            reason = %info.reason,
+                            "Skipping delivery to degraded target"
+                        );
+                        last_error = Some(format!("Target degraded: {}", info.reason));
+                        continue;
+                    }
+                }
+            }
+
             // Try native delivery first (e.g. Google Sheets appends rows directly)
             if !rt.target_id.is_empty() {
                 if let Some(tm) = target_manager {
@@ -280,6 +317,9 @@ pub async fn process_batch(
                                 any_success = true;
                                 if successful_target.is_none() {
                                     successful_target = Some(rt);
+                                }
+                                if let Some(ht) = health_tracker {
+                                    ht.report_success(&rt.target_id);
                                 }
                                 tracing::debug!(
                                     target_id = %rt.target_id,
@@ -299,6 +339,13 @@ pub async fn process_batch(
                                     error = %e,
                                     "Native delivery failed"
                                 );
+                                // Report failure to health tracker
+                                if let Some(ht) = health_tracker {
+                                    let transitioned = ht.report_failure(&rt.target_id, &e);
+                                    if transitioned {
+                                        result.degraded_targets.push(rt.target_id.clone());
+                                    }
+                                }
                                 last_error = Some(e.to_string());
                                 continue; // Don't also try webhook for this target
                             }
@@ -314,10 +361,25 @@ pub async fn process_batch(
                     if successful_target.is_none() {
                         successful_target = Some(rt);
                     }
+                    if let Some(ht) = health_tracker {
+                        if !rt.target_id.is_empty() {
+                            ht.report_success(&rt.target_id);
+                        }
+                    }
                     tracing::debug!(url = %rt.url, event_id = %entry.event_id, "Delivered");
                 }
                 Err(e) => {
                     tracing::warn!(url = %rt.url, event_id = %entry.event_id, error = %e, "Delivery failed");
+                    // Classify webhook errors and report to health tracker
+                    if let Some(ht) = health_tracker {
+                        if !rt.target_id.is_empty() {
+                            let target_err = classify_webhook_error(&e);
+                            let transitioned = ht.report_failure(&rt.target_id, &target_err);
+                            if transitioned {
+                                result.degraded_targets.push(rt.target_id.clone());
+                            }
+                        }
+                    }
                     last_error = Some(e.to_string());
                 }
             }
@@ -401,6 +463,8 @@ fn notify_dlq(app_handle: &tauri::AppHandle, transition: &DlqTransition) {
 ///
 /// The worker polls every 5 seconds, resolving delivery targets from bindings
 /// per source, with fallback to legacy global webhook config.
+/// When targets degrade, pending deliveries are paused automatically.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_worker(
     ledger: Arc<dyn DeliveryLedgerTrait>,
     webhook: Arc<dyn WebhookClient>,
@@ -408,10 +472,11 @@ pub fn spawn_worker(
     binding_store: Arc<BindingStore>,
     credentials: Arc<dyn CredentialStore>,
     target_manager: Arc<TargetManager>,
+    health_tracker: Arc<TargetHealthTracker>,
     app_handle: tauri::AppHandle,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
-        tracing::info!("Delivery worker started (5s interval, binding-aware routing)");
+        tracing::info!("Delivery worker started (5s interval, binding-aware routing, health tracking)");
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         let mut tick_count: u64 = 0;
         let mut tray_showing_error = false;
@@ -434,8 +499,28 @@ pub fn spawn_worker(
                 legacy_config.as_ref(),
                 &*credentials,
                 Some(&target_manager),
+                Some(&health_tracker),
                 10,
             ).await;
+
+            // Pause deliveries for newly degraded targets
+            for degraded_target_id in &result.degraded_targets {
+                let endpoint_ids: Vec<String> = binding_store.list_all()
+                    .into_iter()
+                    .filter(|b| b.target_id == *degraded_target_id)
+                    .map(|b| b.endpoint_id)
+                    .collect();
+                if !endpoint_ids.is_empty() {
+                    let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
+                    if let Err(e) = ledger.pause_target_deliveries(&ep_refs) {
+                        tracing::error!(
+                            target_id = %degraded_target_id,
+                            error = %e,
+                            "Failed to pause deliveries for degraded target"
+                        );
+                    }
+                }
+            }
 
             // Handle DLQ transitions: notify + update tray
             for transition in &result.dlq_transitions {
@@ -447,11 +532,12 @@ pub fn spawn_worker(
                 notify_dlq(&app_handle, transition);
             }
 
-            // Update tray icon based on DLQ state (check every tick, not just on transitions)
-            let has_dlq = ledger.get_stats().map(|s| s.dlq > 0).unwrap_or(false);
-            if has_dlq != tray_showing_error {
-                update_tray_for_dlq(&app_handle, has_dlq);
-                tray_showing_error = has_dlq;
+            // Update tray icon based on DLQ or degraded state
+            let stats = ledger.get_stats().unwrap_or_default();
+            let has_issues = stats.dlq > 0 || stats.target_paused > 0;
+            if has_issues != tray_showing_error {
+                update_tray_for_dlq(&app_handle, has_issues);
+                tray_showing_error = has_issues;
             }
         }
     })
@@ -509,7 +595,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("test.event", serde_json::json!({"hello": "world"})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         assert_eq!(result.failed, 0);
@@ -525,7 +611,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         assert_eq!(result.failed, 0);
@@ -541,7 +627,7 @@ mod tests {
         ledger.enqueue("my-source", serde_json::json!({})).unwrap();
 
         // Even though legacy config is provided, binding should be used
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         // Webhook was called with binding URL, not legacy URL
@@ -558,7 +644,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("test.event", serde_json::json!({})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 0);
         assert_eq!(result.failed, 1);
@@ -572,7 +658,7 @@ mod tests {
         let bs = test_binding_store();
         let creds = test_credentials();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 0);
         assert_eq!(result.failed, 0);
@@ -590,7 +676,7 @@ mod tests {
         ledger.enqueue("event.b", serde_json::json!({"b": 2})).unwrap();
         ledger.enqueue("event.c", serde_json::json!({"c": 3})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 3);
         assert_eq!(webhook.call_count(), 3);
@@ -605,7 +691,7 @@ mod tests {
         ledger.enqueue("orphan-source", serde_json::json!({})).unwrap();
 
         // No legacy config, no bindings → entry should be marked delivered (not stuck)
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 0); // resolve_targets returns empty, skipped
         assert_eq!(result.failed, 0);
@@ -647,7 +733,7 @@ mod tests {
 
         ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         assert_eq!(result.failed, 0);
@@ -673,7 +759,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         let requests = webhook.requests();
@@ -690,7 +776,7 @@ mod tests {
         let creds = test_credentials();
         ledger.enqueue("test.event", serde_json::json!({})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, Some(&test_config()), &creds, None, None, 10).await;
 
         assert_eq!(result.failed, 1);
         assert!(result.dlq_transitions.is_empty(), "first failure is not DLQ");
@@ -868,7 +954,7 @@ mod tests {
 
         ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, Some(&tm), 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, Some(&tm), None, 10).await;
 
         assert_eq!(result.delivered, 1, "Entry should be marked delivered");
         assert_eq!(result.failed, 0);
@@ -906,7 +992,7 @@ mod tests {
 
         ledger.enqueue("my-source", serde_json::json!({"data": 1})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, Some(&tm), 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, Some(&tm), None, 10).await;
 
         assert_eq!(result.delivered, 1, "Entry should be delivered via webhook");
         assert_eq!(result.failed, 0);
@@ -923,7 +1009,7 @@ mod tests {
         // Enqueue a targeted delivery to a non-existent endpoint
         ledger.enqueue_targeted("my-source", serde_json::json!({"data": 1}), "missing-ep").unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, None, &creds, None, None, 10).await;
 
         assert_eq!(result.delivered, 0, "Should NOT be marked delivered");
         assert_eq!(result.failed, 1, "Should be marked failed");

@@ -26,6 +26,7 @@ mod state;
 pub mod delivery_worker;
 pub mod scheduled_worker;
 pub mod error_diagnosis;
+pub mod target_health;
 
 use std::sync::Arc;
 use tauri::{App, Manager};
@@ -79,7 +80,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         }
     }));
 
-    // Spawn background delivery worker (binding-aware routing + native delivery)
+    // Spawn background delivery worker (binding-aware routing + native delivery + health tracking)
     let _worker = delivery_worker::spawn_worker(
         state.ledger.clone(),
         state.webhook_client.clone(),
@@ -87,6 +88,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         state.binding_store.clone(),
         state.credentials.clone(),
         state.target_manager.clone(),
+        state.health_tracker.clone(),
         app.handle().clone(),
     );
 

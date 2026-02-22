@@ -39,6 +39,8 @@ fn main() {
             commands::connect_google_sheets_target,
             commands::list_targets,
             commands::test_target_connection,
+            commands::get_target_health,
+            commands::reconnect_target,
             commands::list_target_endpoints,
             commands::create_binding,
             commands::remove_binding,

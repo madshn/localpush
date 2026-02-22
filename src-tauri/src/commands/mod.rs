@@ -788,6 +788,98 @@ pub async fn test_target_connection(
     serde_json::to_value(info).map_err(|e| e.to_string())
 }
 
+/// Get health status for all targets, including degradation info and queued count.
+#[tauri::command]
+pub async fn get_target_health(
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    tracing::debug!(command = "get_target_health", "Command invoked");
+    let targets = state.target_manager.list();
+    let mut result = Vec::new();
+
+    for (target_id, target_name, target_type) in &targets {
+        let degradation = state.health_tracker.is_degraded(target_id);
+
+        // Get endpoint_ids for this target to count paused deliveries
+        let endpoint_ids: Vec<String> = state.binding_store.list_all()
+            .into_iter()
+            .filter(|b| b.target_id == *target_id)
+            .map(|b| b.endpoint_id)
+            .collect();
+        let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
+        let queued_count = state.ledger
+            .count_paused_for_target(&ep_refs)
+            .unwrap_or(0);
+
+        let health = if let Some(info) = degradation {
+            serde_json::json!({
+                "target_id": target_id,
+                "target_name": target_name,
+                "target_type": target_type,
+                "status": "degraded",
+                "reason": info.reason,
+                "degraded_at": info.degraded_at,
+                "queued_count": queued_count,
+            })
+        } else {
+            serde_json::json!({
+                "target_id": target_id,
+                "target_name": target_name,
+                "target_type": target_type,
+                "status": "healthy",
+                "queued_count": 0,
+            })
+        };
+        result.push(health);
+    }
+
+    Ok(result)
+}
+
+/// Reconnect a degraded target: test connection, and if successful,
+/// mark as healthy and resume all paused deliveries.
+#[tauri::command]
+pub async fn reconnect_target(
+    state: State<'_, AppState>,
+    target_id: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "reconnect_target", target_id = %target_id, "Command invoked");
+
+    // Test the target's connection
+    let info = state
+        .target_manager
+        .test_connection(&target_id)
+        .await
+        .map_err(|e| format!("Reconnect failed: {}", e))?;
+
+    // Mark healthy in the health tracker
+    state.health_tracker.mark_reconnected(&target_id);
+
+    // Resume paused deliveries for all endpoints of this target
+    let endpoint_ids: Vec<String> = state.binding_store.list_all()
+        .into_iter()
+        .filter(|b| b.target_id == target_id)
+        .map(|b| b.endpoint_id)
+        .collect();
+    let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
+    let resumed = state.ledger
+        .resume_target_deliveries(&ep_refs)
+        .map_err(|e| format!("Failed to resume deliveries: {}", e))?;
+
+    tracing::info!(
+        target_id = %target_id,
+        resumed_count = resumed,
+        "Target reconnected and deliveries resumed"
+    );
+
+    Ok(serde_json::json!({
+        "target_id": target_id,
+        "status": "healthy",
+        "resumed_count": resumed,
+        "target_info": serde_json::to_value(info).unwrap_or_default(),
+    }))
+}
+
 /// List endpoints for a specific target
 #[tauri::command]
 pub async fn list_target_endpoints(
