@@ -55,6 +55,23 @@ impl AppState {
         #[cfg(debug_assertions)]
         let credentials: Arc<dyn CredentialStore> = {
             let cred_path = app_data_dir.join("dev-credentials.json");
+
+            // Seed dev credentials from Keychain vault on first dev launch (one prompt, once)
+            if !cred_path.exists() || std::fs::metadata(&cred_path).map(|m| m.len() <= 2).unwrap_or(true) {
+                if let Ok(entry) = keyring::Entry::new("com.localpush.app", "__vault__") {
+                    match entry.get_password() {
+                        Ok(json) => {
+                            if let Err(e) = std::fs::write(&cred_path, &json) {
+                                tracing::warn!(error = %e, "Failed to seed dev credentials from vault");
+                            } else {
+                                tracing::info!("Seeded dev credentials from Keychain vault");
+                            }
+                        }
+                        Err(e) => tracing::debug!(error = %e, "No Keychain vault to seed from (expected on first install)"),
+                    }
+                }
+            }
+
             tracing::info!(path = %cred_path.display(), "DEV MODE: file-based credential store (no Keychain prompts)");
             Arc::new(crate::production::DevFileCredentialStore::new(cred_path))
         };
