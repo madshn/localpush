@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Pencil, Zap, AlertTriangle } from "lucide-react";
 import { SourceCard } from "./SourceCard";
 import { TargetCard } from "./TargetCard";
@@ -48,7 +49,7 @@ function deliveryModeBadge(binding: Binding): string | null {
   return null;
 }
 
-export function DashboardPipelineRow({
+function DashboardPipelineRowComponent({
   source,
   category,
   bindings,
@@ -201,3 +202,19 @@ export function DashboardPipelineRow({
     </div>
   );
 }
+
+function areEqual(
+  prev: DashboardPipelineRowProps,
+  next: DashboardPipelineRowProps
+) {
+  return (
+    prev.source === next.source &&
+    prev.category === next.category &&
+    prev.bindings === next.bindings &&
+    prev.trafficLightStatus === next.trafficLightStatus &&
+    prev.isPushing === next.isPushing &&
+    prev.gap === next.gap
+  );
+}
+
+export const DashboardPipelineRow = memo(DashboardPipelineRowComponent, areEqual);

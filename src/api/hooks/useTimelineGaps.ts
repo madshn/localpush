@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { logger } from "../../utils/logger";
+import { visibleRefetchInterval } from "./polling";
 
 export interface TimelineGap {
   source_id: string;
@@ -31,7 +32,7 @@ export function useTimelineGaps() {
   return useQuery({
     queryKey: ["timelineGaps"],
     queryFn: fetchTimelineGaps,
-    refetchInterval: 60 * 1000, // Poll every 60 seconds
+    refetchInterval: () => visibleRefetchInterval(60 * 1000), // Poll every 60 seconds (visible only)
     staleTime: 30 * 1000, // Consider stale after 30s
   });
 }

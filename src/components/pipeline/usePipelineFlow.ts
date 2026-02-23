@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback, startTransition } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import type { QueryClient } from "@tanstack/react-query";
@@ -58,6 +58,7 @@ export function usePipelineFlow({
     Record<string, DeliveryStatus>
   >({});
   const [pushingSource, setPushingSource] = useState<string | null>(null);
+  const idleFlowStatesRef = useRef<Record<string, FlowState>>({});
 
   useEffect(() => {
     loadDeliveryStatus();
@@ -79,8 +80,17 @@ export function usePipelineFlow({
     }
   };
 
-  const getFlowState = (sourceId: string): FlowState =>
-    flowStates[sourceId] || defaultFlowState(sourceId);
+  const getFlowState = useCallback(
+    (sourceId: string): FlowState => {
+      if (flowStates[sourceId]) return flowStates[sourceId];
+      const existing = idleFlowStatesRef.current[sourceId];
+      if (existing) return existing;
+      const created = defaultFlowState(sourceId);
+      idleFlowStatesRef.current[sourceId] = created;
+      return created;
+    },
+    [flowStates]
+  );
 
   const updateFlowState = (sourceId: string, updates: Partial<FlowState>) => {
     setFlowStates((prev) => ({
@@ -359,42 +369,52 @@ export function usePipelineFlow({
     }
   };
 
-  const handlePushNow = async (sourceId: string) => {
+  const handlePushNow = (sourceId: string) => {
     logger.info("Push Now triggered", { sourceId });
     setPushingSource(sourceId);
     const pushedAt = Date.now();
-    invoke<string>("trigger_source_push", { sourceId })
-      .then((result) => {
-        logger.debug("Push enqueued", { sourceId, result });
-        queryClient.invalidateQueries({ queryKey: ["activityLog"] });
-        // Keep "Pushing..." visible for at least 800ms so the state change is perceptible
-        const elapsed = Date.now() - pushedAt;
-        const remaining = Math.max(0, 800 - elapsed);
-        setTimeout(() => {
-          toast.success("Push enqueued — delivering shortly");
+    const scheduleAfterPaint =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) => window.setTimeout(() => cb(0), 0);
+
+    scheduleAfterPaint(() => {
+      invoke<string>("trigger_source_push", { sourceId })
+        .then((result) => {
+          logger.debug("Push enqueued", { sourceId, result });
+          startTransition(() => {
+            void queryClient.invalidateQueries({ queryKey: ["deliveryQueue"] });
+            void queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
+          });
+          // Keep "Pushing..." visible for at least 800ms so the state change is perceptible
+          const elapsed = Date.now() - pushedAt;
+          const remaining = Math.max(0, 800 - elapsed);
+          setTimeout(() => {
+            toast.success("Push enqueued — delivering shortly");
+            setPushingSource(null);
+          }, remaining);
+        })
+        .catch((error) => {
+          logger.error("Manual push failed", { sourceId, error });
+          toast.error(`Push failed: ${error}`);
           setPushingSource(null);
-        }, remaining);
-      })
-      .catch((error) => {
-        logger.error("Manual push failed", { sourceId, error });
-        toast.error(`Push failed: ${error}`);
-        setPushingSource(null);
-      });
+        });
+    });
   };
 
-  const getTrafficLightStatus = (
-    sourceId: string,
-    enabled: boolean
-  ): TrafficLightStatus => {
-    if (!enabled) return "grey";
-    const status = deliveryStatuses[sourceId];
-    if (!status) return "grey";
-    if (status.failed_count > 0) return "red";
-    if (status.pending_count > 0) return "yellow";
-    if (status.overall === "active" || status.overall === "success")
-      return "green";
-    return "grey";
-  };
+  const getTrafficLightStatus = useCallback(
+    (sourceId: string, enabled: boolean): TrafficLightStatus => {
+      if (!enabled) return "grey";
+      const status = deliveryStatuses[sourceId];
+      if (!status) return "grey";
+      if (status.failed_count > 0) return "red";
+      if (status.pending_count > 0) return "yellow";
+      if (status.overall === "active" || status.overall === "success")
+        return "green";
+      return "grey";
+    },
+    [deliveryStatuses]
+  );
 
   return {
     flowStates,

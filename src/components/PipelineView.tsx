@@ -1,5 +1,6 @@
+import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Plus, Loader2 } from "lucide-react";
 import { useSources } from "../api/hooks/useSources";
 import {
   useAllBindings,
@@ -7,9 +8,9 @@ import {
   useRemoveBinding,
   type Binding,
 } from "../api/hooks/useBindings";
+import { useTargetHealth } from "../api/hooks/useTargets";
 import { SummaryStats } from "./SummaryStats";
 import { PipelineCard } from "./PipelineCard";
-import { SkeletonCard } from "./Skeleton";
 import { usePipelineFlow } from "./pipeline/usePipelineFlow";
 import type {
   SourceData,
@@ -52,8 +53,9 @@ function categorizeAndSortSources(
 }
 
 export function PipelineView() {
-  const { data: sources, isLoading } = useSources();
-  const { data: allBindings } = useAllBindings();
+  const { data: sources, isLoading: sourcesLoading } = useSources();
+  const { data: allBindings, isLoading: bindingsLoading } = useAllBindings();
+  const { data: targetHealth } = useTargetHealth();
   const queryClient = useQueryClient();
   const createBinding = useCreateBinding();
   const removeBinding = useRemoveBinding();
@@ -66,17 +68,48 @@ export function PipelineView() {
     removeBinding,
   });
 
+  const isLoading = sourcesLoading || bindingsLoading;
+
+  const bindingsBySource = useMemo(() => {
+    const map = new Map<string, Binding[]>();
+    if (!allBindings) return map;
+    for (const binding of allBindings) {
+      const existing = map.get(binding.source_id);
+      if (existing) {
+        existing.push(binding);
+      } else {
+        map.set(binding.source_id, [binding]);
+      }
+    }
+    return map;
+  }, [allBindings]);
+
   if (isLoading) {
+    const step = sourcesLoading ? 0 : 1;
+    const steps = ["Loading pipelines", "Checking queues", "Validating connections"];
     return (
-      <div>
-        <SummaryStats />
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Active Pipelines</h2>
+      <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <Loader2 size={24} className="text-accent animate-spin" />
+        <div className="flex flex-col items-center gap-2">
+          {steps.map((label, i) => (
+            <div key={label} className="flex items-center gap-2">
+              <div className={`w-1.5 h-1.5 rounded-full ${
+                i < step ? "bg-success" : i === step ? "bg-accent animate-pulse" : "bg-border"
+              }`} />
+              <span className={`text-xs ${
+                i <= step ? "text-text-primary" : "text-text-secondary/50"
+              }`}>
+                {label}{i === step ? "..." : ""}
+              </span>
+            </div>
+          ))}
         </div>
-        <div className="flex flex-col gap-3">
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
+        {/* Progress bar */}
+        <div className="w-48 h-1 bg-bg-tertiary rounded-full overflow-hidden">
+          <div
+            className="h-full bg-accent rounded-full transition-all duration-500"
+            style={{ width: `${((step + 1) / steps.length) * 100}%` }}
+          />
         </div>
       </div>
     );
@@ -109,6 +142,8 @@ export function PipelineView() {
       key={source.id}
       source={source}
       category={category}
+      bindings={bindingsBySource.get(source.id) || []}
+      targetHealth={targetHealth || []}
       flowState={flow.getFlowState(source.id)}
       previewLoading={flow.previewLoading[source.id] || false}
       trafficLightStatus={flow.getTrafficLightStatus(

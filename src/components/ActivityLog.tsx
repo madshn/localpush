@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
 import {
   useActivityLog,
@@ -100,6 +100,7 @@ function groupByDate(
 export function ActivityLog() {
   const { data: entries, isLoading } = useActivityLog();
   const [searchFilter, setSearchFilter] = useState("");
+  const deferredSearchFilter = useDeferredValue(searchFilter);
 
   if (isLoading) {
     return (
@@ -119,14 +120,15 @@ export function ActivityLog() {
     );
   }
 
-  const filtered = searchFilter
-    ? entries.filter((e) =>
-        e.source.toLowerCase().includes(searchFilter.toLowerCase())
-      )
-    : entries;
+  const filtered = useMemo(() => {
+    if (!entries) return [];
+    if (!deferredSearchFilter) return entries;
+    const needle = deferredSearchFilter.toLowerCase();
+    return entries.filter((e) => e.source.toLowerCase().includes(needle));
+  }, [entries, deferredSearchFilter]);
 
-  const items = groupIntoHourlyBuckets(filtered);
-  const dateGroups = groupByDate(items);
+  const items = useMemo(() => groupIntoHourlyBuckets(filtered), [filtered]);
+  const dateGroups = useMemo(() => groupByDate(items), [items]);
 
   return (
     <div>
@@ -175,9 +177,9 @@ export function ActivityLog() {
         })}
       </div>
 
-      {searchFilter && filtered.length === 0 && (
+      {deferredSearchFilter && filtered.length === 0 && (
         <div className="text-center py-6 text-text-secondary text-xs">
-          No entries matching &ldquo;{searchFilter}&rdquo;
+          No entries matching &ldquo;{deferredSearchFilter}&rdquo;
         </div>
       )}
     </div>

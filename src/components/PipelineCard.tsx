@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Plus, Pencil, Info, X, Zap, SlidersHorizontal, AlertTriangle, RefreshCw } from "lucide-react";
-import { useBindings, type Binding } from "../api/hooks/useBindings";
-import { useTargetHealth, useReconnectTarget } from "../api/hooks/useTargets";
+import type { Binding } from "../api/hooks/useBindings";
+import type { TargetHealth } from "../api/hooks/useTargets";
 import { TransparencyPreview } from "./TransparencyPreview";
 import { EndpointPicker } from "./EndpointPicker";
 import { SecurityCoaching } from "./SecurityCoaching";
@@ -56,6 +56,8 @@ interface PipelineCardProps {
     watch_path: string | null;
   };
   category: SourceCategory;
+  bindings: Binding[];
+  targetHealth: TargetHealth[];
   flowState: FlowState;
   previewLoading: boolean;
   trafficLightStatus: "green" | "yellow" | "red" | "grey";
@@ -136,9 +138,11 @@ function deliveryModeBadge(binding: Binding): string | null {
   return null;
 }
 
-export function PipelineCard({
+function PipelineCardComponent({
   source,
   category,
+  bindings,
+  targetHealth,
   flowState,
   previewLoading,
   trafficLightStatus,
@@ -157,15 +161,13 @@ export function PipelineCard({
   onEditBinding,
   isPushing,
 }: PipelineCardProps) {
-  const { data: bindings } = useBindings(source.id);
-  const { data: healthData } = useTargetHealth();
-  const reconnectTarget = useReconnectTarget();
+  // reconnect navigates to Settings tab via custom event (no mutation needed here)
   const [showInfo, setShowInfo] = useState(false);
   const [showProperties, setShowProperties] = useState(false);
   const [showDisableConfirm, setShowDisableConfirm] = useState(false);
 
   const degradedMap = new Map(
-    (healthData ?? [])
+    targetHealth
       .filter((h) => h.status === "degraded")
       .map((h) => [h.target_id, h])
   );
@@ -439,11 +441,12 @@ export function PipelineCard({
                           {degraded.reason ? ` — ${degraded.reason}` : ""}
                         </span>
                         <button
-                          className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-warning text-bg-primary hover:bg-warning/90 transition-colors disabled:opacity-50"
-                          onClick={() => reconnectTarget.mutate(degraded.target_id)}
-                          disabled={reconnectTarget.isPending}
+                          className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-warning text-bg-primary hover:bg-warning/90 transition-colors"
+                          onClick={() => {
+                            window.dispatchEvent(new CustomEvent("localpush:navigate", { detail: { tab: "settings" } }));
+                          }}
                         >
-                          <RefreshCw size={9} className={reconnectTarget.isPending ? "animate-spin" : ""} />
+                          <RefreshCw size={9} />
                           Reconnect
                         </button>
                       </div>
@@ -573,3 +576,18 @@ export function PipelineCard({
     </div>
   );
 }
+
+function areEqual(prev: PipelineCardProps, next: PipelineCardProps) {
+  return (
+    prev.source === next.source &&
+    prev.category === next.category &&
+    prev.bindings === next.bindings &&
+    prev.targetHealth === next.targetHealth &&
+    prev.flowState === next.flowState &&
+    prev.previewLoading === next.previewLoading &&
+    prev.trafficLightStatus === next.trafficLightStatus &&
+    prev.isPushing === next.isPushing
+  );
+}
+
+export const PipelineCard = memo(PipelineCardComponent, areEqual);

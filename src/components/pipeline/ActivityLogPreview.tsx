@@ -4,7 +4,7 @@ import {
   AlertCircle,
   ArrowRight,
 } from "lucide-react";
-import { useActivityLog } from "../../api/hooks/useActivityLog";
+import { useRecentActivityLog } from "../../api/hooks/useActivityLog";
 import type { ActivityEntry } from "../../api/hooks/useActivityLog";
 
 const statusIcon: Record<
@@ -34,10 +34,10 @@ interface ActivityLogPreviewProps {
 }
 
 export function ActivityLogPreview({ onViewAll }: ActivityLogPreviewProps) {
-  const { data: entries } = useActivityLog();
-  const recent = entries?.slice(0, 3) || [];
+  const { data: recent } = useRecentActivityLog(3);
+  const previewEntries = recent || [];
 
-  if (recent.length === 0) {
+  if (previewEntries.length === 0) {
     return (
       <div className="bg-bg-secondary border border-border rounded-lg p-3">
         <span className="text-[11px] font-medium text-text-secondary uppercase tracking-wide">
@@ -66,7 +66,7 @@ export function ActivityLogPreview({ onViewAll }: ActivityLogPreviewProps) {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        {recent.map((entry) => {
+        {previewEntries.map((entry) => {
           const { icon: StatusIcon, className } =
             statusIcon[entry.status] || statusIcon.pending;
           return (

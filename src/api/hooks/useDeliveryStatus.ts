@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { logger } from "../../utils/logger";
+import { visibleRefetchInterval } from "./polling";
 
 export interface DeliveryStatus {
   overall: "active" | "pending" | "error" | "unknown";
@@ -29,6 +30,6 @@ export function useDeliveryStatus() {
   return useQuery({
     queryKey: ["deliveryStatus"],
     queryFn: getDeliveryStatus,
-    refetchInterval: 5000, // Poll every 5 seconds
+    refetchInterval: () => visibleRefetchInterval(5000), // Poll every 5 seconds (visible only)
   });
 }

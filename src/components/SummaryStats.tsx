@@ -1,14 +1,13 @@
 import { Zap, CheckCircle2 } from "lucide-react";
 import { useDeliveryStatus } from "../api/hooks/useDeliveryStatus";
-import { useDeliveryQueue } from "../api/hooks/useDeliveryQueue";
+import { useDeliveryQueueCounts } from "../api/hooks/useDeliveryQueue";
 import { SparklineChart } from "./SparklineChart";
 
 export function SummaryStats() {
   const { data: status } = useDeliveryStatus();
-  const { data: queue } = useDeliveryQueue();
+  const { data: queueCounts } = useDeliveryQueueCounts();
 
-  const deliveredCount =
-    queue?.filter((item) => item.status === "delivered").length ?? 0;
+  const deliveredCount = queueCounts?.delivered ?? 0;
   const pendingCount = status?.pendingCount ?? 0;
 
   const healthLabel =

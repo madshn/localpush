@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { logger } from "../../utils/logger";
+import { visibleRefetchInterval } from "./polling";
 
 export interface ErrorDiagnosis {
   category:
@@ -92,6 +93,6 @@ export function useDlqCount() {
   return useQuery({
     queryKey: ["dlqCount"],
     queryFn: getDlqCount,
-    refetchInterval: 5000, // Poll every 5s to keep badge updated
+    refetchInterval: () => visibleRefetchInterval(5000), // Poll every 5s to keep badge updated (visible only)
   });
 }

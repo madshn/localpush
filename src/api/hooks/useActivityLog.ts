@@ -1,19 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { invoke } from '@tauri-apps/api/core';
-import { logger } from '../../utils/logger';
-
-interface DeliveryQueueItem {
-  id: string;
-  event_type: string;
-  status: string;
-  retry_count: number;
-  last_error: string | null;
-  created_at: string;
-  delivered_at: string | null;
-  payload: unknown;
-  trigger_type: string | null;
-  delivered_to: string | null;
-}
+import {
+  DELIVERY_QUEUE_QUERY_KEY,
+  fetchDeliveryQueue,
+  type DeliveryQueueItemRaw,
+} from './useDeliveryQueue';
+import { visibleRefetchInterval } from './polling';
 
 export interface DeliveredToInfo {
   endpoint_id: string;
@@ -87,7 +78,7 @@ const parseDeliveredTo = (raw: string | null): DeliveredToInfo | null => {
   }
 };
 
-const transformToActivityEntry = (item: DeliveryQueueItem): ActivityEntry => {
+const transformToActivityEntry = (item: DeliveryQueueItemRaw): ActivityEntry => {
   return {
     id: item.id,
     source: prettifyEventType(item.event_type),
@@ -105,25 +96,26 @@ const transformToActivityEntry = (item: DeliveryQueueItem): ActivityEntry => {
   };
 };
 
+function sortByCreatedAtDesc<T extends { created_at: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
 export const useActivityLog = () => {
   return useQuery({
-    queryKey: ['activityLog'],
-    queryFn: async (): Promise<ActivityEntry[]> => {
-      try {
-        const queue = await invoke<DeliveryQueueItem[]>('get_delivery_queue');
-        logger.debug('Fetched delivery queue', { count: queue.length });
+    queryKey: DELIVERY_QUEUE_QUERY_KEY,
+    queryFn: fetchDeliveryQueue,
+    select: (queue): ActivityEntry[] =>
+      sortByCreatedAtDesc(queue).map(transformToActivityEntry),
+    refetchInterval: () => visibleRefetchInterval(5000), // Poll every 5 seconds (visible only)
+  });
+};
 
-        // Transform and sort by createdAt descending (most recent first)
-        const entries = queue
-          .map(transformToActivityEntry)
-          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-
-        return entries;
-      } catch (error) {
-        logger.error('Failed to fetch delivery queue', { error });
-        throw error;
-      }
-    },
-    refetchInterval: 5000, // Poll every 5 seconds
+export const useRecentActivityLog = (limit = 3) => {
+  return useQuery({
+    queryKey: DELIVERY_QUEUE_QUERY_KEY,
+    queryFn: fetchDeliveryQueue,
+    select: (queue): ActivityEntry[] =>
+      sortByCreatedAtDesc(queue).slice(0, limit).map(transformToActivityEntry),
+    refetchInterval: () => visibleRefetchInterval(5000),
   });
 };

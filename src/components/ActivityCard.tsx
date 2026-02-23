@@ -86,7 +86,7 @@ export function ActivityCard({ entry }: ActivityCardProps) {
         eventType: entry.sourceId,
         payload: entry.payload,
       });
-      await queryClient.invalidateQueries({ queryKey: ["activityLog"] });
+      await queryClient.invalidateQueries({ queryKey: ["deliveryQueue"] });
       toast.success("Replay enqueued — will deliver within 5s");
       logger.info("Delivery replayed", { id: entry.id, source: entry.sourceId });
     } catch (error) {

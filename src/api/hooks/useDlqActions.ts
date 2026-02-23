@@ -32,7 +32,7 @@ export function useDismissDlq() {
     mutationFn: dismissDlqEntry,
     onSuccess: (_, entryId) => {
       // Invalidate all queries that might be affected by dismissal
-      queryClient.invalidateQueries({ queryKey: ["activityLog"] });
+      queryClient.invalidateQueries({ queryKey: ["deliveryQueue"] });
       queryClient.invalidateQueries({ queryKey: ["dlqCount"] });
       queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
       toast.success("Failure dismissed");
@@ -52,7 +52,6 @@ export function useReplayDelivery() {
     mutationFn: replayDelivery,
     onSuccess: (_, entryId) => {
       // Invalidate queries to show new delivery in queue
-      queryClient.invalidateQueries({ queryKey: ["activityLog"] });
       queryClient.invalidateQueries({ queryKey: ["deliveryQueue"] });
       toast.success("Delivery replayed — will send within 5s");
       logger.info("Delivery replayed successfully", { entryId });
