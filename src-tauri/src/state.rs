@@ -243,6 +243,9 @@ impl AppState {
             }
         }
 
+        // Flush migrated credentials to consolidated vault (one Keychain entry going forward)
+        credentials.flush_vault();
+
         // Register sources
         use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource, DesktopActivitySource};
 

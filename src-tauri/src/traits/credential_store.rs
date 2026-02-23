@@ -29,4 +29,8 @@ pub trait CredentialStore: Send + Sync {
 
     /// Check if a credential exists
     fn exists(&self, key: &str) -> Result<bool, CredentialError>;
+
+    /// Flush any migrated credentials to persistent vault storage.
+    /// Keychain impl saves consolidated vault; others no-op.
+    fn flush_vault(&self) {}
 }

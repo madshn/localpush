@@ -190,6 +190,9 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 
     let version = env!("CARGO_PKG_VERSION");
+    #[cfg(debug_assertions)]
+    let about_label = format!("LocalPush v{}-dev", version);
+    #[cfg(not(debug_assertions))]
     let about_label = format!("LocalPush v{}", version);
     let about = MenuItem::with_id(app, "about", &about_label, false, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;

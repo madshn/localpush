@@ -290,6 +290,8 @@ pub async fn process_batch(
         let mut any_success = false;
         let mut last_error = None;
         let mut successful_target: Option<&ResolvedTarget> = None;
+        let mut all_degraded = true; // Track if every target was degraded
+        let mut degraded_reason: Option<String> = None;
 
         for rt in &targets {
             // Skip delivery to degraded targets
@@ -302,11 +304,12 @@ pub async fn process_batch(
                             reason = %info.reason,
                             "Skipping delivery to degraded target"
                         );
-                        last_error = Some(format!("Target degraded: {}", info.reason));
+                        degraded_reason = Some(info.reason.clone());
                         continue;
                     }
                 }
             }
+            all_degraded = false; // At least one target was not degraded
 
             // Try native delivery first (e.g. Google Sheets appends rows directly)
             if !rt.target_id.is_empty() {
@@ -392,6 +395,10 @@ pub async fn process_batch(
             if ledger.mark_delivered(&entry.event_id, delivered_to_json).is_ok() {
                 result.delivered += 1;
             }
+        } else if all_degraded {
+            // All targets were degraded — pause this entry instead of burning retries
+            let reason = degraded_reason.unwrap_or_else(|| "Target degraded".to_string());
+            let _ = ledger.mark_target_paused(&entry.event_id, &reason);
         } else if let Some(err) = last_error {
             if let Ok(new_status) = ledger.mark_failed(&entry.event_id, &err) {
                 if new_status == crate::traits::DeliveryStatus::Dlq {
@@ -503,18 +510,19 @@ pub fn spawn_worker(
                 10,
             ).await;
 
-            // Pause deliveries for newly degraded targets
-            for degraded_target_id in &result.degraded_targets {
+            // Pause pending/failed deliveries for ALL degraded targets (not just newly transitioned)
+            let all_degraded = health_tracker.get_all_degraded();
+            for info in &all_degraded {
                 let endpoint_ids: Vec<String> = binding_store.list_all()
                     .into_iter()
-                    .filter(|b| b.target_id == *degraded_target_id)
+                    .filter(|b| b.target_id == info.target_id)
                     .map(|b| b.endpoint_id)
                     .collect();
                 if !endpoint_ids.is_empty() {
                     let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
                     if let Err(e) = ledger.pause_target_deliveries(&ep_refs) {
                         tracing::error!(
-                            target_id = %degraded_target_id,
+                            target_id = %info.target_id,
                             error = %e,
                             "Failed to pause deliveries for degraded target"
                         );
@@ -532,9 +540,9 @@ pub fn spawn_worker(
                 notify_dlq(&app_handle, transition);
             }
 
-            // Update tray icon based on DLQ or degraded state
+            // Update tray icon based on DLQ, paused entries, or degraded targets
             let stats = ledger.get_stats().unwrap_or_default();
-            let has_issues = stats.dlq > 0 || stats.target_paused > 0;
+            let has_issues = stats.dlq > 0 || stats.target_paused > 0 || !all_degraded.is_empty();
             if has_issues != tray_showing_error {
                 update_tray_for_dlq(&app_handle, has_issues);
                 tray_showing_error = has_issues;

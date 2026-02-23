@@ -138,6 +138,10 @@ pub trait DeliveryLedgerTrait: Send + Sync {
     /// Record which target was attempted (so the UI can show it even on failure)
     fn set_attempted_target(&self, event_id: &str, target_json: &str) -> Result<(), LedgerError>;
 
+    /// Mark a single in-flight entry as target_paused (skipped due to degraded target).
+    /// Unlike mark_failed, this does NOT increment retry count.
+    fn mark_target_paused(&self, event_id: &str, reason: &str) -> Result<(), LedgerError>;
+
     /// Pause all pending/failed deliveries targeting any of the given endpoint IDs.
     /// Called when a target degrades — entries move to `target_paused` status.
     fn pause_target_deliveries(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError>;

@@ -502,6 +502,16 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         Ok(())
     }
 
+    fn mark_target_paused(&self, event_id: &str, reason: &str) -> Result<(), LedgerError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE delivery_ledger SET status = 'target_paused', last_error = ?1
+             WHERE event_id = ?2 AND status = 'in_flight'",
+            params![reason, event_id],
+        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        Ok(())
+    }
+
     fn pause_target_deliveries(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError> {
         if endpoint_ids.is_empty() {
             return Ok(0);
