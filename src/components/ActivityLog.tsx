@@ -102,6 +102,16 @@ export function ActivityLog() {
   const [searchFilter, setSearchFilter] = useState("");
   const deferredSearchFilter = useDeferredValue(searchFilter);
 
+  const filtered = useMemo(() => {
+    if (!entries) return [];
+    if (!deferredSearchFilter) return entries;
+    const needle = deferredSearchFilter.toLowerCase();
+    return entries.filter((e) => e.source.toLowerCase().includes(needle));
+  }, [entries, deferredSearchFilter]);
+
+  const items = useMemo(() => groupIntoHourlyBuckets(filtered), [filtered]);
+  const dateGroups = useMemo(() => groupByDate(items), [items]);
+
   if (isLoading) {
     return (
       <div className="text-center py-8 text-text-secondary text-sm">
@@ -119,16 +129,6 @@ export function ActivityLog() {
       </div>
     );
   }
-
-  const filtered = useMemo(() => {
-    if (!entries) return [];
-    if (!deferredSearchFilter) return entries;
-    const needle = deferredSearchFilter.toLowerCase();
-    return entries.filter((e) => e.source.toLowerCase().includes(needle));
-  }, [entries, deferredSearchFilter]);
-
-  const items = useMemo(() => groupIntoHourlyBuckets(filtered), [filtered]);
-  const dateGroups = useMemo(() => groupByDate(items), [items]);
 
   return (
     <div>
