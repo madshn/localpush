@@ -45,7 +45,8 @@ export function TransparencyPreview({
 
   const maskValue = (value: string): string => {
     if (value.length <= 8) return "\u2022".repeat(value.length);
-    return value.slice(0, 4) + "\u2022".repeat(value.length - 8) + value.slice(-4);
+    // Cap bullets at 12 so long values (paths, titles) don't overflow the container
+    return value.slice(0, 4) + "\u2022".repeat(Math.min(value.length - 8, 12)) + value.slice(-4);
   };
 
   const parseTrend = (

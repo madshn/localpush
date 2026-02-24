@@ -583,13 +583,13 @@ impl Source for CodexSessionsSource {
             fields.push(PreviewField {
                 label: "Latest Session".into(),
                 value: latest.title.clone().unwrap_or_else(|| "Codex session".into()),
-                sensitive: true,
+                sensitive: false,
             });
             if let Some(project) = &latest.project_path {
                 fields.push(PreviewField {
                     label: "Project".into(),
                     value: project.clone(),
-                    sensitive: true,
+                    sensitive: false,
                 });
             }
         }
