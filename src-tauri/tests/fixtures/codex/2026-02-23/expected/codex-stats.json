@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "attribution_mode": "safe_unversioned_family_only",
+    "day_boundary": "utc",
+    "models_observed": [
+      "gpt-5.3-codex"
+    ],
+    "notes": [
+      "Watch session JSONL files (or a derived local cache); period windows are derived from event timestamps, not filesystem paths",
+      "Leaf metrics only; aggregate metrics are computed downstream",
+      "Versioned model leaves are withheld until per-model token attribution is provably correct"
+    ],
+    "per_model_versioned_metrics_emitted": false,
+    "schema_version": 2,
+    "selected_window": "yesterday",
+    "sessions_in_window": 6,
+    "source_family": "codex",
+    "source_type": "stats",
+    "target_date": "2026-02-23"
+  },
+  "metrics": [
+    {
+      "cost_model": "subscription",
+      "metric_key": "token.openai.codex",
+      "period_from": "2026-02-23T00:00:00Z",
+      "period_to": "2026-02-24T00:00:00Z",
+      "source": "localpush",
+      "tags": {
+        "cached_input": 32389760,
+        "input": 34082306,
+        "output": 156921,
+        "reasoning_output": 64401
+      },
+      "value": 34239227
+    }
+  ]
+}

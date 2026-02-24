@@ -7,6 +7,8 @@ use crate::source_config::PropertyDef;
 
 pub mod claude_stats;
 pub mod claude_sessions;
+pub mod codex_sessions;
+pub mod codex_stats;
 pub mod apple_podcasts;
 pub mod apple_notes;
 pub mod apple_photos;
@@ -14,6 +16,8 @@ pub mod desktop_activity;
 
 pub use claude_stats::ClaudeStatsSource;
 pub use claude_sessions::ClaudeSessionsSource;
+pub use codex_sessions::CodexSessionsSource;
+pub use codex_stats::CodexStatsSource;
 pub use apple_podcasts::ApplePodcastsSource;
 pub use apple_notes::AppleNotesSource;
 pub use apple_photos::ApplePhotosSource;

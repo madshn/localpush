@@ -1460,6 +1460,12 @@ pub fn get_timeline_gaps(
     let now = chrono::Local::now();
 
     for binding in bindings {
+        // Interval bindings store schedule_time as minutes (e.g. "15"), not HH:MM.
+        // Timeline gaps only apply to daily/weekly modes with a fixed target time.
+        if binding.delivery_mode == "interval" {
+            continue;
+        }
+
         // Parse schedule time
         let schedule_time = match &binding.schedule_time {
             Some(t) => t,

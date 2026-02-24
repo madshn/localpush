@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "semantics": {
+    "dedupe_basis": "one_record_per_jsonl_session_file",
+    "duration_basis": "session_meta.timestamp_to_last_event_timestamp",
+    "message_count_basis": "count(event_msg.user_message)",
+    "notes": [
+      "cache_read maps to Codex cached_input_tokens",
+      "reasoning_output is included inside tokens for schema parity",
+      "agentic_seconds is an estimate using token_count event gaps < 5 minutes"
+    ],
+    "token_count_basis": "session_max_of_event_msg.token_count.info.total_token_usage",
+    "unsupported_metrics": [
+      "cache_creation_tokens"
+    ],
+    "window": {
+      "days": null,
+      "mode": "all_in_path"
+    }
+  },
+  "sessions": [
+    {
+      "agentic_seconds": 8087,
+      "end_time": "2026-02-24T12:09:44.294+00:00",
+      "git_branch": "main",
+      "id": "019c8a59-e9dd-71f0-9ae3-4079fe9726a9",
+      "message_count": 38,
+      "model": "openai.codex.5_3",
+      "project_path": "/redacted/path/59b923df4d",
+      "session_span_seconds": 87309,
+      "start_time": "2026-02-23T11:54:34.334+00:00",
+      "title": "[REDACTED_TEXT len=3021 sha=dc9e82a0]",
+      "tokens": {
+        "cache_creation": 0,
+        "cache_read": 31621504,
+        "input": 33810485,
+        "output": 133999,
+        "reasoning_output": 42113
+      }
+    },
+    {
+      "agentic_seconds": 91,
+      "end_time": "2026-02-23T19:36:02.635+00:00",
+      "git_branch": "main",
+      "id": "019c8bfe-ec25-79e0-97d7-bda6a9c575ff",
+      "message_count": 1,
+      "model": "openai.codex.5_3",
+      "project_path": "/redacted/path/ea96e59ed9",
+      "session_span_seconds": 97,
+      "start_time": "2026-02-23T19:34:25.573+00:00",
+      "title": "[REDACTED_TEXT len=5296 sha=393c5edf]",
+      "tokens": {
+        "cache_creation": 0,
+        "cache_read": 238848,
+        "input": 298373,
+        "output": 1123,
+        "reasoning_output": 483
+      }
+    },
+    {
+      "agentic_seconds": 1055,
+      "end_time": "2026-02-23T12:57:50.942+00:00",
+      "git_branch": "main",
+      "id": "019c8a53-a0dd-7130-bcd7-95445d84846a",
+      "message_count": 7,
+      "model": "openai.codex.5_3",
+      "project_path": "/redacted/path/59b923df4d",
+      "session_span_seconds": 4208,
+      "start_time": "2026-02-23T11:47:42.429+00:00",
+      "title": "[REDACTED_TEXT len=3021 sha=dc9e82a0]",
+      "tokens": {
+        "cache_creation": 0,
+        "cache_read": 6337024,
+        "input": 6740973,
+        "output": 36950,
+        "reasoning_output": 17085
+      }
+    },
+    {
+      "agentic_seconds": 1140,
+      "end_time": "2026-02-23T12:45:33.362+00:00",
+      "git_branch": "main",
+      "id": "019c8a4c-ed82-79a1-aa28-7738fc5ab61a",
+      "message_count": 5,
+      "model": "openai.codex.5_3",
+      "project_path": "/redacted/path/fa3f7eaace",
+      "session_span_seconds": 3910,
+      "start_time": "2026-02-23T11:40:23.298+00:00",
+      "title": "[REDACTED_TEXT len=3019 sha=37168476]",
+      "tokens": {
+        "cache_creation": 0,
+        "cache_read": 6836352,
+        "input": 7204025,
+        "output": 36075,
+        "reasoning_output": 17896
+      }
+    },
+    {
+      "agentic_seconds": 14,
+      "end_time": "2026-02-23T12:19:52.689+00:00",
+      "git_branch": "main",
+      "id": "019c8a70-dda7-7f33-98ea-f30553347322",
+      "message_count": 1,
+      "model": "openai.codex.5_3",
+      "project_path": "/redacted/path/da0ba47443",
+      "session_span_seconds": 14,
+      "start_time": "2026-02-23T12:19:38.535+00:00",
+      "title": "[REDACTED_TEXT len=3017 sha=f3ffd0ed]",
+      "tokens": {
+        "cache_creation": 0,
+        "cache_read": 3456,
+        "input": 34469,
+        "output": 431,
+        "reasoning_output": 264
+      }
+    },
+    {
+      "agentic_seconds": 309,
+      "end_time": "2026-02-23T11:46:43.618+00:00",
+      "git_branch": "main",
+      "id": "019c8a4d-8f45-7010-8b5d-7fad920aa6f9",
+      "message_count": 1,
+      "model": "openai.codex.5_3",
+      "project_path": "/redacted/path/da0ba47443",
+      "session_span_seconds": 338,
+      "start_time": "2026-02-23T11:41:04.709+00:00",
+      "title": "[REDACTED_TEXT len=3017 sha=f3ffd0ed]",
+      "tokens": {
+        "cache_creation": 0,
+        "cache_read": 1651968,
+        "input": 1751428,
+        "output": 14600,
+        "reasoning_output": 4293
+      }
+    }
+  ],
+  "source": "codex_sessions",
+  "source_family": "codex",
+  "source_type": "sessions",
+  "summary": {
+    "sessions_count": 6,
+    "total_agentic_seconds": 10696,
+    "total_cached_input_tokens": 46689152,
+    "total_duration_seconds": 95876,
+    "total_input_tokens": 49839753,
+    "total_output_tokens": 223178,
+    "total_reasoning_output_tokens": 82134,
+    "total_tokens": 50062931
+  }
+}
