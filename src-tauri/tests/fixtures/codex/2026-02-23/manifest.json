@@ -1,0 +1,61 @@
+{
+  "manifest_version": 1,
+  "source_family": "codex",
+  "fixture_date": "2026-02-23",
+  "capture_status": "sanitized_raw_captured",
+  "day_boundary": {
+    "mode": "utc",
+    "timezone": "UTC",
+    "start_inclusive": "2026-02-23T00:00:00Z",
+    "end_exclusive": "2026-02-24T00:00:00Z"
+  },
+  "sanitization": {
+    "text_redacted": true,
+    "paths_pseudonymized": true,
+    "urls_pseudonymized": true,
+    "ids_pseudonymized": false,
+    "models_preserved": true,
+    "token_counts_preserved": true,
+    "timestamps_preserved": true
+  },
+  "input_files": {
+    "session_file_count": 6,
+    "jsonl_line_count_total": 4760,
+    "source_directory": "/redacted/codex/sessions/2026/02/23"
+  },
+  "observed_line_types": {
+    "session_meta": 6,
+    "response_item": 2414,
+    "event_msg": 1854,
+    "turn_context": 485,
+    "compacted": 1
+  },
+  "verification": {
+    "status": "auto_computed_from_frozen_fixture_pending_manual_review",
+    "sessions_in_scope": 6,
+    "malformed_lines_skipped": 0,
+    "duplicate_events_detected": 480,
+    "duplicate_events_collapsed": 480,
+    "first_event_timestamp": "2026-02-23T11:40:29.275000Z",
+    "last_event_timestamp": "2026-02-24T12:09:44.294000Z",
+    "models_used": [
+      "gpt-5.3-codex"
+    ],
+    "token_totals": {
+      "input": 34082306,
+      "output": 156921,
+      "total": 34239227,
+      "cache_read": 32389760,
+      "cache_creation": 0
+    },
+    "notes": [
+      "token_totals are for UTC day 2026-02-23, computed from codex-stats delta-based aggregation over cumulative token_count snapshots",
+      "fixture includes one session that continues into 2026-02-24; last_event_timestamp reflects full captured raw fixture span",
+      "duplicate_events_* counts are heuristic consecutive duplicate token_count snapshots (same cumulative totals), not a global event-id dedupe count"
+    ]
+  },
+  "expected_outputs": {
+    "codex_sessions": "expected/codex-sessions.json",
+    "codex_stats": "expected/codex-stats.json"
+  }
+}

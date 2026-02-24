@@ -264,7 +264,7 @@ impl AppState {
         credentials.flush_vault();
 
         // Register sources
-        use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource, DesktopActivitySource};
+        use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, CodexSessionsSource, CodexStatsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource, DesktopActivitySource};
 
         match ClaudeStatsSource::new() {
             Ok(source) => {
@@ -281,6 +281,24 @@ impl AppState {
                 source_manager.register(Arc::new(source));
             }
             Err(e) => tracing::warn!("Could not initialize Claude sessions source: {}", e),
+        }
+
+        // Register Codex Sessions source
+        match CodexSessionsSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered CodexSessionsSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Could not initialize Codex sessions source: {}", e),
+        }
+
+        // Register Codex Stats source
+        match CodexStatsSource::new() {
+            Ok(source) => {
+                tracing::info!("Registered CodexStatsSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("Could not initialize Codex stats source: {}", e),
         }
 
         // Register Apple sources (graceful — may fail due to permissions)
