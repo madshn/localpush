@@ -212,62 +212,76 @@ impl DeliveryLedgerTrait for DeliveryLedger {
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, event_id, event_type, payload, status, retry_count, max_retries,
-                    last_error, available_at, created_at, delivered_at, target_endpoint_id,
-                    trigger_type, delivered_to
-             FROM delivery_ledger
-             WHERE status IN ('pending', 'failed') AND available_at <= ?1
-             ORDER BY available_at ASC
-             LIMIT ?2"
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction()
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        let entries: Vec<DeliveryEntry> = stmt.query_map(params![now, limit], |row| {
-            let status_str: String = row.get(4)?;
-            let status = match status_str.as_str() {
-                "pending" => DeliveryStatus::Pending,
-                "in_flight" => DeliveryStatus::InFlight,
-                "delivered" => DeliveryStatus::Delivered,
-                "failed" => DeliveryStatus::Failed,
-                "dlq" => DeliveryStatus::Dlq,
-                "target_paused" => DeliveryStatus::TargetPaused,
-                _ => DeliveryStatus::Pending,
-            };
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, event_id, event_type, payload, status, retry_count, max_retries,
+                        last_error, available_at, created_at, delivered_at, target_endpoint_id,
+                        trigger_type, delivered_to
+                 FROM delivery_ledger
+                 WHERE status IN ('pending', 'failed') AND available_at <= ?1
+                 ORDER BY available_at ASC
+                 LIMIT ?2",
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-            let payload_str: String = row.get(3)?;
-            let payload: serde_json::Value = serde_json::from_str(&payload_str)
-                .unwrap_or(serde_json::Value::Null);
+        let entries: Vec<DeliveryEntry> = stmt
+            .query_map(params![now, limit], |row| {
+                let status_str: String = row.get(4)?;
+                let status = match status_str.as_str() {
+                    "pending" => DeliveryStatus::Pending,
+                    "in_flight" => DeliveryStatus::InFlight,
+                    "delivered" => DeliveryStatus::Delivered,
+                    "failed" => DeliveryStatus::Failed,
+                    "dlq" => DeliveryStatus::Dlq,
+                    "target_paused" => DeliveryStatus::TargetPaused,
+                    _ => DeliveryStatus::Pending,
+                };
 
-            Ok(DeliveryEntry {
-                id: row.get(0)?,
-                event_id: row.get(1)?,
-                event_type: row.get(2)?,
-                payload,
-                status,
-                retry_count: row.get(5)?,
-                max_retries: row.get(6)?,
-                last_error: row.get(7)?,
-                available_at: row.get(8)?,
-                created_at: row.get(9)?,
-                delivered_at: row.get(10)?,
-                target_endpoint_id: row.get(11)?,
-                trigger_type: row.get(12)?,
-                delivered_to: row.get(13)?,
+                let payload_str: String = row.get(3)?;
+                let payload: serde_json::Value =
+                    serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null);
+
+                Ok(DeliveryEntry {
+                    id: row.get(0)?,
+                    event_id: row.get(1)?,
+                    event_type: row.get(2)?,
+                    payload,
+                    status,
+                    retry_count: row.get(5)?,
+                    max_retries: row.get(6)?,
+                    last_error: row.get(7)?,
+                    available_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                    delivered_at: row.get(10)?,
+                    target_endpoint_id: row.get(11)?,
+                    trigger_type: row.get(12)?,
+                    delivered_to: row.get(13)?,
+                })
             })
-        }).map_err(|e| LedgerError::DatabaseError(e.to_string()))?
-        .filter_map(Result::ok)
-        .collect();
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?
+            .filter_map(Result::ok)
+            .collect();
 
-        // Mark claimed entries as in_flight
+        // Mark claimed entries as in_flight inside the same transaction.
         for entry in &entries {
-            conn.execute(
-                "UPDATE delivery_ledger SET status = 'in_flight' WHERE id = ?1",
+            tx.execute(
+                "UPDATE delivery_ledger
+                 SET status = 'in_flight'
+                 WHERE id = ?1 AND status IN ('pending', 'failed')",
                 params![entry.id],
-            ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
         }
 
-        // Return entries with updated status
+        drop(stmt);
+        tx.commit()
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
         Ok(entries.into_iter().map(|mut e| {
             e.status = DeliveryStatus::InFlight;
             e

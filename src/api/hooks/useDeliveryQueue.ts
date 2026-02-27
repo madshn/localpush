@@ -6,7 +6,7 @@ import { visibleRefetchInterval } from "./polling";
 export interface DeliveryQueueItemRaw {
   id: string;
   event_type: string;
-  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq";
+  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq" | "target_paused";
   retry_count: number;
   last_error: string | null;
   created_at: string;
@@ -19,7 +19,7 @@ export interface DeliveryQueueItemRaw {
 export interface DeliveryItem {
   id: string;
   eventType: string;
-  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq";
+  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq" | "target_paused";
   retryCount: number;
   lastError: string | null;
   createdAt: string;
@@ -33,6 +33,7 @@ export interface DeliveryQueueCounts {
   inFlight: number;
   failed: number;
   dlq: number;
+  targetPaused: number;
 }
 
 export const DELIVERY_QUEUE_QUERY_KEY = ["deliveryQueue"] as const;
@@ -69,6 +70,7 @@ function countQueue(items: DeliveryQueueItemRaw[]): DeliveryQueueCounts {
     inFlight: 0,
     failed: 0,
     dlq: 0,
+    targetPaused: 0,
   };
 
   for (const item of items) {
@@ -76,6 +78,7 @@ function countQueue(items: DeliveryQueueItemRaw[]): DeliveryQueueCounts {
     else if (item.status === "delivered") counts.delivered += 1;
     else if (item.status === "failed") counts.failed += 1;
     else if (item.status === "dlq") counts.dlq += 1;
+    else if (item.status === "target_paused") counts.targetPaused += 1;
     else counts.pending += 1;
   }
 

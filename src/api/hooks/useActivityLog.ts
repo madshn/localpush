@@ -17,7 +17,7 @@ export interface ActivityEntry {
   id: string;
   source: string;
   sourceId: string;
-  status: "delivered" | "pending" | "in_flight" | "failed" | "dlq";
+  status: "delivered" | "pending" | "in_flight" | "failed" | "dlq" | "target_paused";
   statusCode?: string;
   error?: string;
   timestamp: Date;

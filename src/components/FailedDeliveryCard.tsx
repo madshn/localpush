@@ -34,6 +34,12 @@ const statusConfig = {
     borderColor: "border-l-2 border-l-error",
     label: "Gave up after 5 retries",
   },
+  target_paused: {
+    icon: AlertTriangle,
+    color: "text-warning",
+    borderColor: "border-l-2 border-l-warning",
+    label: "Paused (target degraded)",
+  },
 } as const;
 
 export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
@@ -50,7 +56,7 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
   const dismissMutation = useDismissDlq();
   const replayMutation = useReplayDelivery();
 
-  const config = statusConfig[entry.status as "failed" | "dlq"];
+  const config = statusConfig[entry.status as "failed" | "dlq" | "target_paused"];
   const Icon = config.icon;
 
   const targetLabel = (targetType: string): string => {
