@@ -504,14 +504,14 @@ pub fn spawn_worker(
             interval.tick().await;
             tick_count += 1;
             let legacy_config = read_worker_config(&config);
-            let has_legacy = legacy_config.is_some();
-            let binding_count = binding_store.count();
-            tracing::debug!(
-                tick = tick_count,
-                bindings = binding_count,
-                has_legacy_webhook = has_legacy,
-                "Delivery worker tick"
-            );
+            if tick_count.is_multiple_of(12) {
+                tracing::debug!(
+                    tick = tick_count,
+                    bindings = binding_store.count(),
+                    has_legacy_webhook = legacy_config.is_some(),
+                    "Delivery worker heartbeat"
+                );
+            }
             let result = process_batch(
                 &*ledger,
                 &*webhook,
@@ -525,20 +525,23 @@ pub fn spawn_worker(
 
             // Pause pending/failed deliveries for ALL degraded targets (not just newly transitioned)
             let all_degraded = health_tracker.get_all_degraded();
-            for info in &all_degraded {
-                let endpoint_ids: Vec<String> = binding_store.list_all()
-                    .into_iter()
-                    .filter(|b| b.target_id == info.target_id)
-                    .map(|b| b.endpoint_id)
-                    .collect();
-                if !endpoint_ids.is_empty() {
-                    let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
-                    if let Err(e) = ledger.pause_target_deliveries(&ep_refs) {
-                        tracing::error!(
-                            target_id = %info.target_id,
-                            error = %e,
-                            "Failed to pause deliveries for degraded target"
-                        );
+            if !all_degraded.is_empty() {
+                let all_bindings = binding_store.list_all();
+                for info in &all_degraded {
+                    let endpoint_ids: Vec<String> = all_bindings
+                        .iter()
+                        .filter(|b| b.target_id == info.target_id)
+                        .map(|b| b.endpoint_id.clone())
+                        .collect();
+                    if !endpoint_ids.is_empty() {
+                        let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
+                        if let Err(e) = ledger.pause_target_deliveries(&ep_refs) {
+                            tracing::error!(
+                                target_id = %info.target_id,
+                                error = %e,
+                                "Failed to pause deliveries for degraded target"
+                            );
+                        }
                     }
                 }
             }

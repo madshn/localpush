@@ -52,7 +52,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "localpush=debug".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "localpush=info".into()),
         ))
         .with(tracing_subscriber::fmt::layer()) // stdout
         .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false)) // file

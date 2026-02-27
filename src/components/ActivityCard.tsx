@@ -45,6 +45,7 @@ const statusLabels: Record<string, string> = {
   in_flight: "Sending...",
   failed: "Failed",
   dlq: "Gave up after 5 retries",
+  target_paused: "Paused (target degraded)",
 };
 
 export function ActivityCard({ entry }: ActivityCardProps) {
@@ -53,8 +54,8 @@ export function ActivityCard({ entry }: ActivityCardProps) {
   const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
 
-  // Route failed/dlq entries to the enhanced FailedDeliveryCard
-  if (entry.status === "failed" || entry.status === "dlq") {
+  // Route non-delivered problem states to the enhanced FailedDeliveryCard
+  if (entry.status === "failed" || entry.status === "dlq" || entry.status === "target_paused") {
     return <FailedDeliveryCard entry={entry} />;
   }
 

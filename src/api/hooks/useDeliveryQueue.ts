@@ -6,7 +6,7 @@ import { visibleRefetchInterval } from "./polling";
 export interface DeliveryQueueItemRaw {
   id: string;
   event_type: string;
-  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq";
+  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq" | "target_paused";
   retry_count: number;
   last_error: string | null;
   created_at: string;
@@ -19,7 +19,7 @@ export interface DeliveryQueueItemRaw {
 export interface DeliveryItem {
   id: string;
   eventType: string;
-  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq";
+  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq" | "target_paused";
   retryCount: number;
   lastError: string | null;
   createdAt: string;
@@ -76,6 +76,7 @@ function countQueue(items: DeliveryQueueItemRaw[]): DeliveryQueueCounts {
     else if (item.status === "delivered") counts.delivered += 1;
     else if (item.status === "failed") counts.failed += 1;
     else if (item.status === "dlq") counts.dlq += 1;
+    else if (item.status === "target_paused") counts.failed += 1;
     else counts.pending += 1;
   }
 

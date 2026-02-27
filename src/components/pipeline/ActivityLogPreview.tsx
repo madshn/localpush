@@ -16,6 +16,7 @@ const statusIcon: Record<
   in_flight: { icon: Clock, className: "text-accent" },
   failed: { icon: AlertCircle, className: "text-error" },
   dlq: { icon: AlertCircle, className: "text-error" },
+  target_paused: { icon: AlertCircle, className: "text-warning" },
 };
 
 function timeAgo(date: Date): string {

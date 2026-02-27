@@ -86,7 +86,7 @@ pub struct CustomTargetConfig {
 /// Get the current delivery status
 #[tauri::command]
 pub fn get_delivery_status(state: State<'_, AppState>) -> Result<DeliveryStatusResponse, String> {
-    tracing::info!(command = "get_delivery_status", "Command invoked");
+    tracing::debug!(command = "get_delivery_status", "Command invoked");
     match state.ledger.get_stats() {
         Ok(stats) => {
             let overall = if stats.dlq > 0 || stats.failed > 0 {
@@ -138,10 +138,17 @@ pub fn get_sources(state: State<'_, AppState>) -> Result<Vec<SourceResponse>, St
 /// Get the delivery queue
 #[tauri::command]
 pub fn get_delivery_queue(state: State<'_, AppState>) -> Result<Vec<DeliveryQueueItem>, String> {
-    tracing::info!(command = "get_delivery_queue", "Command invoked");
+    tracing::debug!(command = "get_delivery_queue", "Command invoked");
     let mut items = Vec::new();
 
-    for status in [DeliveryStatus::Pending, DeliveryStatus::InFlight, DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
+    for status in [
+        DeliveryStatus::Pending,
+        DeliveryStatus::InFlight,
+        DeliveryStatus::Failed,
+        DeliveryStatus::Dlq,
+        DeliveryStatus::TargetPaused,
+        DeliveryStatus::Delivered,
+    ] {
         match state.ledger.get_by_status(status) {
             Ok(entries) => {
                 for entry in entries {
@@ -1371,11 +1378,16 @@ pub fn get_error_diagnosis(
     state: State<'_, AppState>,
     entry_id: String,
 ) -> Result<crate::error_diagnosis::ErrorDiagnosis, String> {
-    tracing::info!(command = "get_error_diagnosis", entry_id = %entry_id, "Command invoked");
+    tracing::debug!(command = "get_error_diagnosis", entry_id = %entry_id, "Command invoked");
 
     // Find the entry by iterating through all statuses
     let mut entry = None;
-    for status in [DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
+    for status in [
+        DeliveryStatus::Failed,
+        DeliveryStatus::Dlq,
+        DeliveryStatus::TargetPaused,
+        DeliveryStatus::Delivered,
+    ] {
         if let Ok(entries) = state.ledger.get_by_status(status) {
             if let Some(e) = entries.into_iter().find(|e| e.id == entry_id) {
                 entry = Some(e);
@@ -1430,7 +1442,7 @@ pub fn get_retry_history(
     state: State<'_, AppState>,
     entry_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    tracing::info!(command = "get_retry_history", entry_id = %entry_id, "Command invoked");
+    tracing::debug!(command = "get_retry_history", entry_id = %entry_id, "Command invoked");
 
     // Query retry_log directly from the ledger
     match state.ledger.get_retry_history(&entry_id) {
@@ -1452,7 +1464,7 @@ pub fn get_retry_history(
 /// Get count of DLQ entries
 #[tauri::command]
 pub fn get_dlq_count(state: State<'_, AppState>) -> Result<u32, String> {
-    tracing::info!(command = "get_dlq_count", "Command invoked");
+    tracing::debug!(command = "get_dlq_count", "Command invoked");
 
     match state.ledger.get_stats() {
         Ok(stats) => {
@@ -1507,7 +1519,12 @@ pub fn replay_delivery_by_id(
 
     // Find the entry
     let mut entry = None;
-    for status in [DeliveryStatus::Failed, DeliveryStatus::Dlq, DeliveryStatus::Delivered] {
+    for status in [
+        DeliveryStatus::Failed,
+        DeliveryStatus::Dlq,
+        DeliveryStatus::TargetPaused,
+        DeliveryStatus::Delivered,
+    ] {
         if let Ok(entries) = state.ledger.get_by_status(status) {
             if let Some(e) = entries.into_iter().find(|e| e.id == entry_id) {
                 entry = Some(e);
@@ -1584,7 +1601,7 @@ pub struct TimelineGap {
 pub fn get_timeline_gaps(
     state: State<'_, AppState>,
 ) -> Result<Vec<TimelineGap>, String> {
-    tracing::info!(command = "get_timeline_gaps", "Command invoked");
+    tracing::debug!(command = "get_timeline_gaps", "Command invoked");
 
     let mut gaps = Vec::new();
     let bindings = state.binding_store.get_scheduled_bindings();
@@ -1705,4 +1722,3 @@ mod tests {
         assert_eq!(parse_weekday_for_gaps("invalid"), None);
     }
 }
-
