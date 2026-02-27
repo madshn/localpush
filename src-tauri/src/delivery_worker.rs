@@ -348,7 +348,14 @@ pub async fn process_batch(
                                     if transitioned {
                                         result.degraded_targets.push(rt.target_id.clone());
                                     }
+                                    // Auth/token errors: target is now degraded, treat as paused
+                                    if matches!(e, TargetError::TokenExpired | TargetError::AuthFailed(_)) {
+                                        degraded_reason = Some(e.to_string());
+                                        // Don't try remaining targets — all_degraded stays true
+                                        continue;
+                                    }
                                 }
+                                all_degraded = false;
                                 last_error = Some(e.to_string());
                                 continue; // Don't also try webhook for this target
                             }
@@ -381,8 +388,14 @@ pub async fn process_batch(
                             if transitioned {
                                 result.degraded_targets.push(rt.target_id.clone());
                             }
+                            // Auth errors: immediately treat as degraded to prevent retry storm
+                            if matches!(target_err, TargetError::AuthFailed(_)) {
+                                degraded_reason = Some(e.to_string());
+                                continue; // all_degraded stays true
+                            }
                         }
                     }
+                    all_degraded = false;
                     last_error = Some(e.to_string());
                 }
             }

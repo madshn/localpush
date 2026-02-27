@@ -846,56 +846,100 @@ pub async fn reconnect_target(
     tracing::info!(command = "reconnect_target", target_id = %target_id, "Command invoked");
 
     // Test the target's connection
-    let info = state
-        .target_manager
-        .test_connection(&target_id)
-        .await
-        .map_err(|e| format!("Reconnect failed: {}", e))?;
+    match state.target_manager.test_connection(&target_id).await {
+        Ok(info) => {
+            // Connection succeeded — mark healthy and resume deliveries
+            state.health_tracker.mark_reconnected(&target_id);
 
-    // Mark healthy in the health tracker
-    state.health_tracker.mark_reconnected(&target_id);
+            let endpoint_ids: Vec<String> = state.binding_store.list_all()
+                .into_iter()
+                .filter(|b| b.target_id == target_id)
+                .map(|b| b.endpoint_id)
+                .collect();
+            let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
+            let resumed = state.ledger
+                .resume_target_deliveries(&ep_refs)
+                .map_err(|e| format!("Failed to resume deliveries: {}", e))?;
 
-    // Resume paused deliveries for all endpoints of this target
-    let endpoint_ids: Vec<String> = state.binding_store.list_all()
-        .into_iter()
-        .filter(|b| b.target_id == target_id)
-        .map(|b| b.endpoint_id)
-        .collect();
-    let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
-    let resumed = state.ledger
-        .resume_target_deliveries(&ep_refs)
-        .map_err(|e| format!("Failed to resume deliveries: {}", e))?;
+            tracing::info!(
+                target_id = %target_id,
+                resumed_count = resumed,
+                "Target reconnected and deliveries resumed"
+            );
 
-    tracing::info!(
-        target_id = %target_id,
-        resumed_count = resumed,
-        "Target reconnected and deliveries resumed"
-    );
+            Ok(serde_json::json!({
+                "target_id": target_id,
+                "status": "healthy",
+                "resumed_count": resumed,
+                "target_info": serde_json::to_value(info).unwrap_or_default(),
+            }))
+        }
+        Err(e) => {
+            let err_str = e.to_string();
+            let needs_reauth = err_str.contains("Token") || err_str.contains("Auth") || err_str.contains("401") || err_str.contains("403");
+            tracing::warn!(target_id = %target_id, error = %err_str, needs_reauth = %needs_reauth, "Reconnect failed");
 
-    Ok(serde_json::json!({
-        "target_id": target_id,
-        "status": "healthy",
-        "resumed_count": resumed,
-        "target_info": serde_json::to_value(info).unwrap_or_default(),
-    }))
+            if needs_reauth {
+                Err("Re-authentication required. Please re-authenticate in Settings.".to_string())
+            } else {
+                Err(format!("Reconnect failed: {}", err_str))
+            }
+        }
+    }
 }
 
-/// List endpoints for a specific target
+/// List endpoints for a specific target.
+/// Falls back to existing bindings if the live endpoint listing fails (e.g. expired token).
 #[tauri::command]
 pub async fn list_target_endpoints(
     state: State<'_, AppState>,
     target_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
     tracing::info!(command = "list_target_endpoints", target_id = %target_id, "Command invoked");
-    let endpoints = state
-        .target_manager
-        .list_endpoints(&target_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    endpoints
-        .into_iter()
-        .map(|e| serde_json::to_value(e).map_err(|e| e.to_string()))
-        .collect()
+
+    // Try live endpoint listing first
+    match state.target_manager.list_endpoints(&target_id).await {
+        Ok(endpoints) => {
+            endpoints
+                .into_iter()
+                .map(|e| serde_json::to_value(e).map_err(|e| e.to_string()))
+                .collect()
+        }
+        Err(e) => {
+            tracing::warn!(target_id = %target_id, error = %e, "Live endpoint listing failed, falling back to existing bindings");
+
+            // Fall back to endpoints from existing bindings for this target (deduplicated)
+            // Infer auth_type from the registered target's type
+            let auth_type = state.target_manager.get(&target_id)
+                .map(|t| match t.target_type() {
+                    "google-sheets" => "oauth2",
+                    _ => "custom",
+                })
+                .unwrap_or("custom");
+
+            let bindings = state.binding_store.list_all();
+            let mut seen = std::collections::HashSet::new();
+            let fallback: Vec<serde_json::Value> = bindings
+                .into_iter()
+                .filter(|b| b.target_id == target_id && seen.insert(b.endpoint_id.clone()))
+                .map(|b| serde_json::json!({
+                    "id": b.endpoint_id,
+                    "name": b.endpoint_name,
+                    "url": b.endpoint_url,
+                    "authenticated": true,
+                    "auth_type": auth_type,
+                    "metadata": {}
+                }))
+                .collect();
+
+            if fallback.is_empty() {
+                Err(format!("Target error: {}", e))
+            } else {
+                tracing::info!(target_id = %target_id, count = fallback.len(), "Returning cached endpoints from bindings");
+                Ok(fallback)
+            }
+        }
+    }
 }
 
 /// Create a binding from a source to a target endpoint
@@ -1171,6 +1215,93 @@ pub async fn connect_google_sheets_target(
 
     tracing::info!(target_id = %target_id, email = %email, "Google Sheets target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
+/// Re-authenticate an existing Google Sheets target with fresh OAuth tokens.
+/// Preserves the target_id and all existing bindings.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn reauth_google_sheets_target(
+    state: State<'_, AppState>,
+    target_id: String,
+    email: String,
+    access_token: String,
+    refresh_token: String,
+    expires_at: i64,
+    client_id: String,
+    client_secret: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(command = "reauth_google_sheets_target", target_id = %target_id, email = %email, "Command invoked");
+
+    // Verify target exists
+    if state.target_manager.get(&target_id).is_none() {
+        return Err(format!("Target {} not found", target_id));
+    }
+
+    let tokens = crate::targets::google_sheets::GoogleTokens {
+        access_token,
+        refresh_token,
+        expires_at,
+        client_id,
+        client_secret,
+    };
+
+    // Create new target instance with same ID
+    let target = crate::targets::GoogleSheetsTarget::new(
+        target_id.clone(),
+        email.clone(),
+        tokens.clone(),
+    );
+
+    // Test connection — fail early if tokens are bad
+    let info = target.test_connection().await.map_err(|e| {
+        tracing::error!(error = %e, "Google Sheets re-auth connection test failed");
+        e.to_string()
+    })?;
+
+    // Update credential store
+    let cred_key = format!("google-sheets:{}", target_id);
+    let tokens_json = serde_json::to_string(&tokens).map_err(|e| e.to_string())?;
+    if let Err(e) = state.credentials.store(&cred_key, &tokens_json) {
+        tracing::warn!(error = %e, "Failed to store updated Google Sheets tokens");
+    }
+
+    // Update email in config (may have changed)
+    let _ = state
+        .config
+        .set(&format!("target.{}.email", target_id), &email);
+
+    // Re-register — HashMap::insert replaces old entry, bindings still reference same target_id
+    state
+        .target_manager
+        .register(std::sync::Arc::new(target));
+
+    // Mark healthy and resume paused deliveries
+    state.health_tracker.mark_reconnected(&target_id);
+
+    let endpoint_ids: Vec<String> = state.binding_store.list_all()
+        .into_iter()
+        .filter(|b| b.target_id == target_id)
+        .map(|b| b.endpoint_id)
+        .collect();
+    let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
+    let resumed = state.ledger
+        .resume_target_deliveries(&ep_refs)
+        .unwrap_or(0);
+
+    tracing::info!(
+        target_id = %target_id,
+        email = %email,
+        resumed_count = resumed,
+        "Google Sheets target re-authenticated successfully"
+    );
+
+    Ok(serde_json::json!({
+        "target_id": target_id,
+        "status": "healthy",
+        "resumed_count": resumed,
+        "target_info": serde_json::to_value(info).unwrap_or_default(),
+    }))
 }
 
 /// Get available properties for a source

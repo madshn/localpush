@@ -37,6 +37,7 @@ fn main() {
             commands::connect_zapier_target,
             commands::connect_custom_target,
             commands::connect_google_sheets_target,
+            commands::reauth_google_sheets_target,
             commands::list_targets,
             commands::test_target_connection,
             commands::get_target_health,

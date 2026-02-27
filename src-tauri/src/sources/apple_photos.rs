@@ -39,6 +39,13 @@ struct DetectedFace {
     person_name: String,
 }
 
+#[derive(Debug)]
+struct FaceQueryColumns {
+    asset_col: String,
+    person_fk_col: String,
+    person_name_col: String,
+}
+
 /// An ML-generated label for a photo.
 #[derive(Debug)]
 struct PhotoLabel {
@@ -212,23 +219,86 @@ impl ApplePhotosSource {
         }
     }
 
+    /// Detect the filename column in ZASSET (varies across macOS versions).
+    fn detect_filename_column(conn: &Connection) -> Option<String> {
+        let mut stmt = conn.prepare("PRAGMA table_info(ZASSET)").ok()?;
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .ok()?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Prefer ZORIGINALFILENAME (older macOS), fall back to ZFILENAME (newer)
+        for candidate in &["ZORIGINALFILENAME", "ZFILENAME"] {
+            if columns.iter().any(|c| c == candidate) {
+                return Some((*candidate).to_string());
+            }
+        }
+        None
+    }
+
+    /// Detect face/person column names (varies across macOS versions).
+    fn detect_face_query_columns(conn: &Connection) -> Option<FaceQueryColumns> {
+        let mut face_stmt = conn.prepare("PRAGMA table_info(ZDETECTEDFACE)").ok()?;
+        let face_columns: Vec<String> = face_stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .ok()?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut person_stmt = conn.prepare("PRAGMA table_info(ZPERSON)").ok()?;
+        let person_columns: Vec<String> = person_stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .ok()?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let asset_col = ["ZASSET", "ZASSETFORFACE"]
+            .into_iter()
+            .find(|candidate| face_columns.iter().any(|c| c == candidate))?
+            .to_string();
+
+        let person_fk_col = ["ZPERSON", "ZPERSONFORFACE"]
+            .into_iter()
+            .find(|candidate| face_columns.iter().any(|c| c == candidate))?
+            .to_string();
+
+        let person_name_col = ["ZFULLNAME", "ZDISPLAYNAME", "ZNAME"]
+            .into_iter()
+            .find(|candidate| person_columns.iter().any(|c| c == candidate))?
+            .to_string();
+
+        Some(FaceQueryColumns {
+            asset_col,
+            person_fk_col,
+            person_name_col,
+        })
+    }
+
     /// Query recent photos (added in the last 7 days) with their metadata.
     fn query_recent_photos(&self) -> Result<Vec<PhotoMetadata>, SourceError> {
         let conn = self.open_db()?;
 
         let cutoff = (Utc::now().timestamp() as f64) - CORE_DATA_EPOCH_OFFSET - 86400.0 * 7.0;
 
+        // Detect available filename column (schema varies across macOS versions)
+        let filename_col = Self::detect_filename_column(&conn);
+        let filename_expr = filename_col.as_deref().unwrap_or("NULL");
+
+        let query = format!(
+            "SELECT Z_PK, ZUUID, {}, ZDATECREATED, ZADDEDDATE,
+                    ZKIND, ZKINDSUBTYPE, ZUNIFORMTYPEIDENTIFIER,
+                    ZLATITUDE, ZLONGITUDE
+             FROM ZASSET
+             WHERE ZADDEDDATE > ?1
+               AND ZTRASHEDSTATE = 0
+             ORDER BY ZADDEDDATE DESC
+             LIMIT 50",
+            filename_expr
+        );
+
         let mut stmt = conn
-            .prepare(
-                "SELECT Z_PK, ZUUID, ZORIGINALFILENAME, ZDATECREATED, ZADDEDDATE,
-                        ZKIND, ZKINDSUBTYPE, ZUNIFORMTYPEIDENTIFIER,
-                        ZLATITUDE, ZLONGITUDE
-                 FROM ZASSET
-                 WHERE ZADDEDDATE > ?1
-                   AND ZTRASHEDSTATE = 0
-                 ORDER BY ZADDEDDATE DESC
-                 LIMIT 50",
-            )
+            .prepare(&query)
             .map_err(|e| SourceError::ParseError(format!("Photo query prepare: {}", e)))?;
 
         let mut photos = Vec::new();
@@ -276,16 +346,22 @@ impl ApplePhotosSource {
 
         if !asset_ids.is_empty() {
             // Query faces for these photos
-            let faces = self.query_faces(&conn, &asset_ids)?;
-            for face in faces {
-                // Find the index of the matching asset
-                if let Some(idx) = asset_ids
-                    .iter()
-                    .position(|&id| id == face.asset_id)
-                {
-                    if let Some(photo) = photos.get_mut(idx) {
-                        photo.faces.push(face.person_name);
+            match self.query_faces(&conn, &asset_ids) {
+                Ok(faces) => {
+                    for face in faces {
+                        // Find the index of the matching asset
+                        if let Some(idx) = asset_ids
+                            .iter()
+                            .position(|&id| id == face.asset_id)
+                        {
+                            if let Some(photo) = photos.get_mut(idx) {
+                                photo.faces.push(face.person_name);
+                            }
+                        }
                     }
+                }
+                Err(err) => {
+                    warn!("Failed to load face metadata, continuing without faces: {}", err);
                 }
             }
 
@@ -323,13 +399,21 @@ impl ApplePhotosSource {
             .collect::<Vec<_>>()
             .join(",");
 
+        let Some(cols) = Self::detect_face_query_columns(conn) else {
+            debug!("Face/person schema columns not found, skipping detected faces");
+            return Ok(Vec::new());
+        };
+
         let query = format!(
-            "SELECT df.ZASSET, p.ZFULLNAME
+            "SELECT df.{asset_col}, p.{person_name_col}
              FROM ZDETECTEDFACE df
-             LEFT JOIN ZPERSON p ON p.Z_PK = df.ZPERSON
-             WHERE df.ZASSET IN ({})
-               AND p.ZFULLNAME IS NOT NULL",
-            placeholders
+             LEFT JOIN ZPERSON p ON p.Z_PK = df.{person_fk_col}
+             WHERE df.{asset_col} IN ({placeholders})
+               AND p.{person_name_col} IS NOT NULL",
+            asset_col = cols.asset_col,
+            person_fk_col = cols.person_fk_col,
+            person_name_col = cols.person_name_col,
+            placeholders = placeholders
         );
 
         let mut stmt = conn
@@ -599,5 +683,35 @@ mod tests {
             assert!(prop.privacy_sensitive, "Location should be privacy sensitive");
             assert!(!prop.default_enabled, "Location should be disabled by default");
         }
+    }
+
+    #[test]
+    fn test_detect_face_query_columns_legacy_schema() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE ZDETECTEDFACE (ZASSET INTEGER, ZPERSON INTEGER);
+             CREATE TABLE ZPERSON (Z_PK INTEGER PRIMARY KEY, ZFULLNAME TEXT);",
+        )
+        .unwrap();
+
+        let cols = ApplePhotosSource::detect_face_query_columns(&conn).unwrap();
+        assert_eq!(cols.asset_col, "ZASSET");
+        assert_eq!(cols.person_fk_col, "ZPERSON");
+        assert_eq!(cols.person_name_col, "ZFULLNAME");
+    }
+
+    #[test]
+    fn test_detect_face_query_columns_variant_schema() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE ZDETECTEDFACE (ZASSETFORFACE INTEGER, ZPERSONFORFACE INTEGER);
+             CREATE TABLE ZPERSON (Z_PK INTEGER PRIMARY KEY, ZDISPLAYNAME TEXT);",
+        )
+        .unwrap();
+
+        let cols = ApplePhotosSource::detect_face_query_columns(&conn).unwrap();
+        assert_eq!(cols.asset_col, "ZASSETFORFACE");
+        assert_eq!(cols.person_fk_col, "ZPERSONFORFACE");
+        assert_eq!(cols.person_name_col, "ZDISPLAYNAME");
     }
 }

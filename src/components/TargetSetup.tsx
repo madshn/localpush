@@ -1,8 +1,9 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Webhook, Bell, Plus, X, Zap, Cog, Table, Globe } from "lucide-react";
 import { toast } from "sonner";
-import { useTargets, useTestTargetConnection } from "../api/hooks/useTargets";
+import { signIn } from "@choochmeque/tauri-plugin-google-auth-api";
+import { useTargets, useTestTargetConnection, useReauthGoogleSheets } from "../api/hooks/useTargets";
 import { N8nConnect } from "./N8nConnect";
 import { NtfyConnect } from "./NtfyConnect";
 import { MakeConnect } from "./MakeConnect";
@@ -11,6 +12,9 @@ import { GoogleSheetsConnect } from "./GoogleSheetsConnect";
 import { CustomConnect } from "./CustomConnect";
 import { logger } from "../utils/logger";
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET || "";
+
 interface TargetInfo {
   id: string;
   target_type: string;
@@ -18,9 +22,11 @@ interface TargetInfo {
 
 export function TargetSetup() {
   const [testingTargetId, setTestingTargetId] = useState<string | null>(null);
+  const [reauthTargetId, setReauthTargetId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const { data: targets, isLoading } = useTargets();
   const testMutation = useTestTargetConnection();
+  const reauthMutation = useReauthGoogleSheets();
 
   const handleTargetConnected = (targetInfo: TargetInfo) => {
     logger.info("Target connected successfully", {
@@ -31,16 +37,83 @@ export function TargetSetup() {
     setShowAddForm(false);
   };
 
+  const [failedTargets, setFailedTargets] = useState<Record<string, string>>({});
+
   const handleTestConnection = async (targetId: string) => {
     setTestingTargetId(targetId);
+    setFailedTargets((prev) => { const next = { ...prev }; delete next[targetId]; return next; });
     try {
       await testMutation.mutateAsync(targetId);
       toast.success("Connection test successful");
     } catch (error) {
+      const msg = String(error);
       logger.error("Target test failed", { targetId, error });
-      toast.error("Connection test failed");
+      const isAuth = msg.includes("Token") || msg.includes("Auth") || msg.includes("401") || msg.includes("403");
+      setFailedTargets((prev) => ({
+        ...prev,
+        [targetId]: isAuth
+          ? "Authentication expired. Re-authenticate to restore delivery."
+          : `Connection failed: ${msg}`,
+      }));
+      toast.error(isAuth ? "Authentication expired" : "Connection test failed");
     } finally {
       setTestingTargetId(null);
+    }
+  };
+
+  const handleReauthenticate = async (targetId: string) => {
+    if (!GOOGLE_CLIENT_ID) {
+      toast.error("Google OAuth not configured");
+      return;
+    }
+
+    setReauthTargetId(targetId);
+    try {
+      const tokens = await signIn({
+        clientId: GOOGLE_CLIENT_ID,
+        clientSecret: GOOGLE_CLIENT_SECRET,
+        scopes: [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/drive.readonly",
+          "https://www.googleapis.com/auth/spreadsheets",
+        ],
+        successHtmlResponse:
+          "<h1>Re-authenticated!</h1><p>You can close this window and return to LocalPush.</p>",
+      });
+
+      if (!tokens.accessToken || !tokens.refreshToken) {
+        throw new Error("Missing tokens from Google sign-in");
+      }
+
+      const userInfoResp = await fetch(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        { headers: { Authorization: `Bearer ${tokens.accessToken}` } }
+      );
+      const userInfo = await userInfoResp.json();
+      const email = userInfo.email || "unknown@gmail.com";
+
+      await reauthMutation.mutateAsync({
+        targetId,
+        email,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresAt: tokens.expiresAt || Math.floor(Date.now() / 1000) + 3600,
+        clientId: GOOGLE_CLIENT_ID,
+        clientSecret: GOOGLE_CLIENT_SECRET,
+      });
+
+      // Clear the error state for this target
+      setFailedTargets((prev) => {
+        const next = { ...prev };
+        delete next[targetId];
+        return next;
+      });
+    } catch (error) {
+      logger.error("Google Sheets re-auth failed", { targetId, error });
+      toast.error("Re-authentication failed");
+    } finally {
+      setReauthTargetId(null);
     }
   };
 
@@ -57,8 +130,8 @@ export function TargetSetup() {
           </div>
           <div className="flex flex-col gap-2">
             {targets.map((target) => (
+              <React.Fragment key={target.id}>
               <div
-                key={target.id}
                 className="flex items-center gap-3 p-3 bg-bg-primary rounded-md border-l-2 border-l-accent"
               >
                 {target.target_type === "n8n" ? (
@@ -96,6 +169,21 @@ export function TargetSetup() {
                   {testingTargetId === target.id ? "Testing..." : "Test"}
                 </button>
               </div>
+              {failedTargets[target.id] && (
+                <div className="mx-3 mb-2 -mt-1 px-3 py-2 bg-error-bg border border-error/20 rounded-md">
+                  <p className="text-[10px] text-error">{failedTargets[target.id]}</p>
+                  {target.target_type === "google-sheets" && failedTargets[target.id].includes("Authentication") && (
+                    <button
+                      className="mt-1.5 text-[10px] font-medium px-2.5 py-1 rounded bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
+                      onClick={() => handleReauthenticate(target.id)}
+                      disabled={reauthTargetId === target.id}
+                    >
+                      {reauthTargetId === target.id ? "Re-authenticating..." : "Re-authenticate with Google"}
+                    </button>
+                  )}
+                </div>
+              )}
+            </React.Fragment>
             ))}
           </div>
         </div>

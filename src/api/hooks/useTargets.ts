@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { logger } from '../../utils/logger';
+import { visibleRefetchInterval } from './polling';
 
 interface Target {
   id: string;
@@ -146,6 +148,44 @@ export function useConnectGoogleSheets() {
   });
 }
 
+export function useReauthGoogleSheets() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    { target_id: string; status: string; resumed_count: number },
+    Error,
+    {
+      targetId: string;
+      email: string;
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      clientId: string;
+      clientSecret: string;
+    }
+  >({
+    mutationFn: async ({ targetId, email, accessToken, refreshToken, expiresAt, clientId, clientSecret }) => {
+      logger.debug('Re-authenticating Google Sheets target', { targetId, email });
+      const result = await invoke<{ target_id: string; status: string; resumed_count: number }>(
+        'reauth_google_sheets_target',
+        { targetId, email, accessToken, refreshToken, expiresAt, clientId, clientSecret }
+      );
+      logger.debug('Google Sheets target re-authenticated', { targetId, resumed: result.resumed_count });
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['targets'] });
+      queryClient.invalidateQueries({ queryKey: ['target-health'] });
+      queryClient.invalidateQueries({ queryKey: ['delivery-status'] });
+      toast.success('Re-authenticated successfully');
+    },
+    onError: (error) => {
+      logger.error('Google Sheets re-auth failed', { error: error.message });
+      toast.error(error.message || 'Re-authentication failed');
+    },
+  });
+}
+
 export function useConnectZapier() {
   const queryClient = useQueryClient();
 
@@ -242,7 +282,7 @@ export function useTargetHealth() {
       const health = await invoke<TargetHealth[]>('get_target_health');
       return health;
     },
-    refetchInterval: 5000,
+    refetchInterval: () => visibleRefetchInterval(5000),
   });
 }
 
@@ -265,6 +305,11 @@ export function useReconnectTarget() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['target-health'] });
       queryClient.invalidateQueries({ queryKey: ['delivery-status'] });
+      toast.success('Target reconnected');
+    },
+    onError: (error) => {
+      logger.error('Reconnect failed', { error: error.message });
+      toast.error(error.message || 'Reconnect failed');
     },
   });
 }

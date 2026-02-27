@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Workflow, Activity, Settings, ExternalLink, AlertTriangle } from "lucide-react";
 import { Toaster, toast } from "sonner";
@@ -55,6 +55,16 @@ function App() {
   const { data: status } = useDeliveryStatus();
   const { data: dlqCount } = useDlqCount();
   const [activeTab, setActiveTab] = useState("pipeline");
+
+  // Listen for cross-component tab navigation events (e.g. Reconnect → Settings)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.tab) setActiveTab(detail.tab);
+    };
+    window.addEventListener("localpush:navigate", handler);
+    return () => window.removeEventListener("localpush:navigate", handler);
+  }, []);
 
   // DLQ state is polled via useDlqCount hook (5s interval).
   // Backend notifies via macOS native notification on DLQ transitions.
