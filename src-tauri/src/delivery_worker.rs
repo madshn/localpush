@@ -504,7 +504,8 @@ pub fn spawn_worker(
             interval.tick().await;
             tick_count += 1;
             let legacy_config = read_worker_config(&config);
-            if tick_count.is_multiple_of(12) {
+            #[allow(clippy::manual_is_multiple_of)]
+            if tick_count % 12 == 0 {
                 tracing::debug!(
                     tick = tick_count,
                     bindings = binding_store.count(),

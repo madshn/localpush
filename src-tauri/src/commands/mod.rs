@@ -89,7 +89,7 @@ pub fn get_delivery_status(state: State<'_, AppState>) -> Result<DeliveryStatusR
     tracing::debug!(command = "get_delivery_status", "Command invoked");
     match state.ledger.get_stats() {
         Ok(stats) => {
-            let overall = if stats.dlq > 0 || stats.failed > 0 {
+            let overall = if stats.dlq > 0 || stats.failed > 0 || stats.target_paused > 0 {
                 "error"
             } else if stats.pending > 0 || stats.in_flight > 0 {
                 "pending"
@@ -101,6 +101,7 @@ pub fn get_delivery_status(state: State<'_, AppState>) -> Result<DeliveryStatusR
                 pending = stats.pending,
                 in_flight = stats.in_flight,
                 failed = stats.failed,
+                target_paused = stats.target_paused,
                 overall = %overall,
                 "Delivery status retrieved"
             );
@@ -108,7 +109,7 @@ pub fn get_delivery_status(state: State<'_, AppState>) -> Result<DeliveryStatusR
             Ok(DeliveryStatusResponse {
                 overall: overall.to_string(),
                 pending_count: stats.pending + stats.in_flight,
-                failed_count: stats.failed,
+                failed_count: stats.failed + stats.target_paused,
                 last_delivery: None, // TODO: Track last delivery timestamp
             })
         }
