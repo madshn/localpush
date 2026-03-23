@@ -8,6 +8,7 @@ export const mockDeliveryStatusActive: DeliveryStatus = {
   pendingCount: 0,
   failedCount: 0,
   lastDelivery: new Date(Date.now() - 60000).toISOString(), // 1 minute ago
+  dlqCount: 0,
 };
 
 /**
@@ -18,6 +19,7 @@ export const mockDeliveryStatusPending: DeliveryStatus = {
   pendingCount: 3,
   failedCount: 0,
   lastDelivery: new Date(Date.now() - 300000).toISOString(), // 5 minutes ago
+  dlqCount: 0,
 };
 
 /**
@@ -28,6 +30,7 @@ export const mockDeliveryStatusError: DeliveryStatus = {
   pendingCount: 1,
   failedCount: 2,
   lastDelivery: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
+  dlqCount: 1,
 };
 
 /**
@@ -38,6 +41,7 @@ export const mockDeliveryStatusUnknown: DeliveryStatus = {
   pendingCount: 0,
   failedCount: 0,
   lastDelivery: null,
+  dlqCount: 0,
 };
 
 /**

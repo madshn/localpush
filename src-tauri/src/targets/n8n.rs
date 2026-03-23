@@ -204,7 +204,10 @@ impl Target for N8nTarget {
 
     async fn list_endpoints(&self) -> Result<Vec<TargetEndpoint>, TargetError> {
         let workflows = self.fetch_workflows().await?;
-        tracing::debug!(count = workflows.len(), "Fetching workflow details in parallel");
+        tracing::debug!(
+            count = workflows.len(),
+            "Fetching workflow details in parallel"
+        );
 
         let futures: Vec<_> = workflows
             .iter()
@@ -220,7 +223,10 @@ impl Target for N8nTarget {
             }
         }
 
-        tracing::info!(endpoint_count = endpoints.len(), "Discovered webhook endpoints");
+        tracing::info!(
+            endpoint_count = endpoints.len(),
+            "Discovered webhook endpoints"
+        );
         Ok(endpoints)
     }
 }

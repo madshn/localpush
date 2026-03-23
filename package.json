@@ -1,6 +1,6 @@
 {
   "name": "localpush",
-  "version": "0.3.1",
+  "version": "0.5.0",
   "description": "Push local file changes to webhooks with guaranteed delivery",
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "bump:version": "node scripts/bump-version.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

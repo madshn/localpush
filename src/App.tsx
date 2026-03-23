@@ -3,9 +3,9 @@ import * as Tabs from "@radix-ui/react-tabs";
 import { Workflow, Activity, Settings, ExternalLink, AlertTriangle } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
-
+import { useBackendEvents } from "./api/hooks/useBackendEvents";
 import { useDeliveryStatus } from "./api/hooks/useDeliveryStatus";
-import { useDlqCount } from "./api/hooks/useErrorDiagnosis";
+
 import { StatusIndicator } from "./components/StatusIndicator";
 import { PipelineView } from "./components/PipelineView";
 import { ActivityLog } from "./components/ActivityLog";
@@ -52,8 +52,9 @@ async function handleOpenDashboard() {
 }
 
 function App() {
+  useBackendEvents();
   const { data: status } = useDeliveryStatus();
-  const { data: dlqCount } = useDlqCount();
+  const dlqCount = status?.dlqCount ?? null;
   const [activeTab, setActiveTab] = useState("pipeline");
 
   // Listen for cross-component tab navigation events (e.g. Reconnect → Settings)
@@ -66,8 +67,7 @@ function App() {
     return () => window.removeEventListener("localpush:navigate", handler);
   }, []);
 
-  // DLQ state is polled via useDlqCount hook (5s interval).
-  // Backend notifies via macOS native notification on DLQ transitions.
+  // DLQ count is derived from delivery status (event-driven + 30s safety-net poll).
 
   if (isDashboard) {
     return (

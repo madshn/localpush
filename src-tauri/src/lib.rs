@@ -11,29 +11,31 @@ pub static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 
 pub mod bindings;
 pub mod commands;
-pub mod traits;
+mod instance_guard;
 pub mod mocks;
 pub mod production;
-pub mod sources;
-pub mod source_manager;
 pub mod source_config;
+pub mod source_manager;
+pub mod sources;
 pub mod target_manager;
 pub mod targets;
+pub mod traits;
 
 pub mod config;
-mod ledger;
-mod state;
 pub mod delivery_worker;
-pub mod scheduled_worker;
-pub mod error_diagnosis;
-pub mod target_health;
-pub mod iokit_idle;
 pub mod desktop_activity_worker;
+pub mod error_diagnosis;
+pub mod events;
+pub mod iokit_idle;
+mod ledger;
+pub mod scheduled_worker;
+mod state;
+pub mod target_health;
 
 use std::sync::Arc;
 use tauri::{App, Manager};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_appender::rolling;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub use ledger::DeliveryLedger;
 pub use state::AppState;
@@ -42,7 +44,9 @@ pub use state::AppState;
 pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     // Menu bar app: only show in dock when a window is visible, never as a standalone dock icon
     #[cfg(target_os = "macos")]
-    let _ = app.handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+    let _ = app
+        .handle()
+        .set_activation_policy(tauri::ActivationPolicy::Accessory);
 
     // Initialize logging to both stdout and file
     let log_dir = app.path().app_log_dir()?;
@@ -55,7 +59,11 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
             std::env::var("RUST_LOG").unwrap_or_else(|_| "localpush=info".into()),
         ))
         .with(tracing_subscriber::fmt::layer()) // stdout
-        .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false)) // file
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(non_blocking)
+                .with_ansi(false),
+        ) // file
         .init();
 
     // Keep guard alive for application lifetime
@@ -64,13 +72,19 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("LocalPush starting up");
 
+    let instance_guard = instance_guard::InstanceGuard::acquire(&app.handle())?;
+    app.manage(instance_guard);
+
     // Initialize app state with production implementations
     let state = AppState::new_production(app.handle())?;
 
     // Recover orphaned in-flight entries from previous crash
     let recovered = state.ledger.recover_orphans().unwrap_or(0);
     if recovered > 0 {
-        tracing::warn!("Recovered {} orphaned deliveries from previous session", recovered);
+        tracing::warn!(
+            "Recovered {} orphaned deliveries from previous session",
+            recovered
+        );
     }
 
     // Connect file watcher events to source manager
@@ -84,13 +98,20 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn coalescing worker (flushes buffered file events every 5s after 90s window expires)
     let source_manager_for_coalescing = state.source_manager.clone();
+    let app_handle_for_coalescing = app.handle().clone();
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
         loop {
             interval.tick().await;
             let flushed = source_manager_for_coalescing.flush_expired();
             if flushed > 0 {
-                tracing::debug!(sources_flushed = flushed, "Coalescing worker flushed expired events");
+                tracing::debug!(
+                    sources_flushed = flushed,
+                    "Coalescing worker flushed expired events"
+                );
+                use tauri::Emitter;
+                let _ = app_handle_for_coalescing.emit(events::SOURCE_DATA_UPDATED, ());
+                let _ = app_handle_for_coalescing.emit(events::DELIVERY_STATUS_CHANGED, ());
             }
         }
     });
@@ -99,7 +120,6 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let _worker = delivery_worker::spawn_worker(
         state.ledger.clone(),
         state.webhook_client.clone(),
-        state.config.clone(),
         state.binding_store.clone(),
         state.credentials.clone(),
         state.target_manager.clone(),
@@ -118,7 +138,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     // Spawn desktop activity worker (polls IOKit idle time every 30s)
     let _desktop_worker = desktop_activity_worker::spawn_worker(
         state.source_manager.clone(),
-        state.ledger.clone(),
+        state.desktop_activity_state.clone(),
     );
 
     app.manage(state);
@@ -133,10 +153,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
         // Check if auto-update is enabled (default: true)
-        let auto_update_enabled = match app_handle.state::<AppState>()
-            .config
-            .get("auto_update")
-        {
+        let auto_update_enabled = match app_handle.state::<AppState>().config.get("auto_update") {
             Ok(Some(value)) => value != "false",
             _ => true, // Default to enabled
         };
@@ -149,32 +166,30 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("Checking for updates...");
         // Use the updater plugin API from tauri-plugin-updater
         match tauri_plugin_updater::UpdaterExt::updater(&app_handle) {
-            Ok(updater_builder) => {
-                match updater_builder.check().await {
-                    Ok(Some(update)) => {
-                        tracing::info!(
-                            current = %update.current_version,
-                            latest = %update.version,
-                            "Update available, downloading and installing"
-                        );
+            Ok(updater_builder) => match updater_builder.check().await {
+                Ok(Some(update)) => {
+                    tracing::info!(
+                        current = %update.current_version,
+                        latest = %update.version,
+                        "Update available, downloading and installing"
+                    );
 
-                        match update.download_and_install(|_, _| {}, || {}).await {
-                            Ok(()) => {
-                                tracing::info!("Update installed successfully, restart required");
-                            }
-                            Err(e) => {
-                                tracing::error!(error = %e, "Failed to install update");
-                            }
+                    match update.download_and_install(|_, _| {}, || {}).await {
+                        Ok(()) => {
+                            tracing::info!("Update installed successfully, restart required");
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to install update");
                         }
                     }
-                    Ok(None) => {
-                        tracing::info!("App is up to date");
-                    }
-                    Err(e) => {
-                        tracing::debug!(error = %e, "Update check failed (expected in dev mode)");
-                    }
                 }
-            }
+                Ok(None) => {
+                    tracing::info!("App is up to date");
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, "Update check failed (expected in dev mode)");
+                }
+            },
             Err(e) => {
                 tracing::debug!(error = %e, "Failed to build updater (expected in dev mode)");
             }
@@ -186,14 +201,15 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState};
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder};
 
     let version = env!("CARGO_PKG_VERSION");
+    let build_number = option_env!("LOCALPUSH_BUILD_NUMBER").unwrap_or("dev");
     #[cfg(debug_assertions)]
-    let about_label = format!("LocalPush v{}-dev", version);
+    let about_label = format!("LocalPush v{}-dev ({})", version, build_number);
     #[cfg(not(debug_assertions))]
-    let about_label = format!("LocalPush v{}", version);
+    let about_label = format!("LocalPush v{} ({})", version, build_number);
     let about = MenuItem::with_id(app, "about", &about_label, false, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit LocalPush", true, None::<&str>)?;
@@ -236,7 +252,9 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
                         tauri::Position::Logical(p) => (p.x, p.y),
                     };
                     let (icon_w, icon_h) = match rect.size {
-                        tauri::Size::Physical(s) => (s.width as f64 / scale, s.height as f64 / scale),
+                        tauri::Size::Physical(s) => {
+                            (s.width as f64 / scale, s.height as f64 / scale)
+                        }
                         tauri::Size::Logical(s) => (s.width, s.height),
                     };
 
@@ -246,12 +264,12 @@ fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
                     let x = icon_x + (icon_w / 2.0) - (window_width / 2.0);
                     let y = icon_y + icon_h + 4.0;
 
-                    let _ = window.set_position(tauri::Position::Logical(
-                        tauri::LogicalPosition::new(x, y),
-                    ));
-                    let _ = window.set_size(tauri::Size::Logical(
-                        tauri::LogicalSize::new(window_width, window_height),
-                    ));
+                    let _ = window
+                        .set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+                        window_width,
+                        window_height,
+                    )));
                     let _ = window.show();
                     let _ = window.set_focus();
                 }

@@ -77,4 +77,4 @@ export interface SourceWithCategory {
   category: SourceCategory;
 }
 
-export type TrafficLightStatus = "green" | "yellow" | "red" | "grey";
+export type TrafficLightStatus = "green" | "yellow" | "red" | "orange" | "grey";

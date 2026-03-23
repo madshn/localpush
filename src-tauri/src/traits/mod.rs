@@ -5,16 +5,18 @@
 use std::sync::{Arc, Mutex};
 
 mod credential_store;
-mod file_watcher;
-mod webhook_client;
 mod delivery_ledger;
+mod file_watcher;
 mod target;
+mod webhook_client;
 
-pub use credential_store::{CredentialStore, CredentialError};
-pub use file_watcher::{FileWatcher, FileWatcherError, FileEvent, FileEventKind};
-pub use webhook_client::{WebhookClient, WebhookError, WebhookResponse, WebhookAuth};
-pub use delivery_ledger::{DeliveryLedgerTrait, DeliveryEntry, DeliveryStatus, LedgerError, LedgerStats};
-pub use target::{Target, TargetError, TargetInfo, TargetEndpoint};
+pub use credential_store::{CredentialError, CredentialStore};
+pub use delivery_ledger::{
+    DeliveryEntry, DeliveryLedgerTrait, DeliveryStatus, LedgerError, LedgerStats, SourceStatusCount,
+};
+pub use file_watcher::{FileEvent, FileEventKind, FileWatcher, FileWatcherError};
+pub use target::{Target, TargetEndpoint, TargetError, TargetInfo};
+pub use webhook_client::{WebhookAuth, WebhookClient, WebhookError, WebhookResponse};
 
 /// Shared event handler type used by file watchers
 pub type EventHandler = Arc<Mutex<Option<Arc<dyn Fn(FileEvent) + Send + Sync>>>>;

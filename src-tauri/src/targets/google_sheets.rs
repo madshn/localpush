@@ -89,8 +89,9 @@ impl GoogleSheetsTarget {
         let mut updated = self.tokens.clone();
         updated.access_token = new_tokens.access_token.clone();
         updated.expires_at = now + new_tokens.expires_in;
-        let json = serde_json::to_string(&updated)
-            .map_err(|e| TargetError::DeliveryError(format!("Failed to serialize tokens: {}", e)))?;
+        let json = serde_json::to_string(&updated).map_err(|e| {
+            TargetError::DeliveryError(format!("Failed to serialize tokens: {}", e))
+        })?;
         let _ = credentials.store(&cred_key, &json);
 
         Ok(new_tokens.access_token)
@@ -123,16 +124,13 @@ impl GoogleSheetsTarget {
             )));
         }
 
-        resp.json()
-            .await
-            .map_err(|e| TargetError::DeliveryError(format!("Failed to parse token response: {}", e)))
+        resp.json().await.map_err(|e| {
+            TargetError::DeliveryError(format!("Failed to parse token response: {}", e))
+        })
     }
 
     /// List user's spreadsheets via Google Drive API.
-    async fn list_spreadsheets(
-        &self,
-        access_token: &str,
-    ) -> Result<Vec<DriveFile>, TargetError> {
+    async fn list_spreadsheets(&self, access_token: &str) -> Result<Vec<DriveFile>, TargetError> {
         let resp = self
             .client
             .get("https://www.googleapis.com/drive/v3/files")
@@ -148,7 +146,9 @@ impl GoogleSheetsTarget {
             .map_err(|e| TargetError::ConnectionFailed(e.to_string()))?;
 
         if resp.status() == 401 || resp.status() == 403 {
-            return Err(TargetError::AuthFailed("Drive API access denied".to_string()));
+            return Err(TargetError::AuthFailed(
+                "Drive API access denied".to_string(),
+            ));
         }
         if !resp.status().is_success() {
             return Err(TargetError::ConnectionFailed(format!(
@@ -157,10 +157,9 @@ impl GoogleSheetsTarget {
             )));
         }
 
-        let file_list: DriveFileList = resp
-            .json()
-            .await
-            .map_err(|e| TargetError::DeliveryError(format!("Failed to parse Drive response: {}", e)))?;
+        let file_list: DriveFileList = resp.json().await.map_err(|e| {
+            TargetError::DeliveryError(format!("Failed to parse Drive response: {}", e))
+        })?;
 
         Ok(file_list.files)
     }
@@ -192,10 +191,9 @@ impl GoogleSheetsTarget {
             )));
         }
 
-        let detail: SpreadsheetDetail = resp
-            .json()
-            .await
-            .map_err(|e| TargetError::DeliveryError(format!("Failed to parse spreadsheet: {}", e)))?;
+        let detail: SpreadsheetDetail = resp.json().await.map_err(|e| {
+            TargetError::DeliveryError(format!("Failed to parse spreadsheet: {}", e))
+        })?;
 
         // Check if sheet already exists
         let exists = detail
@@ -229,7 +227,9 @@ impl GoogleSheetsTarget {
             .json(&body)
             .send()
             .await
-            .map_err(|e| TargetError::DeliveryError(format!("Failed to create worksheet: {}", e)))?;
+            .map_err(|e| {
+                TargetError::DeliveryError(format!("Failed to create worksheet: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -512,8 +512,12 @@ mod tests {
         let pairs = flatten_payload(&payload);
         assert_eq!(pairs.len(), 3);
         assert!(pairs.iter().any(|(k, v)| k == "name" && v == "test"));
-        assert!(pairs.iter().any(|(k, v)| k == "count" && v == &serde_json::json!(42)));
-        assert!(pairs.iter().any(|(k, v)| k == "active" && v == &serde_json::json!(true)));
+        assert!(pairs
+            .iter()
+            .any(|(k, v)| k == "count" && v == &serde_json::json!(42)));
+        assert!(pairs
+            .iter()
+            .any(|(k, v)| k == "active" && v == &serde_json::json!(true)));
     }
 
     #[test]
@@ -526,8 +530,12 @@ mod tests {
         });
         let pairs = flatten_payload(&payload);
         assert_eq!(pairs.len(), 2);
-        assert!(pairs.iter().any(|(k, v)| k == "summary.total_messages" && v == &serde_json::json!(100)));
-        assert!(pairs.iter().any(|(k, v)| k == "summary.total_sessions" && v == &serde_json::json!(5)));
+        assert!(pairs
+            .iter()
+            .any(|(k, v)| k == "summary.total_messages" && v == &serde_json::json!(100)));
+        assert!(pairs
+            .iter()
+            .any(|(k, v)| k == "summary.total_sessions" && v == &serde_json::json!(5)));
     }
 
     #[test]

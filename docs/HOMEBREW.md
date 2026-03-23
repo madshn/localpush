@@ -22,6 +22,7 @@ Two repositories:
 
 ```bash
 # In main repo: /Users/madsnissen/dev/localpush
+npm run bump:version -- minor
 git tag v0.1.0
 git push origin v0.1.0
 ```
@@ -30,6 +31,8 @@ This triggers GitHub Actions to:
 - Build universal DMG
 - Create GitHub Release
 - Upload DMG to release assets
+
+`npm run bump:version -- minor` updates the app version across `package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`, and increments the macOS `bundleVersion` build number used for `CFBundleVersion`.
 
 ### 2. Update Cask Formula
 

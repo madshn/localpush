@@ -21,6 +21,63 @@ pub struct PropertyState {
     pub privacy_sensitive: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WindowSettingState {
+    pub label: String,
+    pub description: String,
+    pub days: i64,
+    pub default_days: i64,
+    pub min_days: i64,
+    pub max_days: i64,
+    pub recommended_days: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WindowSettingDef {
+    pub label: &'static str,
+    pub description: &'static str,
+    pub default_days: i64,
+    pub min_days: i64,
+    pub max_days: i64,
+}
+
+pub fn window_setting_for_source(source_id: &str) -> Option<WindowSettingDef> {
+    match source_id {
+        "claude-sessions" => Some(WindowSettingDef {
+            label: "Data Window",
+            description:
+                "How many recent days of Claude sessions to include in previews and payloads.",
+            default_days: 7,
+            min_days: 1,
+            max_days: 30,
+        }),
+        "codex-sessions" => Some(WindowSettingDef {
+            label: "Data Window",
+            description:
+                "How many recent days of Codex sessions to include in previews and payloads.",
+            default_days: 7,
+            min_days: 1,
+            max_days: 30,
+        }),
+        "claude-stats" => Some(WindowSettingDef {
+            label: "Data Window",
+            description:
+                "How many days of Claude activity to include in daily breakdowns and rollups.",
+            default_days: 30,
+            min_days: 1,
+            max_days: 30,
+        }),
+        "codex-stats" => Some(WindowSettingDef {
+            label: "Data Window",
+            description: "How many complete UTC days of Codex token metrics to emit.",
+            default_days: 1,
+            min_days: 1,
+            max_days: 30,
+        }),
+        _ => None,
+    }
+}
+
 /// Store for per-source property configuration.
 ///
 /// Uses the existing AppConfig with key pattern: `source_config.{source_id}.{property}`
@@ -45,11 +102,71 @@ impl SourceConfigStore {
     }
 
     /// Enable or disable a property for a source.
-    pub fn set_enabled(&self, source_id: &str, property: &str, enabled: bool) -> Result<(), String> {
+    pub fn set_enabled(
+        &self,
+        source_id: &str,
+        property: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
         let key = format!("source_config.{}.{}", source_id, property);
         self.config
             .set(&key, &enabled.to_string())
             .map_err(|e| format!("Failed to set property: {}", e))
+    }
+
+    pub fn get_window_days(&self, source_id: &str, def: &WindowSettingDef) -> i64 {
+        let key = format!("source_window.{}.days", source_id);
+        self.config
+            .get(&key)
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<i64>().ok())
+            .map(|days| days.clamp(def.min_days, def.max_days))
+            .unwrap_or(def.default_days)
+    }
+
+    pub fn get_window_state(&self, source_id: &str) -> Option<WindowSettingState> {
+        let def = window_setting_for_source(source_id)?;
+        let mut recommended_days = vec![1, 7, 14, 30]
+            .into_iter()
+            .filter(|day| *day >= def.min_days && *day <= def.max_days)
+            .collect::<Vec<_>>();
+        let current_days = self.get_window_days(source_id, &def);
+        if !recommended_days.contains(&current_days) {
+            recommended_days.push(current_days);
+            recommended_days.sort_unstable();
+        }
+
+        Some(WindowSettingState {
+            label: def.label.to_string(),
+            description: def.description.to_string(),
+            days: current_days,
+            default_days: def.default_days,
+            min_days: def.min_days,
+            max_days: def.max_days,
+            recommended_days,
+        })
+    }
+
+    pub fn set_window_days(&self, source_id: &str, days: i64) -> Result<(), String> {
+        let Some(def) = window_setting_for_source(source_id) else {
+            return Err(format!(
+                "Source {} does not support window configuration",
+                source_id
+            ));
+        };
+
+        if days < def.min_days || days > def.max_days {
+            return Err(format!(
+                "Window for {} must be between {} and {} days",
+                source_id, def.min_days, def.max_days
+            ));
+        }
+
+        let key = format!("source_window.{}.days", source_id);
+        self.config
+            .set(&key, &days.to_string())
+            .map_err(|e| format!("Failed to set data window: {}", e))
     }
 
     /// Get all property states for a source, given default definitions.
@@ -67,7 +184,11 @@ impl SourceConfigStore {
     }
 
     /// Build a set of enabled property keys for a source.
-    pub fn enabled_set(&self, source_id: &str, defaults: &[PropertyDef]) -> std::collections::HashSet<String> {
+    pub fn enabled_set(
+        &self,
+        source_id: &str,
+        defaults: &[PropertyDef],
+    ) -> std::collections::HashSet<String> {
         defaults
             .iter()
             .filter(|def| self.is_enabled(source_id, &def.key, def.default_enabled))
@@ -157,5 +278,37 @@ mod tests {
         let enabled = store.enabled_set("test-source", &defaults);
         assert!(enabled.contains("enabled_prop"));
         assert!(!enabled.contains("disabled_prop"));
+    }
+
+    #[test]
+    fn test_get_window_state_returns_default_window() {
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let store = SourceConfigStore::new(config);
+
+        let state = store.get_window_state("claude-sessions").unwrap();
+        assert_eq!(state.days, 7);
+        assert_eq!(state.default_days, 7);
+        assert_eq!(state.max_days, 30);
+        assert!(state.recommended_days.contains(&30));
+    }
+
+    #[test]
+    fn test_set_window_days_persists_override() {
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let store = SourceConfigStore::new(config);
+
+        store.set_window_days("claude-sessions", 30).unwrap();
+
+        let state = store.get_window_state("claude-sessions").unwrap();
+        assert_eq!(state.days, 30);
+    }
+
+    #[test]
+    fn test_set_window_days_rejects_invalid_values() {
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let store = SourceConfigStore::new(config);
+
+        let err = store.set_window_days("claude-sessions", 31).unwrap_err();
+        assert!(err.contains("between 1 and 30"));
     }
 }

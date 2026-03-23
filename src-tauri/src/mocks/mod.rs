@@ -2,17 +2,15 @@
 //!
 //! Provides in-memory implementations of all external dependencies for isolated testing.
 
+use async_trait::async_trait;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use async_trait::async_trait;
-use serde_json::Value;
 
 use crate::traits::{
-    CredentialStore, CredentialError,
-    FileWatcher, FileWatcherError, FileEvent, FileEventKind,
-    WebhookClient, WebhookError, WebhookResponse, WebhookAuth,
-    EventHandler,
+    CredentialError, CredentialStore, EventHandler, FileEvent, FileEventKind, FileWatcher,
+    FileWatcherError, WebhookAuth, WebhookClient, WebhookError, WebhookResponse,
 };
 
 // Re-export ledger's in-memory implementation
@@ -67,7 +65,10 @@ impl Default for InMemoryCredentialStore {
 
 impl CredentialStore for InMemoryCredentialStore {
     fn store(&self, key: &str, value: &str) -> Result<(), CredentialError> {
-        self.store.lock().unwrap().insert(key.to_string(), value.to_string());
+        self.store
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), value.to_string());
         Ok(())
     }
 
@@ -175,7 +176,10 @@ pub enum WebhookBehavior {
     /// Always succeed with given status code
     AlwaysSucceed(u16),
     /// Fail N times, then succeed
-    FailThenSucceed { fail_count: usize, error: WebhookError },
+    FailThenSucceed {
+        fail_count: usize,
+        error: WebhookError,
+    },
     /// Always fail with given error
     AlwaysFail(WebhookError),
     /// Custom response based on request
@@ -187,7 +191,9 @@ impl std::fmt::Debug for WebhookBehavior {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AlwaysSucceed(s) => write!(f, "AlwaysSucceed({})", s),
-            Self::FailThenSucceed { fail_count, .. } => write!(f, "FailThenSucceed({})", fail_count),
+            Self::FailThenSucceed { fail_count, .. } => {
+                write!(f, "FailThenSucceed({})", fail_count)
+            }
             Self::AlwaysFail(e) => write!(f, "AlwaysFail({:?})", e),
             Self::Custom(_) => write!(f, "Custom(fn)"),
         }
@@ -277,13 +283,11 @@ impl RecordedWebhookClient {
         // Determine response based on behavior
         let behavior = self.behavior.lock().unwrap().clone();
         match behavior {
-            WebhookBehavior::AlwaysSucceed(status) => {
-                Ok(WebhookResponse {
-                    status,
-                    body: Some("OK".to_string()),
-                    duration_ms: 10,
-                })
-            }
+            WebhookBehavior::AlwaysSucceed(status) => Ok(WebhookResponse {
+                status,
+                body: Some("OK".to_string()),
+                duration_ms: 10,
+            }),
             WebhookBehavior::FailThenSucceed { fail_count, error } => {
                 if current_count <= fail_count {
                     Err(error)
@@ -318,11 +322,7 @@ impl WebhookClient for RecordedWebhookClient {
         self.record_and_respond(url, payload, auth)
     }
 
-    async fn test(
-        &self,
-        url: &str,
-        auth: &WebhookAuth,
-    ) -> Result<WebhookResponse, WebhookError> {
+    async fn test(&self, url: &str, auth: &WebhookAuth) -> Result<WebhookResponse, WebhookError> {
         self.record_and_respond(url, &Value::Null, auth)
     }
 }
@@ -354,10 +354,8 @@ mod tests {
 
     #[test]
     fn test_credential_store_with_entries() {
-        let store = InMemoryCredentialStore::with_entries(vec![
-            ("key1", "value1"),
-            ("key2", "value2"),
-        ]);
+        let store =
+            InMemoryCredentialStore::with_entries(vec![("key1", "value1"), ("key2", "value2")]);
 
         assert_eq!(store.keys().len(), 2);
         assert_eq!(store.retrieve("key1").unwrap(), Some("value1".to_string()));
@@ -444,11 +442,14 @@ mod tests {
     async fn test_webhook_client_success() {
         let client = RecordedWebhookClient::success();
 
-        let response = client.send(
-            "https://example.com/webhook",
-            &serde_json::json!({"test": true}),
-            &WebhookAuth::None,
-        ).await.unwrap();
+        let response = client
+            .send(
+                "https://example.com/webhook",
+                &serde_json::json!({"test": true}),
+                &WebhookAuth::None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(response.status, 200);
         assert_eq!(client.call_count(), 1);
@@ -463,14 +464,32 @@ mod tests {
         );
 
         // First two calls fail
-        let result1 = client.send("https://example.com/webhook", &Value::Null, &WebhookAuth::None).await;
+        let result1 = client
+            .send(
+                "https://example.com/webhook",
+                &Value::Null,
+                &WebhookAuth::None,
+            )
+            .await;
         assert!(result1.is_err());
 
-        let result2 = client.send("https://example.com/webhook", &Value::Null, &WebhookAuth::None).await;
+        let result2 = client
+            .send(
+                "https://example.com/webhook",
+                &Value::Null,
+                &WebhookAuth::None,
+            )
+            .await;
         assert!(result2.is_err());
 
         // Third call succeeds
-        let result3 = client.send("https://example.com/webhook", &Value::Null, &WebhookAuth::None).await;
+        let result3 = client
+            .send(
+                "https://example.com/webhook",
+                &Value::Null,
+                &WebhookAuth::None,
+            )
+            .await;
         assert!(result3.is_ok());
 
         assert_eq!(client.call_count(), 3);
@@ -478,15 +497,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_webhook_client_always_fail() {
-        let client = RecordedWebhookClient::always_fail(
-            WebhookError::Timeout,
-        );
+        let client = RecordedWebhookClient::always_fail(WebhookError::Timeout);
 
-        let result = client.send("https://example.com/webhook", &Value::Null, &WebhookAuth::None).await;
+        let result = client
+            .send(
+                "https://example.com/webhook",
+                &Value::Null,
+                &WebhookAuth::None,
+            )
+            .await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
-            WebhookError::Timeout => {},
+            WebhookError::Timeout => {}
             _ => panic!("Expected timeout error"),
         }
     }

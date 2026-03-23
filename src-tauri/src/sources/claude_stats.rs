@@ -1,68 +1,13 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
-use crate::source_config::PropertyDef;
-use chrono::{DateTime, Utc};
+use crate::config::AppConfig;
+use crate::source_config::{window_setting_for_source, PropertyDef, SourceConfigStore};
+use crate::sources::claude_sessions_collector::collect_claude_sessions;
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use tracing::{debug, info, warn};
-
-/// Raw structure of Claude Code stats-cache.json
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-#[serde(rename_all = "camelCase")]
-struct ClaudeStatsRaw {
-    version: u32,
-    last_computed_date: String,
-    daily_activity: Vec<DailyActivity>,
-    daily_model_tokens: Vec<DailyModelTokens>,
-    model_usage: HashMap<String, ModelUsage>,
-    total_sessions: u64,
-    total_messages: u64,
-    longest_session: Option<LongestSession>,
-    first_session_date: Option<String>,
-    hour_counts: HashMap<String, u64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DailyActivity {
-    date: String,
-    message_count: u64,
-    session_count: u64,
-    tool_call_count: u64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DailyModelTokens {
-    date: String,
-    tokens_by_model: HashMap<String, u64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-#[serde(rename_all = "camelCase")]
-struct ModelUsage {
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_read_input_tokens: u64,
-    cache_creation_input_tokens: u64,
-    #[serde(default)]
-    web_search_requests: u64,
-    #[serde(alias = "costUSD", default)]
-    cost_usd: f64,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-#[serde(rename_all = "camelCase")]
-struct LongestSession {
-    session_id: String,
-    duration: u64,
-    message_count: u64,
-    timestamp: String,
-}
+use std::sync::Arc;
+use tracing::info;
 
 /// Structured payload sent to webhooks
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,7 +16,7 @@ pub struct ClaudeStatsPayload {
     pub last_computed_date: String,
     pub today: Option<DailyStats>,
     pub yesterday: Option<DailyStats>,
-    /// 14-day rolling breakdown with zero-filled gaps (oldest → newest)
+    /// Rolling breakdown across the configured window, zero-filled for inactive days (oldest → newest)
     pub daily_breakdown: Vec<DailyStats>,
     pub model_totals: Vec<ModelTotal>,
     pub summary: SummaryStats,
@@ -104,6 +49,7 @@ pub struct SummaryStats {
     pub total_messages: u64,
     pub first_session_date: Option<String>,
     pub days_active: usize,
+    /// Always None — hour-of-day data is not available from JSONL.
     pub peak_hour: Option<u8>,
 }
 
@@ -114,97 +60,107 @@ pub struct PayloadMetadata {
     pub file_path: String,
 }
 
-/// Claude Code statistics source
+/// Daily accumulator used during aggregation.
+#[derive(Default)]
+struct DayBucket {
+    messages: u64,
+    tool_calls: u64,
+    tokens_by_model: HashMap<String, u64>,
+}
+
+/// Claude Code statistics source.
+///
+/// Reads session data directly from `~/.claude/projects/*/*.jsonl` using a configurable
+/// recent-day window.
+/// This replaces the old `stats-cache.json` approach, which stopped auto-updating
+/// in Claude Code v2.1.45.
 pub struct ClaudeStatsSource {
-    stats_path: PathBuf,
+    claude_projects_dir: PathBuf,
+    config: Option<Arc<AppConfig>>,
+    reference_now: Option<DateTime<Utc>>,
 }
 
 impl ClaudeStatsSource {
-    pub fn new() -> Result<Self, SourceError> {
+    pub fn new(config: Arc<AppConfig>) -> Result<Self, SourceError> {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .map_err(|_| {
                 SourceError::ParseError("Could not determine home directory".to_string())
             })?;
 
-        let stats_path = PathBuf::from(home).join(".claude").join("stats-cache.json");
+        let claude_projects_dir = PathBuf::from(home).join(".claude").join("projects");
 
-        Ok(Self { stats_path })
+        Ok(Self {
+            claude_projects_dir,
+            config: Some(config),
+            reference_now: None,
+        })
     }
 
-    /// Constructor with custom path (for testing)
+    /// Constructor with custom projects directory (for testing).
     pub fn new_with_path(path: impl Into<PathBuf>) -> Self {
         Self {
-            stats_path: path.into(),
+            claude_projects_dir: path.into(),
+            config: None,
+            reference_now: None,
         }
     }
 
-    /// Helper to parse the raw stats file
-    fn load_stats(&self) -> Result<ClaudeStatsRaw, SourceError> {
-        debug!("Loading Claude stats from: {}", self.stats_path.display());
-
-        if !self.stats_path.exists() {
-            warn!("Stats file not found at: {}", self.stats_path.display());
-            return Err(SourceError::FileNotFound(self.stats_path.clone()));
+    /// Constructor with custom path and pinned reference time (for deterministic tests).
+    #[cfg(test)]
+    pub fn new_with_path_and_now(path: impl Into<PathBuf>, reference_now: DateTime<Utc>) -> Self {
+        Self {
+            claude_projects_dir: path.into(),
+            config: None,
+            reference_now: Some(reference_now),
         }
-
-        let content = fs::read_to_string(&self.stats_path)?;
-        let stats: ClaudeStatsRaw = serde_json::from_str(&content)?;
-
-        info!(
-            "Loaded Claude stats: {} sessions, {} messages",
-            stats.total_sessions, stats.total_messages
-        );
-
-        Ok(stats)
     }
 
-    /// Get today's date string
-    fn today() -> String {
-        chrono::Local::now().format("%Y-%m-%d").to_string()
+    #[cfg(test)]
+    pub fn new_with_path_config_and_now(
+        path: impl Into<PathBuf>,
+        config: Arc<AppConfig>,
+        reference_now: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            claude_projects_dir: path.into(),
+            config: Some(config),
+            reference_now: Some(reference_now),
+        }
     }
 
-    /// Get yesterday's date string
-    fn yesterday() -> String {
-        let yesterday = chrono::Local::now() - chrono::Duration::days(1);
-        yesterday.format("%Y-%m-%d").to_string()
+    pub fn new_without_config() -> Result<Self, SourceError> {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map_err(|_| {
+                SourceError::ParseError("Could not determine home directory".to_string())
+            })?;
+
+        Ok(Self {
+            claude_projects_dir: PathBuf::from(home).join(".claude").join("projects"),
+            config: None,
+            reference_now: None,
+        })
     }
 
-    /// Find daily activity for a specific date
-    fn find_daily_activity(
-        stats: &ClaudeStatsRaw,
-        date: &str,
-    ) -> Option<(DailyActivity, HashMap<String, u64>)> {
-        let activity = stats
-            .daily_activity
-            .iter()
-            .find(|a| a.date == date)
-            .cloned();
-
-        let tokens = stats
-            .daily_model_tokens
-            .iter()
-            .find(|t| t.date == date)
-            .map(|t| t.tokens_by_model.clone())
-            .unwrap_or_default();
-
-        activity.map(|a| (a, tokens))
+    fn now(&self) -> DateTime<Utc> {
+        self.reference_now.unwrap_or_else(Utc::now)
     }
 
-    /// Calculate total tokens for a day
-    fn total_tokens(tokens_by_model: &HashMap<String, u64>) -> u64 {
-        tokens_by_model.values().sum()
+    fn today_date(&self) -> NaiveDate {
+        self.now().date_naive()
     }
 
-    /// Find peak hour from hour_counts
-    fn find_peak_hour(hour_counts: &HashMap<String, u64>) -> Option<u8> {
-        hour_counts
-            .iter()
-            .max_by_key(|(_, &count)| count)
-            .and_then(|(hour, _)| hour.parse().ok())
+    fn window_days(&self) -> usize {
+        let Some(config) = &self.config else {
+            return 30;
+        };
+        let def = window_setting_for_source(self.id())
+            .expect("claude-stats should have a window setting definition");
+        SourceConfigStore::new(config.clone()).get_window_days(self.id(), &def) as usize
     }
 
-    /// Format number with commas
+    /// Format number with comma separators (e.g. 1_234_567 → "1,234,567").
     fn format_number(n: u64) -> String {
         n.to_string()
             .as_bytes()
@@ -216,7 +172,7 @@ impl ClaudeStatsSource {
             .join(",")
     }
 
-    /// Calculate percentage change
+    /// Calculate percentage change from yesterday to today.
     fn percentage_change(today: u64, yesterday: u64) -> Option<f64> {
         if yesterday == 0 {
             return None;
@@ -225,32 +181,130 @@ impl ClaudeStatsSource {
         Some(change)
     }
 
-    /// Build a rolling daily breakdown with zero-filled gaps.
-    /// Returns `window_days` entries ordered oldest → newest.
-    fn build_daily_breakdown(stats: &ClaudeStatsRaw, window_days: usize) -> Vec<DailyStats> {
-        let today = chrono::Local::now().date_naive();
+    /// Aggregate JSONL sessions into per-day buckets and per-model totals.
+    ///
+    /// Returns `(day_buckets, day_session_ids, model_map, earliest_date)`.
+    #[allow(clippy::type_complexity)]
+    fn aggregate(
+        &self,
+    ) -> (
+        BTreeMap<String, DayBucket>,
+        BTreeMap<String, std::collections::BTreeSet<String>>,
+        BTreeMap<String, ModelAcc>,
+        Option<String>,
+    ) {
+        let cutoff = self.now() - Duration::days(self.window_days() as i64);
+        let sessions = collect_claude_sessions(&self.claude_projects_dir, Some(cutoff));
+
+        info!(
+            "claude-stats: aggregating {} sessions from JSONL",
+            sessions.len()
+        );
+
+        let mut day_buckets: BTreeMap<String, DayBucket> = BTreeMap::new();
+        // Track unique session IDs per day (to avoid double-counting a session that spans midnight).
+        let mut day_session_ids: BTreeMap<String, std::collections::BTreeSet<String>> =
+            BTreeMap::new();
+        let mut model_map: BTreeMap<String, ModelAcc> = BTreeMap::new();
+        let mut earliest_date: Option<String> = None;
+
+        for session in &sessions {
+            // Attribute each message to the calendar day of its timestamp.
+            let mut session_days: std::collections::BTreeSet<String> =
+                std::collections::BTreeSet::new();
+
+            for msg in &session.messages {
+                // Skip messages outside the configured recent-day window. The file-level mtime
+                // filter only checks if the *file* was touched recently; a
+                // long-lived session file may contain messages far older than the
+                // cutoff.
+                if msg.timestamp < cutoff {
+                    continue;
+                }
+                let day = msg.timestamp.date_naive().format("%Y-%m-%d").to_string();
+                session_days.insert(day.clone());
+
+                let bucket = day_buckets.entry(day.clone()).or_default();
+                bucket.messages += 1;
+                bucket.tool_calls += msg.tool_calls;
+
+                // Update earliest seen date.
+                if earliest_date
+                    .as_ref()
+                    .map(|e: &String| day < *e)
+                    .unwrap_or(true)
+                {
+                    earliest_date = Some(day.clone());
+                }
+
+                // Accumulate per-model totals from assistant messages only.
+                if msg.msg_type == "assistant" {
+                    if let Some(ref model) = msg.model {
+                        // Skip synthetic placeholder messages (error responses, no-ops)
+                        if model == "<synthetic>" {
+                            continue;
+                        }
+                        let acc = model_map.entry(model.clone()).or_default();
+                        acc.input += msg.usage.input;
+                        acc.output += msg.usage.output;
+                        acc.cache_read += msg.usage.cache_read;
+                        acc.cache_creation += msg.usage.cache_creation;
+                        // tokens_by_model tracks total (input + output) per model per day
+                        let total = msg.usage.input + msg.usage.output;
+                        *bucket.tokens_by_model.entry(model.clone()).or_insert(0) += total;
+                    }
+                }
+            }
+
+            // Record session attribution per day.
+            for day in session_days {
+                day_session_ids
+                    .entry(day)
+                    .or_default()
+                    .insert(session.session_id.clone());
+            }
+        }
+
+        (day_buckets, day_session_ids, model_map, earliest_date)
+    }
+
+    /// Build a rolling daily breakdown with zero-filled gaps (oldest → newest).
+    fn build_daily_breakdown(
+        &self,
+        day_buckets: &BTreeMap<String, DayBucket>,
+        day_session_ids: &BTreeMap<String, std::collections::BTreeSet<String>>,
+        window_days: usize,
+    ) -> Vec<DailyStats> {
+        let today = self.today_date();
         let mut breakdown = Vec::with_capacity(window_days);
 
         for i in (0..window_days).rev() {
-            let date = today - chrono::Duration::days(i as i64);
+            let date = today - Duration::days(i as i64);
             let date_str = date.format("%Y-%m-%d").to_string();
 
-            let daily = match Self::find_daily_activity(stats, &date_str) {
-                Some((activity, tokens)) => DailyStats {
-                    date: date_str,
-                    messages: activity.message_count,
-                    sessions: activity.session_count,
-                    tool_calls: activity.tool_call_count,
-                    total_tokens: Self::total_tokens(&tokens),
-                    tokens_by_model: tokens,
-                },
+            let daily = match day_buckets.get(&date_str) {
+                Some(bucket) => {
+                    let sessions = day_session_ids
+                        .get(&date_str)
+                        .map(|s| s.len() as u64)
+                        .unwrap_or(0);
+                    let total_tokens: u64 = bucket.tokens_by_model.values().sum();
+                    DailyStats {
+                        date: date_str,
+                        messages: bucket.messages,
+                        sessions,
+                        tool_calls: bucket.tool_calls,
+                        tokens_by_model: bucket.tokens_by_model.clone(),
+                        total_tokens,
+                    }
+                }
                 None => DailyStats {
                     date: date_str,
                     messages: 0,
                     sessions: 0,
                     tool_calls: 0,
-                    total_tokens: 0,
                     tokens_by_model: HashMap::new(),
+                    total_tokens: 0,
                 },
             };
 
@@ -261,9 +315,18 @@ impl ClaudeStatsSource {
     }
 }
 
+/// Per-model token accumulator used during aggregation.
+#[derive(Default)]
+struct ModelAcc {
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_creation: u64,
+}
+
 impl Default for ClaudeStatsSource {
     fn default() -> Self {
-        Self::new().expect("Failed to initialize ClaudeStatsSource")
+        Self::new_without_config().expect("Failed to initialize ClaudeStatsSource")
     }
 }
 
@@ -277,70 +340,78 @@ impl Source for ClaudeStatsSource {
     }
 
     fn watch_path(&self) -> Option<PathBuf> {
-        Some(self.stats_path.clone())
+        Some(self.claude_projects_dir.clone())
+    }
+
+    fn watch_recursive(&self) -> bool {
+        true
     }
 
     fn parse(&self) -> Result<serde_json::Value, SourceError> {
-        let stats = self.load_stats()?;
+        let (day_buckets, day_session_ids, model_map, earliest_date) = self.aggregate();
 
-        let today_date = Self::today();
-        let yesterday_date = Self::yesterday();
+        let today_str = self.today_date().format("%Y-%m-%d").to_string();
+        let yesterday_str = (self.today_date() - Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
 
-        // Build today's stats
-        let today = Self::find_daily_activity(&stats, &today_date).map(|(activity, tokens)| {
-            DailyStats {
-                date: activity.date,
-                messages: activity.message_count,
-                sessions: activity.session_count,
-                tool_calls: activity.tool_call_count,
-                total_tokens: Self::total_tokens(&tokens),
-                tokens_by_model: tokens,
-            }
-        });
-
-        // Build yesterday's stats
-        let yesterday =
-            Self::find_daily_activity(&stats, &yesterday_date).map(|(activity, tokens)| {
+        let make_daily = |date_str: &str| -> Option<DailyStats> {
+            day_buckets.get(date_str).map(|bucket| {
+                let sessions = day_session_ids
+                    .get(date_str)
+                    .map(|s| s.len() as u64)
+                    .unwrap_or(0);
+                let total_tokens: u64 = bucket.tokens_by_model.values().sum();
                 DailyStats {
-                    date: activity.date,
-                    messages: activity.message_count,
-                    sessions: activity.session_count,
-                    tool_calls: activity.tool_call_count,
-                    total_tokens: Self::total_tokens(&tokens),
-                    tokens_by_model: tokens,
+                    date: date_str.to_string(),
+                    messages: bucket.messages,
+                    sessions,
+                    tool_calls: bucket.tool_calls,
+                    tokens_by_model: bucket.tokens_by_model.clone(),
+                    total_tokens,
                 }
-            });
+            })
+        };
 
-        // Build 14-day rolling breakdown with zero-filled gaps (before model_usage is consumed)
-        let daily_breakdown = Self::build_daily_breakdown(&stats, 14);
+        let today = make_daily(&today_str);
+        let yesterday = make_daily(&yesterday_str);
+        let window_days = self.window_days();
+        let daily_breakdown =
+            self.build_daily_breakdown(&day_buckets, &day_session_ids, window_days);
 
-        // Build model totals
-        let model_totals: Vec<ModelTotal> = stats
-            .model_usage
+        let model_totals: Vec<ModelTotal> = model_map
             .into_iter()
-            .map(|(model, usage)| ModelTotal {
+            .map(|(model, acc)| ModelTotal {
                 model: model.clone(),
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                cache_read_tokens: usage.cache_read_input_tokens,
-                cache_creation_tokens: usage.cache_creation_input_tokens,
-                total_tokens: usage.input_tokens + usage.output_tokens,
+                input_tokens: acc.input,
+                output_tokens: acc.output,
+                cache_read_tokens: acc.cache_read,
+                cache_creation_tokens: acc.cache_creation,
+                total_tokens: acc.input + acc.output,
             })
             .collect();
 
-        // Build summary
+        let total_sessions: u64 = {
+            let mut all_ids = std::collections::BTreeSet::new();
+            for ids in day_session_ids.values() {
+                all_ids.extend(ids.iter().cloned());
+            }
+            all_ids.len() as u64
+        };
+        let total_messages: u64 = day_buckets.values().map(|b| b.messages).sum();
+        let days_active = day_buckets.len();
+
         let summary = SummaryStats {
-            total_sessions: stats.total_sessions,
-            total_messages: stats.total_messages,
-            first_session_date: stats.first_session_date,
-            days_active: stats.daily_activity.len(),
-            peak_hour: Self::find_peak_hour(&stats.hour_counts),
+            total_sessions,
+            total_messages,
+            first_session_date: earliest_date,
+            days_active,
+            peak_hour: None,
         };
 
-        // Build payload
         let payload = ClaudeStatsPayload {
-            version: stats.version,
-            last_computed_date: stats.last_computed_date,
+            version: 2,
+            last_computed_date: today_str.clone(),
             today,
             yesterday,
             daily_breakdown,
@@ -348,32 +419,36 @@ impl Source for ClaudeStatsSource {
             summary,
             metadata: PayloadMetadata {
                 source: "localpush".to_string(),
-                generated_at: Utc::now(),
-                file_path: self.stats_path.display().to_string(),
+                generated_at: self.now(),
+                file_path: self.claude_projects_dir.display().to_string(),
             },
         };
 
-        serde_json::to_value(payload).map_err(SourceError::JsonError)
+        let mut value = serde_json::to_value(payload).map_err(SourceError::JsonError)?;
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("window_days".to_string(), serde_json::json!(window_days));
+        }
+        Ok(value)
     }
 
     fn preview(&self) -> Result<SourcePreview, SourceError> {
-        let stats = self.load_stats()?;
+        let (day_buckets, day_session_ids, _, _) = self.aggregate();
 
-        let today_date = Self::today();
-        let yesterday_date = Self::yesterday();
+        let today_str = self.today_date().format("%Y-%m-%d").to_string();
+        let yesterday_str = (self.today_date() - Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
 
-        let today_data = Self::find_daily_activity(&stats, &today_date);
-        let yesterday_data = Self::find_daily_activity(&stats, &yesterday_date);
+        let today_bucket = day_buckets.get(&today_str);
+        let yesterday_bucket = day_buckets.get(&yesterday_str);
 
-        // Build summary line
-        let summary = if let Some((_today_activity, today_tokens)) = &today_data {
-            let total_tokens = Self::total_tokens(today_tokens);
-            let formatted_tokens = Self::format_number(total_tokens);
+        let summary = if let Some(bucket) = today_bucket {
+            let total_tokens: u64 = bucket.tokens_by_model.values().sum();
+            let formatted = Self::format_number(total_tokens);
 
-            // Calculate trend if we have yesterday's data
-            let trend = if let Some((_yesterday_activity, yesterday_tokens)) = &yesterday_data {
-                let yesterday_total = Self::total_tokens(yesterday_tokens);
-                if let Some(change) = Self::percentage_change(total_tokens, yesterday_total) {
+            let trend = if let Some(yb) = yesterday_bucket {
+                let yesterday_tokens: u64 = yb.tokens_by_model.values().sum();
+                if let Some(change) = Self::percentage_change(total_tokens, yesterday_tokens) {
                     if change > 0.0 {
                         format!(" (+{:.1}%)", change)
                     } else {
@@ -386,40 +461,33 @@ impl Source for ClaudeStatsSource {
                 String::new()
             };
 
-            format!("{} tokens today{}", formatted_tokens, trend)
+            format!("{} tokens today{}", formatted, trend)
         } else {
             "No activity today".to_string()
         };
 
-        // Build preview fields
         let mut fields = Vec::new();
 
-        if let Some((activity, tokens)) = today_data {
+        if let Some(bucket) = today_bucket {
+            let today_sessions = day_session_ids
+                .get(&today_str)
+                .map(|s| s.len() as u64)
+                .unwrap_or(0);
+
             fields.push(PreviewField {
                 label: "Messages".to_string(),
-                value: Self::format_number(activity.message_count),
+                value: Self::format_number(bucket.messages),
                 sensitive: false,
             });
 
             fields.push(PreviewField {
                 label: "Sessions".to_string(),
-                value: Self::format_number(activity.session_count),
+                value: Self::format_number(today_sessions),
                 sensitive: false,
             });
 
-            fields.push(PreviewField {
-                label: "Tool Calls".to_string(),
-                value: Self::format_number(activity.tool_call_count),
-                sensitive: false,
-            });
-
-            // Show tokens by model
-            for (model, count) in tokens {
-                let model_name = model
-                    .split('-')
-                    .nth(1)
-                    .unwrap_or(&model)
-                    .to_uppercase();
+            for (model, &count) in &bucket.tokens_by_model {
+                let model_name = model.split('-').nth(1).unwrap_or(model).to_uppercase();
                 fields.push(PreviewField {
                     label: format!("{} Tokens", model_name),
                     value: Self::format_number(count),
@@ -428,30 +496,26 @@ impl Source for ClaudeStatsSource {
             }
         }
 
-        // Add total statistics
+        let all_session_ids: std::collections::BTreeSet<&String> =
+            day_session_ids.values().flat_map(|s| s.iter()).collect();
+        let window_days = self.window_days();
         fields.push(PreviewField {
-            label: "Total Sessions".to_string(),
-            value: Self::format_number(stats.total_sessions),
+            label: format!("Total Sessions ({}d)", window_days),
+            value: Self::format_number(all_session_ids.len() as u64),
             sensitive: false,
         });
 
         fields.push(PreviewField {
-            label: "Days Active".to_string(),
-            value: stats.daily_activity.len().to_string(),
+            label: format!("Days Active ({}d)", window_days),
+            value: day_buckets.len().to_string(),
             sensitive: false,
         });
-
-        // Last update time (from file modification)
-        let last_updated = fs::metadata(&self.stats_path)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| DateTime::<Utc>::from(t).into());
 
         Ok(SourcePreview {
             title: self.name().to_string(),
             summary,
             fields,
-            last_updated,
+            last_updated: Some(self.now()),
         })
     }
 
@@ -460,45 +524,79 @@ impl Source for ClaudeStatsSource {
             PropertyDef {
                 key: "daily_breakdown".to_string(),
                 label: "Daily Breakdown".to_string(),
-                description: "14-day rolling stats with messages and tokens per day".to_string(),
+                description:
+                    "Daily stats with messages and tokens across the configured data window"
+                        .to_string(),
                 default_enabled: true,
                 privacy_sensitive: false,
             },
             PropertyDef {
                 key: "model_totals".to_string(),
                 label: "Model Totals".to_string(),
-                description: "Per-model token counts and usage".to_string(),
-                default_enabled: true,
-                privacy_sensitive: false,
-            },
-            PropertyDef {
-                key: "cost_breakdown".to_string(),
-                label: "Cost Breakdown".to_string(),
-                description: "Estimated costs per model (approximate)".to_string(),
-                default_enabled: false,
-                privacy_sensitive: false,
-            },
-            PropertyDef {
-                key: "hour_breakdown".to_string(),
-                label: "Hour Breakdown".to_string(),
-                description: "Hourly activity distribution across the day".to_string(),
-                default_enabled: false,
-                privacy_sensitive: false,
-            },
-            PropertyDef {
-                key: "longest_session".to_string(),
-                label: "Longest Session".to_string(),
-                description: "Peak session details and stats".to_string(),
+                description: "Per-model token counts and usage across the configured data window"
+                    .to_string(),
                 default_enabled: true,
                 privacy_sensitive: false,
             },
         ]
+    }
+
+    fn has_meaningful_payload(&self, payload: &serde_json::Value) -> bool {
+        payload["summary"]["total_sessions"].as_u64().unwrap_or(0) > 0
+            || payload["summary"]["total_messages"].as_u64().unwrap_or(0) > 0
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AppConfig;
+    use std::fs;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    /// Write a minimal JSONL session with given timestamps and token counts.
+    fn write_jsonl_session(
+        projects_dir: &std::path::Path,
+        project: &str,
+        session_id: &str,
+        events: &[(&str, &str, u64, u64)], // (timestamp, model, input, output)
+    ) {
+        let project_dir = projects_dir.join(project);
+        fs::create_dir_all(&project_dir).unwrap();
+
+        let lines: Vec<String> = events
+            .iter()
+            .map(|(ts, model, input, output)| {
+                serde_json::json!({
+                    "type": "assistant",
+                    "timestamp": ts,
+                    "message": {
+                        "model": model,
+                        "usage": {
+                            "input_tokens": input,
+                            "output_tokens": output,
+                            "cache_read_input_tokens": 0,
+                            "cache_creation_input_tokens": 0
+                        }
+                    }
+                })
+                .to_string()
+            })
+            .collect();
+
+        fs::write(
+            project_dir.join(format!("{session_id}.jsonl")),
+            lines.join("\n"),
+        )
+        .unwrap();
+    }
+
+    fn ref_now() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-03-12T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
+    }
 
     #[test]
     fn test_format_number() {
@@ -509,22 +607,298 @@ mod tests {
 
     #[test]
     fn test_percentage_change() {
-        assert_eq!(
-            ClaudeStatsSource::percentage_change(150, 100),
-            Some(50.0)
-        );
-        assert_eq!(
-            ClaudeStatsSource::percentage_change(75, 100),
-            Some(-25.0)
-        );
+        assert_eq!(ClaudeStatsSource::percentage_change(150, 100), Some(50.0));
+        assert_eq!(ClaudeStatsSource::percentage_change(75, 100), Some(-25.0));
         assert_eq!(ClaudeStatsSource::percentage_change(100, 0), None);
     }
 
     #[test]
-    fn test_total_tokens() {
-        let mut tokens = HashMap::new();
-        tokens.insert("opus".to_string(), 1000);
-        tokens.insert("sonnet".to_string(), 500);
-        assert_eq!(ClaudeStatsSource::total_tokens(&tokens), 1500);
+    fn test_empty_dir_returns_valid_payload() {
+        let tmp = TempDir::new().unwrap();
+        let source = ClaudeStatsSource::new_with_path_and_now(tmp.path(), ref_now());
+
+        let value = source.parse().unwrap();
+        assert_eq!(value["version"], 2);
+        assert_eq!(value["summary"]["total_sessions"], 0);
+        assert_eq!(value["summary"]["total_messages"], 0);
+        assert_eq!(value["summary"]["days_active"], 0);
+        assert!(value["daily_breakdown"].as_array().unwrap().len() == 30);
+    }
+
+    #[test]
+    fn test_daily_breakdown_30_entries_zero_filled() {
+        let tmp = TempDir::new().unwrap();
+        let source = ClaudeStatsSource::new_with_path_and_now(tmp.path(), ref_now());
+
+        let value = source.parse().unwrap();
+        let breakdown = value["daily_breakdown"].as_array().unwrap();
+        assert_eq!(breakdown.len(), 30);
+
+        // All zeros since directory is empty.
+        for day in breakdown {
+            assert_eq!(day["messages"], 0);
+            assert_eq!(day["sessions"], 0);
+            assert_eq!(day["tool_calls"], 0);
+            assert_eq!(day["total_tokens"], 0);
+        }
+
+        // Oldest first, newest last.
+        let first_date = breakdown[0]["date"].as_str().unwrap();
+        let last_date = breakdown[29]["date"].as_str().unwrap();
+        assert!(first_date < last_date);
+        assert_eq!(last_date, "2026-03-12");
+    }
+
+    #[test]
+    fn test_window_setting_expands_daily_breakdown() {
+        let tmp = TempDir::new().unwrap();
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        config.set("source_window.claude-stats.days", "30").unwrap();
+
+        let source = ClaudeStatsSource::new_with_path_config_and_now(tmp.path(), config, ref_now());
+        let value = source.parse().unwrap();
+        let breakdown = value["daily_breakdown"].as_array().unwrap();
+
+        assert_eq!(value["window_days"], 30);
+        assert_eq!(breakdown.len(), 30);
+    }
+
+    #[test]
+    fn test_model_totals_aggregated() {
+        let tmp = TempDir::new().unwrap();
+        let now = ref_now();
+        let today = now.date_naive().format("%Y-%m-%d").to_string();
+        let ts = format!("{}T10:00:00Z", today);
+
+        write_jsonl_session(
+            tmp.path(),
+            "-Users-test-proj",
+            "s1",
+            &[
+                (ts.as_str(), "claude-opus-4-6", 100, 50),
+                (ts.as_str(), "claude-opus-4-6", 200, 100),
+            ],
+        );
+
+        let source = ClaudeStatsSource::new_with_path_and_now(tmp.path(), now);
+        let value = source.parse().unwrap();
+
+        let model_totals = value["model_totals"].as_array().unwrap();
+        assert_eq!(model_totals.len(), 1);
+        assert_eq!(model_totals[0]["model"], "claude-opus-4-6");
+        assert_eq!(model_totals[0]["input_tokens"], 300);
+        assert_eq!(model_totals[0]["output_tokens"], 150);
+        assert_eq!(model_totals[0]["total_tokens"], 450);
+    }
+
+    #[test]
+    fn test_today_slice_populated() {
+        let tmp = TempDir::new().unwrap();
+        let now = ref_now();
+        let today = now.date_naive().format("%Y-%m-%d").to_string();
+        let ts = format!("{}T10:00:00Z", today);
+
+        write_jsonl_session(
+            tmp.path(),
+            "-Users-test",
+            "sess-today",
+            &[(ts.as_str(), "claude-sonnet-4-6", 500, 200)],
+        );
+
+        let source = ClaudeStatsSource::new_with_path_and_now(tmp.path(), now);
+        let value = source.parse().unwrap();
+
+        let today_val = &value["today"];
+        assert!(!today_val.is_null(), "today should be Some");
+        assert_eq!(today_val["date"], today);
+        assert_eq!(today_val["messages"], 1);
+        assert_eq!(today_val["tool_calls"], 0);
+    }
+
+    #[test]
+    fn test_tool_calls_counted_from_assistant_tool_use_events() {
+        let tmp = TempDir::new().unwrap();
+        let now = ref_now();
+        let today = now.date_naive().format("%Y-%m-%d").to_string();
+        let ts = format!("{today}T10:00:00Z");
+        let project_dir = tmp.path().join("-Users-test");
+        fs::create_dir_all(&project_dir).unwrap();
+
+        let payload = [
+            serde_json::json!({
+                "type": "assistant",
+                "timestamp": ts,
+                "message": {
+                    "model": "claude-sonnet-4-6",
+                    "content": [
+                        {"type": "tool_use", "name": "Bash", "input": {"command": "pwd"}},
+                        {"type": "tool_use", "name": "Read", "input": {"path": "README.md"}}
+                    ],
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0
+                    }
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "assistant",
+                "timestamp": ts,
+                "message": {
+                    "model": "claude-sonnet-4-6",
+                    "content": [
+                        {"type": "text", "text": "No tools here"}
+                    ],
+                    "usage": {
+                        "input_tokens": 50,
+                        "output_tokens": 25,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0
+                    }
+                }
+            })
+            .to_string(),
+        ]
+        .join("\n");
+
+        fs::write(project_dir.join("session-1.jsonl"), payload).unwrap();
+
+        let source = ClaudeStatsSource::new_with_path_and_now(tmp.path(), now);
+        let value = source.parse().unwrap();
+
+        assert_eq!(value["today"]["tool_calls"], 2);
+        assert_eq!(value["daily_breakdown"][29]["tool_calls"], 2);
+    }
+
+    #[test]
+    fn test_summary_counts_sessions_across_days() {
+        let tmp = TempDir::new().unwrap();
+        let now = ref_now();
+        let today = now.date_naive().format("%Y-%m-%d").to_string();
+        let yesterday = (now.date_naive() - Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+
+        let ts_today = format!("{}T10:00:00Z", today);
+        let ts_yest = format!("{}T10:00:00Z", yesterday);
+
+        write_jsonl_session(
+            tmp.path(),
+            "-Users-test",
+            "s1",
+            &[(ts_today.as_str(), "claude-opus-4-6", 100, 50)],
+        );
+        write_jsonl_session(
+            tmp.path(),
+            "-Users-test",
+            "s2",
+            &[(ts_yest.as_str(), "claude-opus-4-6", 100, 50)],
+        );
+
+        let source = ClaudeStatsSource::new_with_path_and_now(tmp.path(), now);
+        let value = source.parse().unwrap();
+
+        assert_eq!(value["summary"]["total_sessions"], 2);
+        assert_eq!(value["summary"]["total_messages"], 2);
+        assert_eq!(value["summary"]["days_active"], 2);
+        assert!(value["summary"]["peak_hour"].is_null());
+    }
+
+    #[test]
+    fn test_old_messages_in_recent_file_excluded() {
+        // A long-lived session file touched today may contain messages from
+        // months ago. Only messages within the 30-day window should be counted.
+        let tmp = TempDir::new().unwrap();
+        let now = ref_now(); // 2026-03-12T12:00:00Z
+        let today = now.date_naive().format("%Y-%m-%d").to_string();
+        let ts_recent = format!("{}T10:00:00Z", today);
+        // 60 days ago — well outside the 30-day window
+        let old_date = (now - Duration::days(60))
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        let ts_old = format!("{}T10:00:00Z", old_date);
+
+        write_jsonl_session(
+            tmp.path(),
+            "-Users-test",
+            "long-lived-session",
+            &[
+                (ts_old.as_str(), "claude-opus-4-6", 1000, 500),
+                (ts_recent.as_str(), "claude-opus-4-6", 200, 100),
+            ],
+        );
+
+        let source = ClaudeStatsSource::new_with_path_and_now(tmp.path(), now);
+        let value = source.parse().unwrap();
+
+        // Only the recent message should be counted.
+        assert_eq!(value["summary"]["total_messages"], 1);
+        // Model totals should reflect only the recent message's tokens.
+        let model_totals = value["model_totals"].as_array().unwrap();
+        assert_eq!(model_totals.len(), 1);
+        assert_eq!(model_totals[0]["input_tokens"], 200);
+        assert_eq!(model_totals[0]["output_tokens"], 100);
+    }
+
+    #[test]
+    fn test_source_trait_basics() {
+        let tmp = TempDir::new().unwrap();
+        let source = ClaudeStatsSource::new_with_path(tmp.path());
+
+        assert_eq!(source.id(), "claude-stats");
+        assert_eq!(source.name(), "Claude Code Statistics");
+        assert!(source.watch_path().is_some());
+        assert!(source.watch_recursive());
+    }
+
+    #[test]
+    fn test_available_properties_no_cost_or_hour_breakdown() {
+        let tmp = TempDir::new().unwrap();
+        let source = ClaudeStatsSource::new_with_path(tmp.path());
+        let props = source.available_properties();
+        let keys: Vec<&str> = props.iter().map(|p| p.key.as_str()).collect();
+
+        assert!(keys.contains(&"daily_breakdown"));
+        assert!(keys.contains(&"model_totals"));
+        // These were removed (not available from JSONL).
+        assert!(!keys.contains(&"cost_breakdown"));
+        assert!(!keys.contains(&"hour_breakdown"));
+        assert!(!keys.contains(&"longest_session"));
+    }
+
+    #[test]
+    fn test_preview_no_activity() {
+        let tmp = TempDir::new().unwrap();
+        let source = ClaudeStatsSource::new_with_path_and_now(tmp.path(), ref_now());
+        let preview = source.preview().unwrap();
+        assert_eq!(preview.summary, "No activity today");
+        assert_eq!(preview.title, "Claude Code Statistics");
+    }
+
+    #[test]
+    fn test_preview_with_today_activity() {
+        let tmp = TempDir::new().unwrap();
+        let now = ref_now();
+        let today = now.date_naive().format("%Y-%m-%d").to_string();
+        let ts = format!("{}T10:00:00Z", today);
+
+        write_jsonl_session(
+            tmp.path(),
+            "-Users-test",
+            "s1",
+            &[(ts.as_str(), "claude-opus-4-6", 1000, 500)],
+        );
+
+        let source = ClaudeStatsSource::new_with_path_and_now(tmp.path(), now);
+        let preview = source.preview().unwrap();
+
+        assert!(
+            preview.summary.contains("tokens today"),
+            "Summary was: {}",
+            preview.summary
+        );
     }
 }

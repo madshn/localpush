@@ -216,9 +216,12 @@ mod tests {
         let _req = target.apply_auth(req);
 
         // Can't easily inspect headers in tests, but we verify the structure compiles
-        assert_eq!(target.auth_type, AuthType::Bearer {
-            token: "secret123".to_string()
-        });
+        assert_eq!(
+            target.auth_type,
+            AuthType::Bearer {
+                token: "secret123".to_string()
+            }
+        );
     }
 
     #[test]

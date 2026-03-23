@@ -4,20 +4,17 @@
 //! Healthy and Degraded states. Auth/token errors degrade immediately;
 //! transient errors degrade after 3 consecutive failures.
 
+use crate::traits::TargetError;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use serde::Serialize;
-use crate::traits::TargetError;
 
 /// Health state for a single target.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TargetHealthState {
     Healthy,
-    Degraded {
-        reason: String,
-        degraded_at: i64,
-    },
+    Degraded { reason: String, degraded_at: i64 },
 }
 
 /// Internal tracking data per target.
@@ -112,7 +109,11 @@ impl TargetHealthTracker {
     pub fn is_degraded(&self, target_id: &str) -> Option<DegradationInfo> {
         let entries = self.entries.lock().unwrap();
         entries.get(target_id).and_then(|entry| {
-            if let TargetHealthState::Degraded { reason, degraded_at } = &entry.state {
+            if let TargetHealthState::Degraded {
+                reason,
+                degraded_at,
+            } = &entry.state
+            {
                 Some(DegradationInfo {
                     target_id: target_id.to_string(),
                     reason: reason.clone(),
@@ -137,17 +138,24 @@ impl TargetHealthTracker {
     /// Get all currently degraded targets.
     pub fn get_all_degraded(&self) -> Vec<DegradationInfo> {
         let entries = self.entries.lock().unwrap();
-        entries.iter().filter_map(|(target_id, entry)| {
-            if let TargetHealthState::Degraded { reason, degraded_at } = &entry.state {
-                Some(DegradationInfo {
-                    target_id: target_id.clone(),
-                    reason: reason.clone(),
-                    degraded_at: *degraded_at,
-                })
-            } else {
-                None
-            }
-        }).collect()
+        entries
+            .iter()
+            .filter_map(|(target_id, entry)| {
+                if let TargetHealthState::Degraded {
+                    reason,
+                    degraded_at,
+                } = &entry.state
+                {
+                    Some(DegradationInfo {
+                        target_id: target_id.clone(),
+                        reason: reason.clone(),
+                        degraded_at: *degraded_at,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 
@@ -173,7 +181,8 @@ mod tests {
     #[test]
     fn test_auth_failed_immediate_degradation() {
         let tracker = TargetHealthTracker::new();
-        let transitioned = tracker.report_failure("t1", &TargetError::AuthFailed("bad creds".into()));
+        let transitioned =
+            tracker.report_failure("t1", &TargetError::AuthFailed("bad creds".into()));
         assert!(transitioned);
         assert!(tracker.is_degraded("t1").is_some());
     }
@@ -189,7 +198,7 @@ mod tests {
         assert!(!tracker.report_failure("t1", &err)); // 2nd
         assert!(tracker.is_degraded("t1").is_none());
 
-        assert!(tracker.report_failure("t1", &err));  // 3rd → degraded
+        assert!(tracker.report_failure("t1", &err)); // 3rd → degraded
         assert!(tracker.is_degraded("t1").is_some());
     }
 
@@ -200,7 +209,7 @@ mod tests {
 
         tracker.report_failure("t1", &err); // 1st
         tracker.report_failure("t1", &err); // 2nd
-        tracker.report_success("t1");       // resets
+        tracker.report_success("t1"); // resets
 
         // Next failure starts from 1 again
         assert!(!tracker.report_failure("t1", &err)); // 1st (reset)

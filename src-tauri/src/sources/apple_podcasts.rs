@@ -94,7 +94,18 @@ impl ApplePodcastsSource {
             &self.db_path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
-        .map_err(|e| SourceError::ParseError(format!("SQLite open: {}", e)))
+        .map_err(|e| {
+            let err_msg = e.to_string();
+            if err_msg.contains("unable to open database")
+                || err_msg.contains("disk I/O error")
+                || err_msg.contains("attempt to write a readonly database")
+            {
+                warn!("Permission denied accessing Podcasts database");
+                SourceError::PermissionDenied("Cannot access Apple Podcasts library".to_string())
+            } else {
+                SourceError::ParseError(format!("SQLite open: {}", e))
+            }
+        })
     }
 
     /// Extract URLs from HTML description text.

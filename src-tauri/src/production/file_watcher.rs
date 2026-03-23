@@ -1,12 +1,12 @@
 //! FSEvents file watcher implementation
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{new_debouncer, Debouncer, FileIdMap};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::traits::{FileWatcher, FileWatcherError, FileEvent, FileEventKind, EventHandler};
+use crate::traits::{EventHandler, FileEvent, FileEventKind, FileWatcher, FileWatcherError};
 
 pub struct FsEventsWatcher {
     debouncer: Arc<Mutex<Debouncer<RecommendedWatcher, FileIdMap>>>,
@@ -26,7 +26,11 @@ impl FsEventsWatcher {
             .map_err(|e| FileWatcherError::WatchError(e.to_string()))?;
 
         self.watched_paths.lock().unwrap().push(path.clone());
-        tracing::info!("Watching path: {:?} (recursive: {})", path, mode == RecursiveMode::Recursive);
+        tracing::info!(
+            "Watching path: {:?} (recursive: {})",
+            path,
+            mode == RecursiveMode::Recursive
+        );
 
         Ok(())
     }
@@ -66,11 +70,8 @@ impl FsEventsWatcher {
             }
         });
 
-        let debouncer = new_debouncer(
-            Duration::from_millis(300),
-            None,
-            tx,
-        ).map_err(|e| FileWatcherError::WatchError(e.to_string()))?;
+        let debouncer = new_debouncer(Duration::from_millis(300), None, tx)
+            .map_err(|e| FileWatcherError::WatchError(e.to_string()))?;
 
         Ok(Self {
             debouncer: Arc::new(Mutex::new(debouncer)),

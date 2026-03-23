@@ -27,7 +27,7 @@ Prove that local-first data push with guaranteed delivery creates real user adop
 - Crash-safe writes: delivery state is persisted via SQLite WAL.
 - Retry on failure: failed deliveries remain in the ledger and are retried.
 - No silent drops: events are ledgered before delivery attempts.
-- Binding resolution fallback: if no bindings exist, legacy global webhook fallback may apply (v0.1 compatibility).
+- Binding resolution: deliveries go only to configured bindings/targets; if no bindings exist, the source is not delivered.
 - Visibility: pending/delivering/delivered/failed states are queryable.
 
 What "guaranteed" does not mean:
@@ -47,7 +47,7 @@ Flow:
 3. Delivery worker polls pending entries.
 4. Bindings resolve source to one or more target endpoints.
 5. HTTP POST executes delivery.
-6. If no bindings exist, legacy global webhook fallback may be used.
+6. If no bindings exist, nothing is delivered until the source is bound to a target.
 
 Key constraint:
 

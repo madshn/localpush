@@ -9,6 +9,16 @@ export interface PropertyDef {
   privacy_sensitive: boolean;
 }
 
+export interface WindowSetting {
+  label: string;
+  description: string;
+  days: number;
+  default_days: number;
+  min_days: number;
+  max_days: number;
+  recommended_days: number[];
+}
+
 /**
  * Fetch configurable properties for a source
  */
@@ -17,6 +27,18 @@ export function useSourceProperties(sourceId: string) {
     queryKey: ["source-properties", sourceId],
     queryFn: async () => {
       return await invoke<PropertyDef[]>("get_source_properties", {
+        sourceId,
+      });
+    },
+    enabled: !!sourceId,
+  });
+}
+
+export function useSourceWindowSetting(sourceId: string) {
+  return useQuery<WindowSetting | null>({
+    queryKey: ["source-window", sourceId],
+    queryFn: async () => {
+      return await invoke<WindowSetting | null>("get_source_window_setting", {
         sourceId,
       });
     },
@@ -50,6 +72,36 @@ export function useSetSourceProperty() {
       // Invalidate the specific source's properties to refetch
       queryClient.invalidateQueries({
         queryKey: ["source-properties", variables.sourceId],
+      });
+    },
+  });
+}
+
+export function useSetSourceWindowDays() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      sourceId,
+      days,
+    }: {
+      sourceId: string;
+      days: number;
+    }) => {
+      await invoke("set_source_window_days", {
+        sourceId,
+        days,
+      });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ["source-window", variables.sourceId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["source-preview", variables.sourceId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["sources"],
       });
     },
   });

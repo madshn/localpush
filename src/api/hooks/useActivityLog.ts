@@ -106,7 +106,7 @@ export const useActivityLog = () => {
     queryFn: fetchDeliveryQueue,
     select: (queue): ActivityEntry[] =>
       sortByCreatedAtDesc(queue).map(transformToActivityEntry),
-    refetchInterval: () => visibleRefetchInterval(5000), // Poll every 5 seconds (visible only)
+    refetchInterval: () => visibleRefetchInterval(30_000),
   });
 };
 
@@ -116,6 +116,6 @@ export const useRecentActivityLog = (limit = 3) => {
     queryFn: fetchDeliveryQueue,
     select: (queue): ActivityEntry[] =>
       sortByCreatedAtDesc(queue).slice(0, limit).map(transformToActivityEntry),
-    refetchInterval: () => visibleRefetchInterval(5000),
+    refetchInterval: () => visibleRefetchInterval(30_000),
   });
 };

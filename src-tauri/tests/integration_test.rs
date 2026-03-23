@@ -2,23 +2,25 @@
 //!
 //! Tests the full flow: Source → File Event → Parse → Enqueue → Deliver
 
-use std::sync::Arc;
 use std::io::Write;
+use std::sync::Arc;
 use tempfile::NamedTempFile;
 
-use localpush_lib::bindings::BindingStore;
+use localpush_lib::bindings::{BindingStore, SourceBinding};
 use localpush_lib::config::AppConfig;
-use localpush_lib::delivery_worker::{self, WorkerConfig};
+use localpush_lib::delivery_worker;
+use localpush_lib::mocks::{InMemoryCredentialStore, ManualFileWatcher, RecordedWebhookClient};
 use localpush_lib::source_manager::SourceManager;
 use localpush_lib::sources::ClaudeStatsSource;
-use localpush_lib::mocks::{InMemoryCredentialStore, ManualFileWatcher, RecordedWebhookClient};
+use localpush_lib::traits::{DeliveryLedgerTrait, DeliveryStatus, FileWatcher};
 use localpush_lib::DeliveryLedger;
-use localpush_lib::traits::{DeliveryLedgerTrait, DeliveryStatus, WebhookAuth, FileWatcher};
 
 /// Create a temporary stats file with valid JSON
 fn create_stats_file() -> NamedTempFile {
     let mut file = NamedTempFile::new().unwrap();
-    write!(file, r#"{{
+    write!(
+        file,
+        r#"{{
         "version": 2,
         "lastComputedDate": "2026-02-04",
         "dailyActivity": [
@@ -40,7 +42,9 @@ fn create_stats_file() -> NamedTempFile {
         "totalSessions": 50,
         "totalMessages": 500,
         "hourCounts": {{"14": 100, "15": 200}}
-    }}"#).unwrap();
+    }}"#
+    )
+    .unwrap();
     file.flush().unwrap();
     file
 }
@@ -61,11 +65,37 @@ fn setup() -> (
     let config = Arc::new(AppConfig::open_in_memory().unwrap());
 
     let binding_store = Arc::new(localpush_lib::bindings::BindingStore::new(config.clone()));
-    let mgr = SourceManager::new(ledger.clone(), watcher.clone(), config.clone(), binding_store);
+    let mgr = SourceManager::new(
+        ledger.clone(),
+        watcher.clone(),
+        config.clone(),
+        binding_store,
+    );
     let source = Arc::new(ClaudeStatsSource::new_with_path(stats_file.path()));
     mgr.register(source);
 
     (ledger, watcher, webhook, config, mgr, stats_file)
+}
+
+fn add_on_change_binding(config: &Arc<AppConfig>, source_id: &str, url: &str) {
+    let binding_store = BindingStore::new(config.clone());
+    binding_store
+        .save(&SourceBinding {
+            source_id: source_id.to_string(),
+            target_id: "test-target".to_string(),
+            endpoint_id: "test-endpoint".to_string(),
+            endpoint_url: url.to_string(),
+            endpoint_name: "Test Endpoint".to_string(),
+            created_at: 1000,
+            active: true,
+            headers_json: None,
+            auth_credential_key: None,
+            delivery_mode: "on_change".to_string(),
+            schedule_time: None,
+            schedule_day: None,
+            last_scheduled_at: None,
+        })
+        .unwrap();
 }
 
 #[test]
@@ -73,6 +103,8 @@ fn test_full_pipeline_enable_event_deliver() {
     // Setup
     let (ledger, watcher, webhook, config, mgr, stats_file) = setup();
     let path = stats_file.path().to_path_buf();
+
+    add_on_change_binding(&config, "claude-stats", "https://example.com/hook");
 
     // 1. Enable source → watcher should be tracking the path
     mgr.enable("claude-stats").unwrap();
@@ -83,32 +115,46 @@ fn test_full_pipeline_enable_event_deliver() {
 
     // 3. Flush coalesced event → parse and enqueue
     let count = mgr.flush_source("claude-stats").unwrap();
-    assert_eq!(count, 1, "Flush should enqueue 1 entry (legacy fallback, no bindings)");
+    assert_eq!(count, 1, "Flush should enqueue 1 targeted entry");
     let stats = ledger.get_stats().unwrap();
     assert_eq!(stats.pending, 1, "Should have 1 pending entry after flush");
 
-    // 4. Configure webhook target
-    config.set("webhook_url", "https://example.com/hook").unwrap();
-    config.set("webhook_auth_json", r#"{"type":"none"}"#).unwrap();
-
-    // 5. Run delivery worker tick
+    // 4. Run delivery worker tick
     let binding_store = BindingStore::new(config.clone());
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let worker_config = delivery_worker::read_worker_config(&config).unwrap();
-        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&worker_config), &InMemoryCredentialStore::new(), None, None, 10).await;
+        delivery_worker::process_batch(
+            &*ledger,
+            &*webhook,
+            &binding_store,
+            &InMemoryCredentialStore::new(),
+            None,
+            None,
+            10,
+        )
+        .await;
     });
 
-    // 6. Verify webhook was called
-    assert_eq!(webhook.call_count(), 1, "Webhook should have been called once");
+    // 5. Verify webhook was called
+    assert_eq!(
+        webhook.call_count(),
+        1,
+        "Webhook should have been called once"
+    );
 
-    // 7. Verify payload contains Claude stats data
+    // 6. Verify payload contains Claude stats data
     let requests = webhook.requests();
     let payload = &requests[0].payload;
-    assert!(payload.get("metadata").is_some(), "Payload should have metadata");
-    assert!(payload.get("summary").is_some(), "Payload should have summary");
+    assert!(
+        payload.get("metadata").is_some(),
+        "Payload should have metadata"
+    );
+    assert!(
+        payload.get("summary").is_some(),
+        "Payload should have summary"
+    );
 
-    // 8. Verify ledger entry is delivered
+    // 7. Verify ledger entry is delivered
     let delivered = ledger.get_by_status(DeliveryStatus::Delivered).unwrap();
     assert_eq!(delivered.len(), 1, "Should have 1 delivered entry");
 }
@@ -117,10 +163,11 @@ fn test_full_pipeline_enable_event_deliver() {
 fn test_pipeline_retry_on_webhook_failure() {
     let (ledger, _watcher, _webhook_success, config, mgr, stats_file) = setup();
     let path = stats_file.path().to_path_buf();
+    add_on_change_binding(&config, "claude-stats", "https://example.com/hook");
 
     // Use a failing webhook instead
     let webhook_fail = Arc::new(RecordedWebhookClient::always_fail(
-        localpush_lib::traits::WebhookError::NetworkError("Connection refused".to_string())
+        localpush_lib::traits::WebhookError::NetworkError("Connection refused".to_string()),
     ));
 
     // Enable, trigger, and flush coalesced event
@@ -128,18 +175,20 @@ fn test_pipeline_retry_on_webhook_failure() {
     mgr.handle_file_event(&path).unwrap();
     mgr.flush_source("claude-stats").unwrap();
 
-    // Configure webhook
-    config.set("webhook_url", "https://example.com/hook").unwrap();
-
     // Run delivery → should fail
     let binding_store = BindingStore::new(config.clone());
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let worker_config = WorkerConfig {
-            webhook_url: "https://example.com/hook".to_string(),
-            webhook_auth: WebhookAuth::None,
-        };
-        delivery_worker::process_batch(&*ledger, &*webhook_fail, &binding_store, Some(&worker_config), &InMemoryCredentialStore::new(), None, None, 10).await;
+        delivery_worker::process_batch(
+            &*ledger,
+            &*webhook_fail,
+            &binding_store,
+            &InMemoryCredentialStore::new(),
+            None,
+            None,
+            10,
+        )
+        .await;
     });
 
     // Entry should be failed, not delivered
@@ -162,17 +211,24 @@ fn test_pipeline_disabled_source_ignores_events() {
     let result = mgr.handle_file_event(&path);
 
     // Based on source_manager.rs line 139-141, disabled sources are silently ignored
-    assert!(result.is_ok(), "Disabled source events should be silently ignored");
+    assert!(
+        result.is_ok(),
+        "Disabled source events should be silently ignored"
+    );
 
     // Ledger should be empty
     let stats = ledger.get_stats().unwrap();
-    assert_eq!(stats.pending, 0, "Should have 0 entries when source disabled");
+    assert_eq!(
+        stats.pending, 0,
+        "Should have 0 entries when source disabled"
+    );
 }
 
 #[test]
 fn test_pipeline_multiple_events_coalesce_to_single_delivery() {
     let (ledger, _watcher, webhook, config, mgr, stats_file) = setup();
     let path = stats_file.path().to_path_buf();
+    add_on_change_binding(&config, "claude-stats", "https://example.com/hook");
 
     mgr.enable("claude-stats").unwrap();
 
@@ -185,23 +241,26 @@ fn test_pipeline_multiple_events_coalesce_to_single_delivery() {
     let stats = ledger.get_stats().unwrap();
     assert_eq!(stats.pending, 0, "events should be buffered, not enqueued");
 
-    // Flush → parses once, enqueues once (no bindings = legacy fallback)
+    // Flush → parses once, enqueues once to the on_change binding
     let count = mgr.flush_source("claude-stats").unwrap();
     assert_eq!(count, 1, "3 events coalesce into 1 flush");
 
     let stats = ledger.get_stats().unwrap();
     assert_eq!(stats.pending, 1);
 
-    // Deliver
-    config.set("webhook_url", "https://example.com/hook").unwrap();
     let binding_store = BindingStore::new(config.clone());
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let worker_config = WorkerConfig {
-            webhook_url: "https://example.com/hook".to_string(),
-            webhook_auth: WebhookAuth::None,
-        };
-        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&worker_config), &InMemoryCredentialStore::new(), None, None, 10).await;
+        delivery_worker::process_batch(
+            &*ledger,
+            &*webhook,
+            &binding_store,
+            &InMemoryCredentialStore::new(),
+            None,
+            None,
+            10,
+        )
+        .await;
     });
 
     assert_eq!(webhook.call_count(), 1, "coalesced events → 1 delivery");
@@ -213,9 +272,13 @@ fn test_pipeline_multiple_events_coalesce_to_single_delivery() {
 fn test_orphan_recovery_then_redelivery() {
     let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
     let webhook = Arc::new(RecordedWebhookClient::success());
+    let app_config = Arc::new(AppConfig::open_in_memory().unwrap());
+    add_on_change_binding(&app_config, "orphan.event", "https://example.com/hook");
 
     // Enqueue and claim (simulating crash during delivery)
-    ledger.enqueue("orphan.event", serde_json::json!({"orphan": true})).unwrap();
+    ledger
+        .enqueue("orphan.event", serde_json::json!({"orphan": true}))
+        .unwrap();
     let entries = ledger.claim_batch(1).unwrap();
     assert_eq!(entries[0].status, DeliveryStatus::InFlight);
 
@@ -225,16 +288,20 @@ fn test_orphan_recovery_then_redelivery() {
     let _ = ledger.mark_failed(&entries[0].event_id, "Simulated crash recovery");
 
     // Now re-deliver
-    let app_config = Arc::new(AppConfig::open_in_memory().unwrap());
     let binding_store = BindingStore::new(app_config);
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let config = WorkerConfig {
-            webhook_url: "https://example.com/hook".to_string(),
-            webhook_auth: WebhookAuth::None,
-        };
         // Claim the failed entry (it's now eligible for retry)
-        delivery_worker::process_batch(&*ledger, &*webhook, &binding_store, Some(&config), &InMemoryCredentialStore::new(), None, None, 10).await;
+        delivery_worker::process_batch(
+            &*ledger,
+            &*webhook,
+            &binding_store,
+            &InMemoryCredentialStore::new(),
+            None,
+            None,
+            10,
+        )
+        .await;
     });
 
     // Note: The failed entry has available_at in the future due to backoff,

@@ -6,15 +6,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCategory {
-    AuthInvalid,          // 401
-    AuthMissing,          // 403
-    EndpointGone,         // 404
-    RateLimited,          // 429
-    TargetError,          // 500-599
-    Unreachable,          // Connection refused/reset
-    Timeout,              // Request timeout
-    AuthNotConfigured,    // Empty auth header
-    Unknown,              // Unclassifiable
+    AuthInvalid,       // 401
+    AuthMissing,       // 403
+    EndpointGone,      // 404
+    RateLimited,       // 429
+    TargetError,       // 500-599
+    Unreachable,       // Connection refused/reset
+    Timeout,           // Request timeout
+    AuthNotConfigured, // Empty auth header
+    Unknown,           // Unclassifiable
 }
 
 /// Structured diagnosis of a delivery failure with user-friendly guidance
@@ -180,7 +180,12 @@ mod tests {
 
     #[test]
     fn test_diagnose_429() {
-        let diagnosis = diagnose_error(Some(429), "Too Many Requests", "Claude Stats", "Metrick KPI");
+        let diagnosis = diagnose_error(
+            Some(429),
+            "Too Many Requests",
+            "Claude Stats",
+            "Metrick KPI",
+        );
         assert_eq!(diagnosis.category, ErrorCategory::RateLimited);
         assert!(diagnosis.user_message.contains("rate-limiting"));
         assert!(diagnosis.risk_summary.is_none()); // Temporary, auto-retries
@@ -188,7 +193,12 @@ mod tests {
 
     #[test]
     fn test_diagnose_500() {
-        let diagnosis = diagnose_error(Some(500), "Internal Server Error", "Claude Stats", "Metrick KPI");
+        let diagnosis = diagnose_error(
+            Some(500),
+            "Internal Server Error",
+            "Claude Stats",
+            "Metrick KPI",
+        );
         assert_eq!(diagnosis.category, ErrorCategory::TargetError);
         assert!(diagnosis.user_message.contains("internal error"));
         assert!(diagnosis.guidance.contains("LocalPush will retry"));
@@ -212,7 +222,12 @@ mod tests {
 
     #[test]
     fn test_diagnose_empty_auth() {
-        let diagnosis = diagnose_error(None, "Authorization header is empty", "Claude Stats", "Metrick KPI");
+        let diagnosis = diagnose_error(
+            None,
+            "Authorization header is empty",
+            "Claude Stats",
+            "Metrick KPI",
+        );
         assert_eq!(diagnosis.category, ErrorCategory::AuthNotConfigured);
         assert!(diagnosis.user_message.contains("Authentication not set up"));
         assert!(diagnosis.guidance.contains("binding config"));

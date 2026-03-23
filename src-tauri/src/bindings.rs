@@ -50,11 +50,22 @@ impl SourceBinding {
     pub fn build_delivered_to_json(&self, target_type: &str, base_url: &str) -> String {
         let target_url = match target_type {
             "google-sheets" => {
-                format!("https://docs.google.com/spreadsheets/d/{}", self.endpoint_id)
+                format!(
+                    "https://docs.google.com/spreadsheets/d/{}",
+                    self.endpoint_id
+                )
             }
             "n8n" => {
-                let workflow_id = self.endpoint_id.split(':').next().unwrap_or(&self.endpoint_id);
-                format!("{}/workflow/{}/executions", base_url.trim_end_matches('/'), workflow_id)
+                let workflow_id = self
+                    .endpoint_id
+                    .split(':')
+                    .next()
+                    .unwrap_or(&self.endpoint_id);
+                format!(
+                    "{}/workflow/{}/executions",
+                    base_url.trim_end_matches('/'),
+                    workflow_id
+                )
             }
             _ => self.endpoint_url.clone(),
         };
@@ -63,7 +74,8 @@ impl SourceBinding {
             "endpoint_name": self.endpoint_name,
             "target_type": target_type,
             "target_url": target_url,
-        }).to_string()
+        })
+        .to_string()
     }
 }
 
@@ -135,9 +147,9 @@ impl BindingStore {
     ) -> Result<(), String> {
         let key = format!("binding.{}.{}", source_id, endpoint_id);
         let json = self.config.get(&key).map_err(|e| e.to_string())?;
-        let json = json.ok_or_else(|| format!("Binding not found: {}.{}", source_id, endpoint_id))?;
-        let mut binding: SourceBinding =
-            serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        let json =
+            json.ok_or_else(|| format!("Binding not found: {}.{}", source_id, endpoint_id))?;
+        let mut binding: SourceBinding = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         binding.last_scheduled_at = Some(timestamp);
         self.save(&binding)
     }
@@ -214,9 +226,7 @@ mod tests {
         let store = BindingStore::new(config);
 
         store.save(&test_binding("claude-stats", "ep1")).unwrap();
-        store
-            .save(&test_binding("claude-sessions", "ep2"))
-            .unwrap();
+        store.save(&test_binding("claude-sessions", "ep2")).unwrap();
 
         let all = store.list_all();
         assert_eq!(all.len(), 2);
@@ -255,10 +265,14 @@ mod tests {
         let loaded = store.get_for_source("claude-stats");
         assert_eq!(loaded.len(), 1);
         assert!(loaded[0].headers_json.is_some());
-        assert_eq!(loaded[0].auth_credential_key.as_deref(), Some("binding:claude-stats:ep1"));
+        assert_eq!(
+            loaded[0].auth_credential_key.as_deref(),
+            Some("binding:claude-stats:ep1")
+        );
 
         // Verify headers deserialize correctly
-        let parsed: Vec<(String, String)> = serde_json::from_str(loaded[0].headers_json.as_ref().unwrap()).unwrap();
+        let parsed: Vec<(String, String)> =
+            serde_json::from_str(loaded[0].headers_json.as_ref().unwrap()).unwrap();
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].0, "Authorization");
         assert_eq!(parsed[1].1, "value");

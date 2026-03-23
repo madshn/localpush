@@ -8,6 +8,7 @@ interface Target {
   id: string;
   name: string;
   target_type: string;
+  base_url?: string | null;
 }
 
 interface TargetInfo {
@@ -71,6 +72,35 @@ export function useConnectN8n() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['targets'] });
+    },
+  });
+}
+
+export function useUpdateN8n() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    { target_id: string; status: string; resumed_count: number; target_info: TargetInfo },
+    Error,
+    { targetId: string; instanceUrl: string; apiKey: string }
+  >({
+    mutationFn: async ({ targetId, instanceUrl, apiKey }) => {
+      logger.debug('Updating n8n target', { targetId, instanceUrl });
+      const result = await invoke<{ target_id: string; status: string; resumed_count: number; target_info: TargetInfo }>(
+        'update_n8n_target',
+        {
+          targetId,
+          instanceUrl,
+          apiKey,
+        }
+      );
+      logger.debug('n8n target updated', { targetId, resumed: result.resumed_count });
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['targets'] });
+      queryClient.invalidateQueries({ queryKey: ['target-health'] });
+      queryClient.invalidateQueries({ queryKey: ['deliveryStatus'] });
     },
   });
 }
@@ -176,7 +206,7 @@ export function useReauthGoogleSheets() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['targets'] });
       queryClient.invalidateQueries({ queryKey: ['target-health'] });
-      queryClient.invalidateQueries({ queryKey: ['delivery-status'] });
+      queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
       toast.success('Re-authenticated successfully');
     },
     onError: (error) => {
@@ -282,7 +312,7 @@ export function useTargetHealth() {
       const health = await invoke<TargetHealth[]>('get_target_health');
       return health;
     },
-    refetchInterval: () => visibleRefetchInterval(5000),
+    refetchInterval: () => visibleRefetchInterval(30_000),
   });
 }
 
@@ -304,7 +334,7 @@ export function useReconnectTarget() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['target-health'] });
-      queryClient.invalidateQueries({ queryKey: ['delivery-status'] });
+      queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
       toast.success('Target reconnected');
     },
     onError: (error) => {

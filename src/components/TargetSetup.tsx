@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Webhook, Bell, Plus, X, Zap, Cog, Table, Globe } from "lucide-react";
+import { Webhook, Bell, Plus, X, Zap, Cog, Table, Globe, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { signIn } from "@choochmeque/tauri-plugin-google-auth-api";
 import { useTargets, useTestTargetConnection, useReauthGoogleSheets } from "../api/hooks/useTargets";
@@ -24,17 +24,21 @@ export function TargetSetup() {
   const [testingTargetId, setTestingTargetId] = useState<string | null>(null);
   const [reauthTargetId, setReauthTargetId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingTargetId, setEditingTargetId] = useState<string | null>(null);
   const { data: targets, isLoading } = useTargets();
   const testMutation = useTestTargetConnection();
   const reauthMutation = useReauthGoogleSheets();
 
   const handleTargetConnected = (targetInfo: TargetInfo) => {
+    const isEditing = editingTargetId === targetInfo.id;
     logger.info("Target connected successfully", {
       targetId: targetInfo.id,
       type: targetInfo.target_type,
+      mode: isEditing ? "update" : "create",
     });
-    toast.success("Target connected");
+    toast.success(isEditing ? "Target updated" : "Target connected");
     setShowAddForm(false);
+    setEditingTargetId(null);
   };
 
   const [failedTargets, setFailedTargets] = useState<Record<string, string>>({});
@@ -151,16 +155,35 @@ export function TargetSetup() {
                   <div className="text-xs font-medium truncate">
                     {target.name}
                   </div>
+                  {target.base_url && (
+                    <div className="text-[10px] text-text-secondary truncate mt-0.5">
+                      {target.base_url}
+                    </div>
+                  )}
                   <span
                     className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
                       target.target_type === "n8n"
                         ? "bg-accent-muted text-accent"
                         : "bg-success-bg text-success"
                     }`}
-                  >
-                    {target.target_type}
-                  </span>
+                    >
+                      {target.target_type}
+                    </span>
                 </div>
+                {target.target_type === "n8n" && (
+                  <button
+                    className="text-xs font-medium px-2.5 py-1 rounded bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
+                    onClick={() => {
+                      setEditingTargetId((current) => current === target.id ? null : target.id);
+                      setShowAddForm(false);
+                    }}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Pencil size={12} />
+                      {editingTargetId === target.id ? "Close" : "Edit"}
+                    </span>
+                  </button>
+                )}
                 <button
                   className="text-xs font-medium px-2.5 py-1 rounded bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors disabled:opacity-50"
                   onClick={() => handleTestConnection(target.id)}
@@ -181,6 +204,21 @@ export function TargetSetup() {
                       {reauthTargetId === target.id ? "Re-authenticating..." : "Re-authenticate with Google"}
                     </button>
                   )}
+                </div>
+              )}
+              {target.target_type === "n8n" && editingTargetId === target.id && (
+                <div className="mx-3 mb-2 -mt-1 p-3 bg-bg-secondary border border-border rounded-md">
+                  <div className="text-[11px] font-medium text-text-secondary uppercase tracking-wide mb-2">
+                    Edit n8n Connection
+                  </div>
+                  <N8nConnect
+                    targetId={target.id}
+                    initialInstanceUrl={target.base_url || ""}
+                    submitLabel="Save and reconnect"
+                    successLabel="n8n target updated"
+                    onCancel={() => setEditingTargetId(null)}
+                    onConnected={handleTargetConnected}
+                  />
                 </div>
               )}
             </React.Fragment>

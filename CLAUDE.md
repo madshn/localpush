@@ -112,7 +112,7 @@ Don't struggle alone. Call the farm when stuck.
 | **Crash-safe** | SQLite WAL mode — writes survive app crashes mid-delivery |
 | **Retry on failure** | Failed deliveries stay in ledger, retried on next poll cycle (5s) |
 | **No silent drops** | Every source event is ledgered before any delivery attempt |
-| **Binding resolution** | If no bindings exist, falls back to legacy global webhook (v0.1 compat) |
+| **Binding resolution** | Deliveries go only to configured bindings/targets; if no bindings exist, nothing is delivered |
 | **Visibility** | Every delivery state (pending → delivering → delivered/failed) is queryable |
 
 **What "guaranteed" does NOT mean:**
@@ -174,7 +174,7 @@ apple-photos ──────┘
 2. **DeliveryWorker polls** (every 5s) → picks up pending entries
 3. **Binding resolution** → looks up bindings for source_id → gets target endpoints
 4. **HTTP POST** → sends to each bound endpoint
-5. **Fallback** → if no bindings, tries legacy global webhook (v0.1 compat)
+5. **Unbound sources** → if no bindings exist, the source is skipped until it is bound to a target
 
 For implementation details, read `src-tauri/CLAUDE.md`. For frontend patterns, read `src/CLAUDE.md`.
 

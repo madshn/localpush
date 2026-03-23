@@ -5,14 +5,15 @@ use tauri::{AppHandle, Manager};
 
 use crate::bindings::BindingStore;
 use crate::config::AppConfig;
-use crate::source_manager::SourceManager;
-use crate::target_health::TargetHealthTracker;
-use crate::target_manager::TargetManager;
-use crate::traits::{CredentialStore, FileWatcher, WebhookClient, DeliveryLedgerTrait};
+use crate::ledger::DeliveryLedger;
 #[cfg(not(debug_assertions))]
 use crate::production::KeychainCredentialStore;
 use crate::production::{FsEventsWatcher, ReqwestWebhookClient};
-use crate::ledger::DeliveryLedger;
+use crate::source_manager::SourceManager;
+use crate::sources::desktop_activity::SharedDesktopActivityState;
+use crate::target_health::TargetHealthTracker;
+use crate::target_manager::TargetManager;
+use crate::traits::{CredentialStore, DeliveryLedgerTrait, FileWatcher, WebhookClient};
 
 /// Application state containing all dependencies
 pub struct AppState {
@@ -25,6 +26,7 @@ pub struct AppState {
     pub binding_store: Arc<BindingStore>,
     pub config: Arc<AppConfig>,
     pub health_tracker: Arc<TargetHealthTracker>,
+    pub desktop_activity_state: SharedDesktopActivityState,
 }
 
 impl AppState {
@@ -41,23 +43,18 @@ impl AppState {
 
         let config_path = app_data_dir.join("config.sqlite");
         tracing::info!(path = %config_path.display(), "Opening config database");
-        let config_conn = rusqlite::Connection::open(&config_path)?;
-        AppConfig::init_table(&config_conn)?;
-        let config = Arc::new(AppConfig::from_connection(config_conn));
-
-        // Set default webhook if not configured
-        if config.get("webhook_url").ok().flatten().is_none() {
-            tracing::info!("Setting default webhook URL");
-            let _ = config.set("webhook_url", "https://flow.rightaim.ai/webhook/localpush-ingest");
-            let _ = config.set("webhook_auth_json", r#"{"type":"none"}"#);
-        }
+        let config = Arc::new(AppConfig::open(&config_path)?);
 
         #[cfg(debug_assertions)]
         let credentials: Arc<dyn CredentialStore> = {
             let cred_path = app_data_dir.join("dev-credentials.json");
 
             // Seed dev credentials from Keychain vault on first dev launch (one prompt, once)
-            if !cred_path.exists() || std::fs::metadata(&cred_path).map(|m| m.len() <= 2).unwrap_or(true) {
+            if !cred_path.exists()
+                || std::fs::metadata(&cred_path)
+                    .map(|m| m.len() <= 2)
+                    .unwrap_or(true)
+            {
                 if let Ok(entry) = keyring::Entry::new("com.localpush.app", "__vault__") {
                     match entry.get_password() {
                         Ok(json) => {
@@ -67,7 +64,9 @@ impl AppState {
                                 tracing::info!("Seeded dev credentials from Keychain vault");
                             }
                         }
-                        Err(e) => tracing::debug!(error = %e, "No Keychain vault to seed from (expected on first install)"),
+                        Err(e) => {
+                            tracing::debug!(error = %e, "No Keychain vault to seed from (expected on first install)")
+                        }
                     }
                 }
             }
@@ -120,18 +119,27 @@ impl AppState {
                         tracing::debug!(target_id = %tid, cred_key = %cred_key, result = ?cred_result, "n8n credential lookup");
                         match cred_result {
                             Ok(Some(api_key)) if !api_key.is_empty() => {
-                                let target = crate::targets::N8nTarget::new(tid.clone(), url, api_key);
+                                let target =
+                                    crate::targets::N8nTarget::new(tid.clone(), url, api_key);
                                 target_manager.register(Arc::new(target));
                                 tracing::info!(target_id = %tid, "Restored n8n target");
                             }
-                            Ok(Some(_)) => tracing::warn!(target_id = %tid, "n8n API key is empty in keychain"),
-                            Ok(None) => tracing::warn!(target_id = %tid, "n8n API key not found in keychain — target skipped"),
-                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve n8n API key from keychain"),
+                            Ok(Some(_)) => {
+                                tracing::warn!(target_id = %tid, "n8n API key is empty in keychain")
+                            }
+                            Ok(None) => {
+                                tracing::warn!(target_id = %tid, "n8n API key not found in keychain — target skipped")
+                            }
+                            Err(e) => {
+                                tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve n8n API key from keychain")
+                            }
                         }
                     }
                     "ntfy" => {
                         let mut target = crate::targets::NtfyTarget::new(tid.clone(), url);
-                        if let Some(topic) = config.get(&format!("target.{}.topic", tid)).ok().flatten() {
+                        if let Some(topic) =
+                            config.get(&format!("target.{}.topic", tid)).ok().flatten()
+                        {
                             target = target.with_topic(topic);
                         }
                         if let Ok(Some(token)) = credentials.retrieve(&format!("ntfy:{}", tid)) {
@@ -148,52 +156,92 @@ impl AppState {
                         tracing::debug!(target_id = %tid, cred_key = %cred_key, result = ?cred_result, "Make.com credential lookup");
                         match cred_result {
                             Ok(Some(api_key)) if !api_key.is_empty() => {
-                                let team_id = config.get(&format!("target.{}.team_id", tid)).ok().flatten();
-                                let target = crate::targets::MakeTarget::new(tid.clone(), url, api_key, team_id);
+                                let team_id = config
+                                    .get(&format!("target.{}.team_id", tid))
+                                    .ok()
+                                    .flatten();
+                                let target = crate::targets::MakeTarget::new(
+                                    tid.clone(),
+                                    url,
+                                    api_key,
+                                    team_id,
+                                );
                                 target_manager.register(Arc::new(target));
                                 tracing::info!(target_id = %tid, "Restored Make.com target");
                             }
-                            Ok(Some(_)) => tracing::warn!(target_id = %tid, "Make.com API key is empty in keychain"),
-                            Ok(None) => tracing::warn!(target_id = %tid, "Make.com API key not found in keychain — target skipped"),
-                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve Make.com API key from keychain"),
+                            Ok(Some(_)) => {
+                                tracing::warn!(target_id = %tid, "Make.com API key is empty in keychain")
+                            }
+                            Ok(None) => {
+                                tracing::warn!(target_id = %tid, "Make.com API key not found in keychain — target skipped")
+                            }
+                            Err(e) => {
+                                tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve Make.com API key from keychain")
+                            }
                         }
                     }
                     "zapier" => {
-                        let name = config.get(&format!("target.{}.name", tid)).ok().flatten().unwrap_or_else(|| "Zapier Webhook".to_string());
+                        let name = config
+                            .get(&format!("target.{}.name", tid))
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| "Zapier Webhook".to_string());
                         match crate::targets::ZapierTarget::new(tid.clone(), name, url) {
                             Ok(target) => {
                                 target_manager.register(Arc::new(target));
                                 tracing::info!(target_id = %tid, "Restored Zapier target");
                             }
-                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to restore Zapier target"),
+                            Err(e) => {
+                                tracing::warn!(target_id = %tid, error = %e, "Failed to restore Zapier target")
+                            }
                         }
                     }
                     "google-sheets" => {
                         let cred_key = format!("google-sheets:{}", tid);
                         match credentials.retrieve(&cred_key) {
                             Ok(Some(tokens_json)) => {
-                                match serde_json::from_str::<crate::targets::google_sheets::GoogleTokens>(&tokens_json) {
+                                match serde_json::from_str::<
+                                    crate::targets::google_sheets::GoogleTokens,
+                                >(&tokens_json)
+                                {
                                     Ok(tokens) => {
-                                        let email = config.get(&format!("target.{}.email", tid))
-                                            .ok().flatten().unwrap_or_default();
+                                        let email = config
+                                            .get(&format!("target.{}.email", tid))
+                                            .ok()
+                                            .flatten()
+                                            .unwrap_or_default();
                                         let target = crate::targets::GoogleSheetsTarget::new(
-                                            tid.clone(), email, tokens,
+                                            tid.clone(),
+                                            email,
+                                            tokens,
                                         );
                                         target_manager.register(Arc::new(target));
                                         tracing::info!(target_id = %tid, "Restored Google Sheets target");
                                     }
-                                    Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to parse Google Sheets tokens"),
+                                    Err(e) => {
+                                        tracing::warn!(target_id = %tid, error = %e, "Failed to parse Google Sheets tokens")
+                                    }
                                 }
                             }
-                            Ok(None) => tracing::warn!(target_id = %tid, "Google Sheets tokens not found — target skipped"),
-                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve Google Sheets tokens"),
+                            Ok(None) => {
+                                tracing::warn!(target_id = %tid, "Google Sheets tokens not found — target skipped")
+                            }
+                            Err(e) => {
+                                tracing::warn!(target_id = %tid, error = %e, "Failed to retrieve Google Sheets tokens")
+                            }
                         }
                     }
                     "custom" => {
-                        let name = config.get(&format!("target.{}.name", tid))
-                            .ok().flatten().unwrap_or_else(|| "Custom Webhook".to_string());
-                        let auth_type_str = config.get(&format!("target.{}.auth_type", tid))
-                            .ok().flatten().unwrap_or_else(|| "none".to_string());
+                        let name = config
+                            .get(&format!("target.{}.name", tid))
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| "Custom Webhook".to_string());
+                        let auth_type_str = config
+                            .get(&format!("target.{}.auth_type", tid))
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| "none".to_string());
 
                         // Reconstruct auth from config + credentials
                         let auth = match auth_type_str.as_str() {
@@ -210,10 +258,14 @@ impl AppState {
                                 }
                             }
                             "header" => {
-                                let header_name = config.get(&format!("target.{}.auth_header_name", tid))
-                                    .ok().flatten();
-                                let header_value = credentials.retrieve(&format!("custom:{}:header_value", tid))
-                                    .ok().flatten();
+                                let header_name = config
+                                    .get(&format!("target.{}.auth_header_name", tid))
+                                    .ok()
+                                    .flatten();
+                                let header_value = credentials
+                                    .retrieve(&format!("custom:{}:header_value", tid))
+                                    .ok()
+                                    .flatten();
 
                                 match (header_name, header_value) {
                                     (Some(name), Some(value)) if !value.is_empty() => {
@@ -226,10 +278,14 @@ impl AppState {
                                 }
                             }
                             "basic" => {
-                                let username = config.get(&format!("target.{}.auth_username", tid))
-                                    .ok().flatten();
-                                let password = credentials.retrieve(&format!("custom:{}:password", tid))
-                                    .ok().flatten();
+                                let username = config
+                                    .get(&format!("target.{}.auth_username", tid))
+                                    .ok()
+                                    .flatten();
+                                let password = credentials
+                                    .retrieve(&format!("custom:{}:password", tid))
+                                    .ok()
+                                    .flatten();
 
                                 match (username, password) {
                                     (Some(username), Some(password)) if !password.is_empty() => {
@@ -252,10 +308,14 @@ impl AppState {
                                 target_manager.register(Arc::new(target));
                                 tracing::info!(target_id = %tid, "Restored custom target");
                             }
-                            Err(e) => tracing::warn!(target_id = %tid, error = %e, "Failed to restore custom target"),
+                            Err(e) => {
+                                tracing::warn!(target_id = %tid, error = %e, "Failed to restore custom target")
+                            }
                         }
                     }
-                    _ => tracing::warn!(target_id = %tid, target_type = %ttype, "Unknown target type"),
+                    _ => {
+                        tracing::warn!(target_id = %tid, target_type = %ttype, "Unknown target type")
+                    }
                 }
             }
         }
@@ -264,9 +324,12 @@ impl AppState {
         credentials.flush_vault();
 
         // Register sources
-        use crate::sources::{ClaudeStatsSource, ClaudeSessionsSource, CodexSessionsSource, CodexStatsSource, ApplePodcastsSource, AppleNotesSource, ApplePhotosSource, DesktopActivitySource};
+        use crate::sources::{
+            AppleNotesSource, ApplePhotosSource, ApplePodcastsSource, ClaudeSessionsSource,
+            ClaudeStatsSource, CodexSessionsSource, CodexStatsSource, DesktopActivitySource,
+        };
 
-        match ClaudeStatsSource::new() {
+        match ClaudeStatsSource::new(config.clone()) {
             Ok(source) => {
                 tracing::info!("Registered ClaudeStatsSource");
                 source_manager.register(Arc::new(source));
@@ -275,7 +338,7 @@ impl AppState {
         }
 
         // Register Claude Sessions source
-        match ClaudeSessionsSource::new() {
+        match ClaudeSessionsSource::new(config.clone()) {
             Ok(source) => {
                 tracing::info!("Registered ClaudeSessionsSource");
                 source_manager.register(Arc::new(source));
@@ -284,7 +347,7 @@ impl AppState {
         }
 
         // Register Codex Sessions source
-        match CodexSessionsSource::new() {
+        match CodexSessionsSource::new(config.clone()) {
             Ok(source) => {
                 tracing::info!("Registered CodexSessionsSource");
                 source_manager.register(Arc::new(source));
@@ -293,7 +356,7 @@ impl AppState {
         }
 
         // Register Codex Stats source
-        match CodexStatsSource::new() {
+        match CodexStatsSource::new(config.clone()) {
             Ok(source) => {
                 tracing::info!("Registered CodexStatsSource");
                 source_manager.register(Arc::new(source));
@@ -325,16 +388,23 @@ impl AppState {
         }
 
         // Register Desktop Activity source (non-file, polled by worker)
-        let desktop_activity = DesktopActivitySource::new();
+        let desktop_activity = Arc::new(DesktopActivitySource::new());
+        let desktop_activity_state = desktop_activity.shared_state();
         tracing::info!("Registered DesktopActivitySource");
-        source_manager.register(Arc::new(desktop_activity));
+        source_manager.register(desktop_activity);
 
         // Restore enabled sources from config
         let restored = source_manager.restore_enabled();
         tracing::info!(restored_count = restored.len(), "Restored enabled sources");
 
         // Auto-enable Claude stats on first launch
-        if restored.is_empty() && config.get("source.claude-stats.enabled").ok().flatten().is_none() {
+        if restored.is_empty()
+            && config
+                .get("source.claude-stats.enabled")
+                .ok()
+                .flatten()
+                .is_none()
+        {
             tracing::info!("First launch: auto-enabling Claude Code stats source");
             let _ = source_manager.enable("claude-stats");
         }
@@ -351,6 +421,7 @@ impl AppState {
             binding_store,
             config,
             health_tracker,
+            desktop_activity_state,
         })
     }
 
@@ -358,8 +429,8 @@ impl AppState {
     #[cfg(test)]
     pub fn new_test() -> Self {
         use crate::mocks::{InMemoryCredentialStore, ManualFileWatcher, RecordedWebhookClient};
-        use crate::DeliveryLedger;
         use crate::sources::ClaudeStatsSource;
+        use crate::DeliveryLedger;
 
         let credentials = Arc::new(InMemoryCredentialStore::new());
         let file_watcher = Arc::new(ManualFileWatcher::new());
@@ -370,6 +441,9 @@ impl AppState {
         let target_manager = Arc::new(TargetManager::new(config.clone()));
         let binding_store = Arc::new(BindingStore::new(config.clone()));
         let health_tracker = Arc::new(TargetHealthTracker::new());
+        let desktop_activity_state = Arc::new(std::sync::Mutex::new(
+            crate::sources::desktop_activity::DesktopActivityState::new(),
+        ));
 
         let source_manager = Arc::new(SourceManager::new(
             ledger.clone(),
@@ -379,11 +453,13 @@ impl AppState {
         ));
 
         // Register test source
-        match ClaudeStatsSource::new() {
+        match ClaudeStatsSource::new(config.clone()) {
             Ok(source) => source_manager.register(Arc::new(source)),
             Err(_) => {
                 // In tests, use a custom path
-                source_manager.register(Arc::new(ClaudeStatsSource::new_with_path("/tmp/fake-stats.json")))
+                source_manager.register(Arc::new(ClaudeStatsSource::new_with_path(
+                    "/tmp/fake-stats.json",
+                )))
             }
         }
 
@@ -397,6 +473,7 @@ impl AppState {
             binding_store,
             config,
             health_tracker,
+            desktop_activity_state,
         }
     }
 }

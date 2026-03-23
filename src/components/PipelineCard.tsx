@@ -2,6 +2,7 @@ import { memo, useState } from "react";
 import { Plus, Pencil, Info, X, Zap, SlidersHorizontal, AlertTriangle, RefreshCw } from "lucide-react";
 import type { Binding } from "../api/hooks/useBindings";
 import type { TargetHealth } from "../api/hooks/useTargets";
+import type { TrafficLightStatus } from "./pipeline/types";
 import { TransparencyPreview } from "./TransparencyPreview";
 import { EndpointPicker } from "./EndpointPicker";
 import { SecurityCoaching } from "./SecurityCoaching";
@@ -59,8 +60,9 @@ interface PipelineCardProps {
   bindings: Binding[];
   targetHealth: TargetHealth[];
   flowState: FlowState;
+  nextPushLabel: string | null;
   previewLoading: boolean;
-  trafficLightStatus: "green" | "yellow" | "red" | "grey";
+  trafficLightStatus: TrafficLightStatus;
   onEnableClick: (sourceId: string, isEnabled: boolean) => void;
   onPreviewEnable: (sourceId: string) => void;
   onPreviewRefresh: (sourceId: string) => void;
@@ -91,6 +93,7 @@ interface PipelineCardProps {
   onAddTarget: (sourceId: string) => void;
   onEditBinding: (sourceId: string, endpointId: string) => void;
   isPushing: boolean;
+  isLoading?: boolean;
 }
 
 const statusConfig = {
@@ -106,6 +109,12 @@ const statusConfig = {
     badgeClass: "bg-warning-bg text-warning",
     pulse: false,
   },
+  orange: {
+    stripe: "bg-warning",
+    badge: "Blocked",
+    badgeClass: "bg-warning-bg text-warning",
+    pulse: false,
+  },
   red: {
     stripe: "bg-error",
     badge: "Error",
@@ -114,7 +123,7 @@ const statusConfig = {
   },
   grey: {
     stripe: "bg-text-secondary/30",
-    badge: "Paused",
+    badge: "Idle",
     badgeClass: "bg-bg-tertiary text-text-secondary",
     pulse: false,
   },
@@ -144,6 +153,7 @@ function PipelineCardComponent({
   bindings,
   targetHealth,
   flowState,
+  nextPushLabel,
   previewLoading,
   trafficLightStatus,
   onEnableClick,
@@ -160,6 +170,7 @@ function PipelineCardComponent({
   onAddTarget,
   onEditBinding,
   isPushing,
+  isLoading = false,
 }: PipelineCardProps) {
   // reconnect navigates to Settings tab via custom event (no mutation needed here)
   const [showInfo, setShowInfo] = useState(false);
@@ -183,6 +194,9 @@ function PipelineCardComponent({
   const isAvailable = category === "available";
   const isPaused = category === "paused";
   const isFlowActive = flowState.step !== "idle";
+  const badgeLabel = isPaused ? "Paused" : status.badge;
+  const badgeClass = isPaused ? "bg-bg-tertiary text-text-secondary" : status.badgeClass;
+  const showPulse = !isPaused && status.pulse;
 
   const handleEnableDisable = () => {
     if (source.enabled) {
@@ -212,12 +226,12 @@ function PipelineCardComponent({
               <h3 className="text-sm font-semibold truncate">{source.name}</h3>
               {!isAvailable && (
                 <span
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${status.badgeClass}`}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${badgeClass}`}
                 >
-                  {status.pulse && (
+                  {showPulse && (
                     <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
                   )}
-                  {status.badge}
+                  {badgeLabel}
                 </span>
               )}
               {category === "active" && (() => {
@@ -268,10 +282,13 @@ function PipelineCardComponent({
                 </button>
               )}
             </div>
+            {nextPushLabel && (
+              <p className="text-[11px] text-text-secondary mb-1">{nextPushLabel}</p>
+            )}
             <p className="text-xs text-text-secondary">{source.description}</p>
           </div>
           <button
-            className={`ml-3 shrink-0 text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${
+            className={`ml-3 shrink-0 text-xs font-medium px-3 py-1.5 rounded-md transition-colors disabled:opacity-50 ${
               source.enabled
                 ? "bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover"
                 : isAvailable
@@ -279,8 +296,9 @@ function PipelineCardComponent({
                   : "bg-accent text-white hover:bg-accent/90"
             }`}
             onClick={handleEnableDisable}
+            disabled={isLoading}
           >
-            {source.enabled ? "Disable" : "Configure"}
+            {isLoading ? "..." : source.enabled ? "Disable" : "Configure"}
           </button>
         </div>
 
@@ -584,9 +602,11 @@ function areEqual(prev: PipelineCardProps, next: PipelineCardProps) {
     prev.bindings === next.bindings &&
     prev.targetHealth === next.targetHealth &&
     prev.flowState === next.flowState &&
+    prev.nextPushLabel === next.nextPushLabel &&
     prev.previewLoading === next.previewLoading &&
     prev.trafficLightStatus === next.trafficLightStatus &&
-    prev.isPushing === next.isPushing
+    prev.isPushing === next.isPushing &&
+    prev.isLoading === next.isLoading
   );
 }
 

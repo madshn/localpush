@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Loader2 } from "lucide-react";
 import { useSources } from "../api/hooks/useSources";
@@ -11,6 +11,7 @@ import {
 import { useTargetHealth } from "../api/hooks/useTargets";
 import { SummaryStats } from "./SummaryStats";
 import { PipelineCard } from "./PipelineCard";
+import { formatNextPushLabel, getNextPushBySource } from "./pipeline/scheduling";
 import { usePipelineFlow } from "./pipeline/usePipelineFlow";
 import type {
   SourceData,
@@ -59,6 +60,12 @@ export function PipelineView() {
   const queryClient = useQueryClient();
   const createBinding = useCreateBinding();
   const removeBinding = useRemoveBinding();
+  const [scheduleNowMs, setScheduleNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setScheduleNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const flow = usePipelineFlow({
     sources,
@@ -83,6 +90,11 @@ export function PipelineView() {
     }
     return map;
   }, [allBindings]);
+
+  const nextPushBySource = useMemo(
+    () => getNextPushBySource(allBindings || [], scheduleNowMs),
+    [allBindings, scheduleNowMs]
+  );
 
   if (isLoading) {
     const step = sourcesLoading ? 0 : 1;
@@ -145,6 +157,7 @@ export function PipelineView() {
       bindings={bindingsBySource.get(source.id) || []}
       targetHealth={targetHealth || []}
       flowState={flow.getFlowState(source.id)}
+      nextPushLabel={formatNextPushLabel(nextPushBySource.get(source.id), scheduleNowMs)}
       previewLoading={flow.previewLoading[source.id] || false}
       trafficLightStatus={flow.getTrafficLightStatus(
         source.id,
@@ -164,6 +177,11 @@ export function PipelineView() {
       onAddTarget={flow.handleAddTarget}
       onEditBinding={flow.handleEditBinding}
       isPushing={flow.pushingSource === source.id}
+      isLoading={
+        flow.isEnabling === source.id ||
+        flow.isDisabling === source.id ||
+        flow.isConfirming === source.id
+      }
     />
   );
 

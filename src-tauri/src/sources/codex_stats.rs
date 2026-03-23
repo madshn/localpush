@@ -1,9 +1,11 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
-use crate::source_config::PropertyDef;
+use crate::config::AppConfig;
+use crate::source_config::{window_setting_for_source, PropertyDef, SourceConfigStore};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::codex_sessions::{collect_codex_sessions, CodexTokenUsage};
 
@@ -21,16 +23,18 @@ fn format_number(n: u64) -> String {
 #[derive(Clone)]
 pub struct CodexStatsSource {
     sessions_root: PathBuf,
+    config: Option<Arc<AppConfig>>,
     reference_now: Option<DateTime<Utc>>,
 }
 
 impl CodexStatsSource {
-    pub fn new() -> Result<Self, SourceError> {
+    pub fn new(config: Arc<AppConfig>) -> Result<Self, SourceError> {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .map_err(|_| SourceError::ParseError("Could not determine home directory".into()))?;
         Ok(Self {
             sessions_root: PathBuf::from(home).join(".codex").join("sessions"),
+            config: Some(config),
             reference_now: None,
         })
     }
@@ -38,6 +42,7 @@ impl CodexStatsSource {
     pub fn new_with_path(path: impl Into<PathBuf>) -> Self {
         Self {
             sessions_root: path.into(),
+            config: None,
             reference_now: None,
         }
     }
@@ -46,12 +51,35 @@ impl CodexStatsSource {
     pub fn new_with_path_and_now(path: impl Into<PathBuf>, reference_now: DateTime<Utc>) -> Self {
         Self {
             sessions_root: path.into(),
+            config: None,
+            reference_now: Some(reference_now),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_with_path_config_and_now(
+        path: impl Into<PathBuf>,
+        config: Arc<AppConfig>,
+        reference_now: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            sessions_root: path.into(),
+            config: Some(config),
             reference_now: Some(reference_now),
         }
     }
 
     fn now(&self) -> DateTime<Utc> {
         self.reference_now.unwrap_or_else(Utc::now)
+    }
+
+    fn window_days(&self) -> i64 {
+        let Some(config) = &self.config else {
+            return 1;
+        };
+        let def = window_setting_for_source(self.id())
+            .expect("codex-stats should have a window setting definition");
+        SourceConfigStore::new(config.clone()).get_window_days(self.id(), &def)
     }
 }
 
@@ -74,10 +102,15 @@ impl Source for CodexStatsSource {
 
     fn parse(&self) -> Result<Value, SourceError> {
         let sessions = collect_codex_sessions(&self.sessions_root, None);
+        let window_days = self.window_days();
+        let today = self.now().date_naive();
+        let window_start = today - Duration::days(window_days);
+        let window_end = today;
 
         let mut day_totals: BTreeMap<String, CodexTokenUsage> = BTreeMap::new();
         let mut day_session_counts: BTreeMap<String, u64> = BTreeMap::new();
         let mut models_observed_for_day: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut sessions_in_window: BTreeSet<String> = BTreeSet::new();
 
         for session in &sessions {
             let mut prev_total = CodexTokenUsage::default();
@@ -87,8 +120,15 @@ impl Source for CodexStatsSource {
                 prev_total = snap.total_usage.clone();
 
                 let day = snap.timestamp.date_naive().format("%Y-%m-%d").to_string();
-                day_totals.entry(day.clone()).or_default().add_assign(&delta);
+                day_totals
+                    .entry(day.clone())
+                    .or_default()
+                    .add_assign(&delta);
                 seen_days_for_session.insert(day.clone());
+                let snap_day = snap.timestamp.date_naive();
+                if snap_day >= window_start && snap_day < window_end {
+                    sessions_in_window.insert(session.id.clone());
+                }
 
                 if let Some(model) = &session.model {
                     models_observed_for_day
@@ -102,40 +142,47 @@ impl Source for CodexStatsSource {
             }
         }
 
-        let target_day: NaiveDate = self.now().date_naive() - Duration::days(1);
-        let target_day_key = target_day.format("%Y-%m-%d").to_string();
-        let totals = day_totals.get(&target_day_key).cloned().unwrap_or_default();
-        let sessions_count = day_session_counts.get(&target_day_key).copied().unwrap_or(0);
-        let models_observed: Vec<String> = models_observed_for_day
-            .get(&target_day_key)
-            .map(|s| s.iter().cloned().collect())
-            .unwrap_or_default();
-
-        let period_from = format!("{target_day_key}T00:00:00Z");
-        let period_to = format!(
-            "{}T00:00:00Z",
-            (target_day + Duration::days(1)).format("%Y-%m-%d")
-        );
+        let latest_day: NaiveDate = today - Duration::days(1);
+        let latest_day_key = latest_day.format("%Y-%m-%d").to_string();
+        let latest_day_sessions = day_session_counts
+            .get(&latest_day_key)
+            .copied()
+            .unwrap_or(0);
 
         // We only emit leaf metrics. Per-model versioned leaves are gated by provable attribution.
         // Current Codex token_count snapshots are cumulative and not reliably tagged by model per token delta,
         // so emit the safe unversioned Codex family leaf.
         let metric_key = "token.openai.codex";
+        let mut metrics = Vec::with_capacity(window_days as usize);
+        let mut all_models_observed: BTreeSet<String> = BTreeSet::new();
 
-        let metrics = vec![serde_json::json!({
-            "metric_key": metric_key,
-            "period_from": period_from,
-            "period_to": period_to,
-            "value": totals.total,
-            "source": "localpush",
-            "cost_model": "subscription",
-            "tags": {
-                "input": totals.input,
-                "cached_input": totals.cached_input,
-                "output": totals.output,
-                "reasoning_output": totals.reasoning_output
+        for offset in 0..window_days {
+            let day: NaiveDate = window_start + Duration::days(offset);
+            let day_key = day.format("%Y-%m-%d").to_string();
+            let totals = day_totals.get(&day_key).cloned().unwrap_or_default();
+
+            if let Some(models) = models_observed_for_day.get(&day_key) {
+                all_models_observed.extend(models.iter().cloned());
             }
-        })];
+
+            metrics.push(serde_json::json!({
+                "metric_key": metric_key,
+                "period_from": format!("{day_key}T00:00:00Z"),
+                "period_to": format!(
+                    "{}T00:00:00Z",
+                    (day + Duration::days(1)).format("%Y-%m-%d")
+                ),
+                "value": totals.total,
+                "source": "localpush",
+                "cost_model": "subscription",
+                "tags": {
+                    "input": totals.input,
+                    "cached_input": totals.cached_input,
+                    "output": totals.output,
+                    "reasoning_output": totals.reasoning_output
+                }
+            }));
+        }
 
         Ok(serde_json::json!({
             "metrics": metrics,
@@ -144,16 +191,23 @@ impl Source for CodexStatsSource {
                 "source_type": "stats",
                 "schema_version": 2,
                 "day_boundary": "utc",
-                "selected_window": "yesterday",
-                "target_date": target_day_key,
-                "sessions_in_window": sessions_count,
+                "selected_window": {
+                    "mode": "recent_days",
+                    "days": window_days,
+                    "start_date": window_start.format("%Y-%m-%d").to_string(),
+                    "end_date_exclusive": window_end.format("%Y-%m-%d").to_string()
+                },
+                "latest_date": latest_day_key,
+                "sessions_in_window": sessions_in_window.len(),
+                "latest_day_sessions": latest_day_sessions,
                 "attribution_mode": "safe_unversioned_family_only",
-                "models_observed": models_observed,
+                "models_observed": all_models_observed.into_iter().collect::<Vec<_>>(),
                 "per_model_versioned_metrics_emitted": false,
                 "notes": [
                     "Watch session JSONL files (or a derived local cache); period windows are derived from event timestamps, not filesystem paths",
                     "Leaf metrics only; aggregate metrics are computed downstream",
-                    "Versioned model leaves are withheld until per-model token attribution is provably correct"
+                    "Versioned model leaves are withheld until per-model token attribution is provably correct",
+                    "Metrics are emitted for every day in the configured window, including zero-activity days"
                 ]
             }
         }))
@@ -161,27 +215,39 @@ impl Source for CodexStatsSource {
 
     fn preview(&self) -> Result<SourcePreview, SourceError> {
         let payload = self.parse()?;
-        let metric = &payload["metrics"][0];
-        let total = metric["value"].as_u64().unwrap_or(0);
-        let date = metric["period_from"]
-            .as_str()
-            .unwrap_or("")
-            .split('T')
-            .next()
-            .unwrap_or("");
+        let metrics = payload["metrics"].as_array().cloned().unwrap_or_default();
+        let total: u64 = metrics
+            .iter()
+            .map(|metric| metric["value"].as_u64().unwrap_or(0))
+            .sum();
+        let window_days = self.window_days();
+        let latest_date = payload["meta"]["latest_date"].as_str().unwrap_or("");
 
         Ok(SourcePreview {
             title: self.name().to_string(),
-            summary: format!("{} tokens for {}", format_number(total), date),
+            summary: if window_days == 1 {
+                format!("{} tokens for {}", format_number(total), latest_date)
+            } else {
+                format!(
+                    "{} tokens across last {} days",
+                    format_number(total),
+                    window_days
+                )
+            },
             fields: vec![
                 PreviewField {
                     label: "Metric Key".into(),
-                    value: metric["metric_key"].as_str().unwrap_or("").to_string(),
+                    value: "token.openai.codex".to_string(),
                     sensitive: false,
                 },
                 PreviewField {
                     label: "Tokens".into(),
                     value: format_number(total),
+                    sensitive: false,
+                },
+                PreviewField {
+                    label: "Window".into(),
+                    value: format!("{} days", window_days),
                     sensitive: false,
                 },
             ],
@@ -190,24 +256,28 @@ impl Source for CodexStatsSource {
     }
 
     fn available_properties(&self) -> Vec<PropertyDef> {
-        vec![
-            PropertyDef {
-                key: "metrics".into(),
-                label: "Metrics".into(),
-                description: "Leaf KPI metrics for yesterday UTC window".into(),
-                default_enabled: true,
-                privacy_sensitive: false,
-            },
-        ]
+        vec![PropertyDef {
+            key: "metrics".into(),
+            label: "Metrics".into(),
+            description: "Leaf KPI metrics for each day in the configured UTC data window".into(),
+            default_enabled: true,
+            privacy_sensitive: false,
+        }]
+    }
+
+    fn has_meaningful_payload(&self, payload: &serde_json::Value) -> bool {
+        payload["meta"]["sessions_in_window"].as_u64().unwrap_or(0) > 0
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sources::codex_sessions::{CodexSessionsSource, normalize_model_key};
+    use crate::config::AppConfig;
+    use crate::sources::codex_sessions::{normalize_model_key, CodexSessionsSource};
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn fixture_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -244,14 +314,15 @@ mod tests {
         assert_eq!(payload["metrics"][0]["metric_key"], "token.openai.codex");
         assert_eq!(payload["metrics"][0]["source"], "localpush");
         assert_eq!(payload["metrics"][0]["cost_model"], "subscription");
-        assert_eq!(payload["meta"]["target_date"], "2026-02-23");
+        assert_eq!(payload["meta"]["latest_date"], "2026-02-23");
     }
 
     #[test]
     fn test_codex_stats_fixture_matches_expected_golden() {
         let actual = normalize(fixture_source().parse().unwrap());
         let expected_path = fixture_base().join("expected/codex-stats.json");
-        let expected: Value = serde_json::from_str(&fs::read_to_string(expected_path).unwrap()).unwrap();
+        let expected: Value =
+            serde_json::from_str(&fs::read_to_string(expected_path).unwrap()).unwrap();
         if expected.get("_status").and_then(|v| v.as_str()) == Some("pending") {
             return;
         }
@@ -263,20 +334,35 @@ mod tests {
         let base = fixture_base();
         let manifest: Value =
             serde_json::from_str(&fs::read_to_string(base.join("manifest.json")).unwrap()).unwrap();
-        let sessions = normalize(CodexSessionsSource::new_with_path(fixture_dir()).parse().unwrap());
+        let sessions = normalize(
+            CodexSessionsSource::new_with_path(fixture_dir())
+                .parse()
+                .unwrap(),
+        );
         let stats = normalize(fixture_source().parse().unwrap());
 
         assert_eq!(
-            manifest["verification"]["sessions_in_scope"].as_u64().unwrap(),
+            manifest["verification"]["sessions_in_scope"]
+                .as_u64()
+                .unwrap(),
             sessions["summary"]["sessions_count"].as_u64().unwrap()
         );
 
         let metric = &stats["metrics"][0];
         let tags = &metric["tags"];
 
-        assert_eq!(manifest["verification"]["token_totals"]["input"], tags["input"]);
-        assert_eq!(manifest["verification"]["token_totals"]["output"], tags["output"]);
-        assert_eq!(manifest["verification"]["token_totals"]["total"], metric["value"]);
+        assert_eq!(
+            manifest["verification"]["token_totals"]["input"],
+            tags["input"]
+        );
+        assert_eq!(
+            manifest["verification"]["token_totals"]["output"],
+            tags["output"]
+        );
+        assert_eq!(
+            manifest["verification"]["token_totals"]["total"],
+            metric["value"]
+        );
         assert_eq!(
             manifest["verification"]["token_totals"]["cache_read"],
             tags["cached_input"]
@@ -284,10 +370,38 @@ mod tests {
     }
 
     #[test]
+    fn test_window_setting_emits_full_daily_series() {
+        let now = DateTime::parse_from_rfc3339("2026-02-24T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        config.set("source_window.codex-stats.days", "7").unwrap();
+        let source = CodexStatsSource::new_with_path_config_and_now(fixture_dir(), config, now);
+
+        let payload = source.parse().unwrap();
+        let metrics = payload["metrics"].as_array().unwrap();
+
+        assert_eq!(metrics.len(), 7);
+        assert_eq!(payload["meta"]["selected_window"]["days"], 7);
+        assert_eq!(
+            metrics.first().unwrap()["period_from"],
+            "2026-02-17T00:00:00Z"
+        );
+        assert_eq!(
+            metrics.last().unwrap()["period_from"],
+            "2026-02-23T00:00:00Z"
+        );
+    }
+
+    #[test]
     #[ignore]
     fn regenerate_codex_fixture_goldens_2026_02_23() {
         let base = fixture_base();
-        let sessions = normalize(CodexSessionsSource::new_with_path(fixture_dir()).parse().unwrap());
+        let sessions = normalize(
+            CodexSessionsSource::new_with_path(fixture_dir())
+                .parse()
+                .unwrap(),
+        );
         let stats = normalize(fixture_source().parse().unwrap());
 
         fs::write(

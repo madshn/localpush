@@ -100,9 +100,7 @@ impl ApplePhotosSource {
                 || err_msg.contains("attempt to write a readonly database")
             {
                 warn!("Permission denied accessing Photos database");
-                SourceError::PermissionDenied(
-                    "Cannot access Apple Photos library".to_string()
-                )
+                SourceError::PermissionDenied("Cannot access Apple Photos library".to_string())
             } else {
                 SourceError::ParseError(format!("SQLite: {}", e))
             }
@@ -203,8 +201,7 @@ impl ApplePhotosSource {
 
     /// Check if a uniform type identifier indicates a screenshot.
     fn is_screenshot(uti: &str) -> bool {
-        uti.contains("screenshot")
-            || uti.contains("public.png") && uti.contains("screen")
+        uti.contains("screenshot") || uti.contains("public.png") && uti.contains("screen")
     }
 
     /// Map photo kind and subtype to a human-readable string.
@@ -331,7 +328,7 @@ impl ApplePhotosSource {
                         photo_type,
                         latitude,
                         longitude,
-                        faces: Vec::new(), // Populated later
+                        faces: Vec::new(),  // Populated later
                         labels: Vec::new(), // Populated later
                     },
                 ))
@@ -350,10 +347,7 @@ impl ApplePhotosSource {
                 Ok(faces) => {
                     for face in faces {
                         // Find the index of the matching asset
-                        if let Some(idx) = asset_ids
-                            .iter()
-                            .position(|&id| id == face.asset_id)
-                        {
+                        if let Some(idx) = asset_ids.iter().position(|&id| id == face.asset_id) {
                             if let Some(photo) = photos.get_mut(idx) {
                                 photo.faces.push(face.person_name);
                             }
@@ -361,7 +355,10 @@ impl ApplePhotosSource {
                     }
                 }
                 Err(err) => {
-                    warn!("Failed to load face metadata, continuing without faces: {}", err);
+                    warn!(
+                        "Failed to load face metadata, continuing without faces: {}",
+                        err
+                    );
                 }
             }
 
@@ -393,11 +390,7 @@ impl ApplePhotosSource {
             return Ok(Vec::new());
         }
 
-        let placeholders = asset_ids
-            .iter()
-            .map(|_| "?")
-            .collect::<Vec<_>>()
-            .join(",");
+        let placeholders = asset_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
 
         let Some(cols) = Self::detect_face_query_columns(conn) else {
             debug!("Face/person schema columns not found, skipping detected faces");
@@ -420,8 +413,10 @@ impl ApplePhotosSource {
             .prepare(&query)
             .map_err(|e| SourceError::ParseError(format!("Face query prepare: {}", e)))?;
 
-        let params: Vec<&dyn rusqlite::ToSql> =
-            asset_ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let params: Vec<&dyn rusqlite::ToSql> = asset_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
 
         let rows = stmt
             .query_map(&params[..], |row| {
@@ -571,7 +566,8 @@ impl Source for ApplePhotosSource {
             PropertyDef {
                 key: "recent_photos".to_string(),
                 label: "Recent Photos".to_string(),
-                description: "New photos with metadata (filenames, dates) from the last 7 days".to_string(),
+                description: "New photos with metadata (filenames, dates) from the last 7 days"
+                    .to_string(),
                 default_enabled: false,
                 privacy_sensitive: true,
             },
@@ -678,10 +674,19 @@ mod tests {
 
         // Location should be marked privacy-sensitive and default disabled
         let location_prop = props.iter().find(|p| p.key == "photo_location");
-        assert!(location_prop.is_some(), "photo_location property should exist");
+        assert!(
+            location_prop.is_some(),
+            "photo_location property should exist"
+        );
         if let Some(prop) = location_prop {
-            assert!(prop.privacy_sensitive, "Location should be privacy sensitive");
-            assert!(!prop.default_enabled, "Location should be disabled by default");
+            assert!(
+                prop.privacy_sensitive,
+                "Location should be privacy sensitive"
+            );
+            assert!(
+                !prop.default_enabled,
+                "Location should be disabled by default"
+            );
         }
     }
 

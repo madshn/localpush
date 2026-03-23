@@ -4,10 +4,10 @@
 //! so startup requires only ONE Keychain password prompt instead of N.
 //! Pre-vault individual entries are migrated on first access (fallback read).
 
+use crate::traits::{CredentialError, CredentialStore};
+use keyring::Entry;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use keyring::Entry;
-use crate::traits::{CredentialStore, CredentialError};
 
 const SERVICE_NAME: &str = "com.localpush.app";
 const VAULT_KEY: &str = "__vault__";
@@ -51,7 +51,8 @@ impl KeychainCredentialStore {
 
         let entry = Entry::new(SERVICE_NAME, VAULT_KEY)
             .map_err(|e| CredentialError::StorageError(e.to_string()))?;
-        entry.set_password(&json)
+        entry
+            .set_password(&json)
             .map_err(|e| CredentialError::StorageError(e.to_string()))?;
 
         Ok(())

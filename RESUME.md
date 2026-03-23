@@ -53,7 +53,7 @@ Bob can build the landing page now — all visual direction and content approved
 
 - **Full delivery pipeline:** Source → Parse → Ledger → DeliveryWorker → Binding Lookup → HTTP POST
 - **n8n target:** Connected (n8n-e2480372), credentials persisted in dev-credentials.json
-- **Binding:** claude-stats → W9fgsdFjC3Fo4dvR ("LocalPush Ingestion Test") at https://flow.rightaim.ai/webhook/localpush-ingest
+- **Binding:** claude-stats → deprecated legacy ingestion test webhook removed
 - **Push Now:** Manual trigger works — parse + enqueue → delivery worker picks up within 5s
 - **Target restoration:** n8n targets restore from config on app restart
 - **Tests:** 80 unit + 5 integration all passing

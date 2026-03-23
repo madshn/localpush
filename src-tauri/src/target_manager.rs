@@ -51,7 +51,13 @@ impl TargetManager {
             .lock()
             .unwrap()
             .iter()
-            .map(|(id, t)| (id.clone(), t.name().to_string(), t.target_type().to_string()))
+            .map(|(id, t)| {
+                (
+                    id.clone(),
+                    t.name().to_string(),
+                    t.target_type().to_string(),
+                )
+            })
             .collect()
     }
 
@@ -64,7 +70,10 @@ impl TargetManager {
     }
 
     /// List endpoints for a specific target
-    pub async fn list_endpoints(&self, id: &str) -> Result<Vec<TargetEndpoint>, TargetManagerError> {
+    pub async fn list_endpoints(
+        &self,
+        id: &str,
+    ) -> Result<Vec<TargetEndpoint>, TargetManagerError> {
         let target = self
             .get(id)
             .ok_or_else(|| TargetManagerError::NotFound(id.to_string()))?;
@@ -82,7 +91,10 @@ mod tests {
     fn test_register_and_list() {
         let config = Arc::new(AppConfig::open_in_memory().unwrap());
         let mgr = TargetManager::new(config);
-        let target = Arc::new(NtfyTarget::new("ntfy-1".to_string(), "https://ntfy.sh".to_string()));
+        let target = Arc::new(NtfyTarget::new(
+            "ntfy-1".to_string(),
+            "https://ntfy.sh".to_string(),
+        ));
         mgr.register(target);
 
         let list = mgr.list();

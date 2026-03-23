@@ -1,82 +1,129 @@
 //! SQLite-based delivery ledger with WAL for guaranteed delivery
 
+use crate::traits::{
+    DeliveryEntry, DeliveryLedgerTrait, DeliveryStatus, LedgerError, LedgerStats, SourceStatusCount,
+};
+use rusqlite::{params, Connection, OpenFlags};
 use std::path::Path;
 use std::sync::Mutex;
-use rusqlite::{Connection, params};
-use crate::traits::{DeliveryLedgerTrait, DeliveryEntry, DeliveryStatus, LedgerError, LedgerStats};
 
 pub struct DeliveryLedger {
-    conn: Mutex<Connection>,
+    writer: Mutex<Connection>,
+    reader: Mutex<Connection>,
+}
+
+fn apply_writer_pragmas(conn: &Connection) -> Result<(), LedgerError> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA wal_autocheckpoint = 1000;
+         PRAGMA busy_timeout = 5000;",
+    )
+    .map_err(|e| LedgerError::DatabaseError(e.to_string()))
+}
+
+fn apply_reader_pragmas(conn: &Connection) -> Result<(), LedgerError> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 5000;
+         PRAGMA query_only = ON;",
+    )
+    .map_err(|e| LedgerError::DatabaseError(e.to_string()))
+}
+
+fn create_schema(conn: &Connection) -> Result<(), LedgerError> {
+    // Create tables
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS delivery_ledger (
+            id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL UNIQUE,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            max_retries INTEGER NOT NULL DEFAULT 5,
+            last_error TEXT,
+            available_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            delivered_at INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ledger_status
+            ON delivery_ledger (status, available_at);
+
+        CREATE INDEX IF NOT EXISTS idx_ledger_delivered
+            ON delivery_ledger (delivered_at)
+            WHERE status = 'delivered';",
+    )
+    .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+    // Idempotent migration: add target_endpoint_id column
+    let _ = conn.execute_batch(
+        "ALTER TABLE delivery_ledger ADD COLUMN target_endpoint_id TEXT DEFAULT NULL;",
+    ); // Ignore error if column already exists
+
+    // Idempotent migration: add retry_log column (JSON array of retry attempts)
+    let _ =
+        conn.execute_batch("ALTER TABLE delivery_ledger ADD COLUMN retry_log TEXT DEFAULT '[]';"); // Ignore error if column already exists
+
+    // Idempotent migration: add trigger_type column (file_change, manual, scheduled)
+    let _ = conn.execute_batch(
+        "ALTER TABLE delivery_ledger ADD COLUMN trigger_type TEXT DEFAULT 'file_change';",
+    );
+
+    // Idempotent migration: add delivered_to column (JSON: endpoint_id, endpoint_name, target_type)
+    let _ = conn
+        .execute_batch("ALTER TABLE delivery_ledger ADD COLUMN delivered_to TEXT DEFAULT NULL;");
+
+    Ok(())
 }
 
 impl DeliveryLedger {
     /// Open or create a ledger database
     pub fn open(path: &Path) -> Result<Self, LedgerError> {
-        let conn = Connection::open(path)
-            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        let writer =
+            Connection::open(path).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        // Enable WAL mode for crash recovery
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA wal_autocheckpoint = 1000;
-             PRAGMA busy_timeout = 5000;"
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        apply_writer_pragmas(&writer)?;
+        create_schema(&writer)?;
 
-        // Create tables
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS delivery_ledger (
-                id TEXT PRIMARY KEY,
-                event_id TEXT NOT NULL UNIQUE,
-                event_type TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                max_retries INTEGER NOT NULL DEFAULT 5,
-                last_error TEXT,
-                available_at INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                delivered_at INTEGER
-            );
+        let reader =
+            Connection::open(path).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        apply_reader_pragmas(&reader)?;
 
-            CREATE INDEX IF NOT EXISTS idx_ledger_status
-                ON delivery_ledger (status, available_at);
-
-            CREATE INDEX IF NOT EXISTS idx_ledger_delivered
-                ON delivery_ledger (delivered_at)
-                WHERE status = 'delivered';"
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
-
-        // Idempotent migration: add target_endpoint_id column
-        let _ = conn.execute_batch(
-            "ALTER TABLE delivery_ledger ADD COLUMN target_endpoint_id TEXT DEFAULT NULL;"
-        ); // Ignore error if column already exists
-
-        // Idempotent migration: add retry_log column (JSON array of retry attempts)
-        let _ = conn.execute_batch(
-            "ALTER TABLE delivery_ledger ADD COLUMN retry_log TEXT DEFAULT '[]';"
-        ); // Ignore error if column already exists
-
-        // Idempotent migration: add trigger_type column (file_change, manual, scheduled)
-        let _ = conn.execute_batch(
-            "ALTER TABLE delivery_ledger ADD COLUMN trigger_type TEXT DEFAULT 'file_change';"
-        );
-
-        // Idempotent migration: add delivered_to column (JSON: endpoint_id, endpoint_name, target_type)
-        let _ = conn.execute_batch(
-            "ALTER TABLE delivery_ledger ADD COLUMN delivered_to TEXT DEFAULT NULL;"
-        );
-
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            writer: Mutex::new(writer),
+            reader: Mutex::new(reader),
+        })
     }
 
-    /// Open an in-memory database (for testing)
+    /// Open an in-memory database (for testing).
+    ///
+    /// Uses a unique named shared-cache URI so both connections see the same in-memory database
+    /// while remaining isolated from other test instances running in parallel.
     pub fn open_in_memory() -> Result<Self, LedgerError> {
-        let conn = Connection::open_in_memory()
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let uri = format!("file:ledger_mem_{}?mode=memory&cache=shared", id);
+
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_SHARED_CACHE;
+
+        let writer = Connection::open_with_flags(&uri, flags)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS delivery_ledger (
+        // Writer pragmas (skip query_only so we can write)
+        writer
+            .execute_batch("PRAGMA busy_timeout = 5000;")
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        // Create full schema on writer
+        writer
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS delivery_ledger (
                 id TEXT PRIMARY KEY,
                 event_id TEXT NOT NULL UNIQUE,
                 event_type TEXT NOT NULL,
@@ -92,10 +139,24 @@ impl DeliveryLedger {
                 retry_log TEXT DEFAULT '[]',
                 trigger_type TEXT DEFAULT 'file_change',
                 delivered_to TEXT DEFAULT NULL
-            );"
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+            );",
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        Ok(Self { conn: Mutex::new(conn) })
+        let reader = Connection::open_with_flags(&uri, flags)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        reader
+            .execute_batch(
+                "PRAGMA busy_timeout = 5000;
+             PRAGMA query_only = ON;",
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        Ok(Self {
+            writer: Mutex::new(writer),
+            reader: Mutex::new(reader),
+        })
     }
 }
 
@@ -107,7 +168,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.writer.lock().unwrap();
         conn.execute(
             "INSERT INTO delivery_ledger (id, event_id, event_type, payload, available_at, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
@@ -130,25 +191,34 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.writer.lock().unwrap();
         conn.execute(
             "INSERT INTO delivery_ledger (id, event_id, event_type, payload, available_at, created_at, target_endpoint_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
             params![id, event_id, event_type, payload_str, now, target_endpoint_id],
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        tracing::debug!("Enqueued targeted delivery: {} ({}) -> {}", event_id, event_type, target_endpoint_id);
+        tracing::debug!(
+            "Enqueued targeted delivery: {} ({}) -> {}",
+            event_id,
+            event_type,
+            target_endpoint_id
+        );
         Ok(event_id)
     }
 
-    fn enqueue_manual(&self, event_type: &str, payload: serde_json::Value) -> Result<String, LedgerError> {
+    fn enqueue_manual(
+        &self,
+        event_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<String, LedgerError> {
         let id = uuid::Uuid::new_v4().to_string();
         let event_id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().timestamp();
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.writer.lock().unwrap();
         conn.execute(
             "INSERT INTO delivery_ledger (id, event_id, event_type, payload, available_at, created_at, trigger_type)
              VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'manual')",
@@ -171,14 +241,19 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.writer.lock().unwrap();
         conn.execute(
             "INSERT INTO delivery_ledger (id, event_id, event_type, payload, available_at, created_at, trigger_type, target_endpoint_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'manual', ?6)",
             params![id, event_id, event_type, payload_str, now, target_endpoint_id],
         ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        tracing::debug!("Enqueued manual targeted delivery: {} ({}) -> {}", event_id, event_type, target_endpoint_id);
+        tracing::debug!(
+            "Enqueued manual targeted delivery: {} ({}) -> {}",
+            event_id,
+            event_type,
+            target_endpoint_id
+        );
         Ok(event_id)
     }
 
@@ -195,7 +270,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.writer.lock().unwrap();
         conn.execute(
             "INSERT INTO delivery_ledger (id, event_id, event_type, payload, available_at, created_at, target_endpoint_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -204,7 +279,10 @@ impl DeliveryLedgerTrait for DeliveryLedger {
 
         tracing::debug!(
             "Enqueued targeted delivery: {} ({}) -> {} available_at={}",
-            event_id, event_type, target_endpoint_id, available_at
+            event_id,
+            event_type,
+            target_endpoint_id,
+            available_at
         );
         Ok(event_id)
     }
@@ -212,7 +290,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.writer.lock().unwrap();
         let tx = conn
             .transaction()
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
@@ -282,22 +360,31 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         tx.commit()
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        Ok(entries.into_iter().map(|mut e| {
-            e.status = DeliveryStatus::InFlight;
-            e
-        }).collect())
+        Ok(entries
+            .into_iter()
+            .map(|mut e| {
+                e.status = DeliveryStatus::InFlight;
+                e
+            })
+            .collect())
     }
 
-    fn mark_delivered(&self, event_id: &str, delivered_to: Option<String>) -> Result<(), LedgerError> {
+    fn mark_delivered(
+        &self,
+        event_id: &str,
+        delivered_to: Option<String>,
+    ) -> Result<(), LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "UPDATE delivery_ledger
+        let conn = self.writer.lock().unwrap();
+        let rows = conn
+            .execute(
+                "UPDATE delivery_ledger
              SET status = 'delivered', delivered_at = ?1, delivered_to = ?3
              WHERE event_id = ?2 AND status = 'in_flight'",
-            params![now, event_id, delivered_to.as_deref()],
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+                params![now, event_id, delivered_to.as_deref()],
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         if rows == 0 {
             return Err(LedgerError::NotFound(event_id.to_string()));
@@ -310,7 +397,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
     fn mark_failed(&self, event_id: &str, error: &str) -> Result<DeliveryStatus, LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.writer.lock().unwrap();
         // Get current retry count, max, and retry_log
         let (retry_count, max_retries, retry_log_str): (u32, u32, String) = conn.query_row(
             "SELECT retry_count, max_retries, COALESCE(retry_log, '[]') FROM delivery_ledger WHERE event_id = ?1",
@@ -329,65 +416,82 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         };
 
         // Append to retry_log
-        let mut retry_log: Vec<serde_json::Value> = serde_json::from_str(&retry_log_str)
-            .unwrap_or_default();
+        let mut retry_log: Vec<serde_json::Value> =
+            serde_json::from_str(&retry_log_str).unwrap_or_default();
         retry_log.push(serde_json::json!({
             "at": now,
             "error": error,
             "attempt": new_retry_count
         }));
-        let new_retry_log_str = serde_json::to_string(&retry_log)
-            .unwrap_or_else(|_| "[]".to_string());
+        let new_retry_log_str =
+            serde_json::to_string(&retry_log).unwrap_or_else(|_| "[]".to_string());
 
         conn.execute(
             "UPDATE delivery_ledger
              SET status = ?1, retry_count = ?2, last_error = ?3, available_at = ?4, retry_log = ?5
              WHERE event_id = ?6",
-            params![new_status.as_str(), new_retry_count, error, next_available, new_retry_log_str, event_id],
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+            params![
+                new_status.as_str(),
+                new_retry_count,
+                error,
+                next_available,
+                new_retry_log_str,
+                event_id
+            ],
+        )
+        .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        tracing::warn!("Delivery failed: {} (attempt {}/{}): {}",
-            event_id, new_retry_count, max_retries, error);
+        tracing::warn!(
+            "Delivery failed: {} (attempt {}/{}): {}",
+            event_id,
+            new_retry_count,
+            max_retries,
+            error
+        );
 
         Ok(new_status)
     }
 
     fn get_by_status(&self, status: DeliveryStatus) -> Result<Vec<DeliveryEntry>, LedgerError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, event_id, event_type, payload, status, retry_count, max_retries,
+        let conn = self.reader.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, event_id, event_type, payload, status, retry_count, max_retries,
                     last_error, available_at, created_at, delivered_at, target_endpoint_id,
                     trigger_type, delivered_to
              FROM delivery_ledger
              WHERE status = ?1
              ORDER BY created_at DESC
-             LIMIT 100"
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+             LIMIT 100",
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
-        let entries = stmt.query_map(params![status.as_str()], |row| {
-            let payload_str: String = row.get(3)?;
-            let payload: serde_json::Value = serde_json::from_str(&payload_str)
-                .unwrap_or(serde_json::Value::Null);
+        let entries = stmt
+            .query_map(params![status.as_str()], |row| {
+                let payload_str: String = row.get(3)?;
+                let payload: serde_json::Value =
+                    serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null);
 
-            Ok(DeliveryEntry {
-                id: row.get(0)?,
-                event_id: row.get(1)?,
-                event_type: row.get(2)?,
-                payload,
-                status,
-                retry_count: row.get(5)?,
-                max_retries: row.get(6)?,
-                last_error: row.get(7)?,
-                available_at: row.get(8)?,
-                created_at: row.get(9)?,
-                delivered_at: row.get(10)?,
-                target_endpoint_id: row.get(11)?,
-                trigger_type: row.get(12)?,
-                delivered_to: row.get(13)?,
+                Ok(DeliveryEntry {
+                    id: row.get(0)?,
+                    event_id: row.get(1)?,
+                    event_type: row.get(2)?,
+                    payload,
+                    status,
+                    retry_count: row.get(5)?,
+                    max_retries: row.get(6)?,
+                    last_error: row.get(7)?,
+                    available_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                    delivered_at: row.get(10)?,
+                    target_endpoint_id: row.get(11)?,
+                    trigger_type: row.get(12)?,
+                    delivered_to: row.get(13)?,
+                })
             })
-        }).map_err(|e| LedgerError::DatabaseError(e.to_string()))?
-        .filter_map(Result::ok)
-        .collect();
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?
+            .filter_map(Result::ok)
+            .collect();
 
         Ok(entries)
     }
@@ -400,7 +504,7 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             .and_utc()
             .timestamp();
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.reader.lock().unwrap();
         let stats: LedgerStats = conn.query_row(
             "SELECT
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
@@ -430,15 +534,17 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         let now = chrono::Utc::now().timestamp();
         let stale_threshold = now - 300; // 5 minutes
 
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "UPDATE delivery_ledger
+        let conn = self.writer.lock().unwrap();
+        let rows = conn
+            .execute(
+                "UPDATE delivery_ledger
              SET status = 'failed',
                  last_error = 'Recovered from crash - previous attempt status unknown',
                  available_at = ?1
              WHERE status = 'in_flight' AND available_at < ?2",
-            params![now, stale_threshold],
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+                params![now, stale_threshold],
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         if rows > 0 {
             tracing::warn!("Recovered {} orphaned in-flight entries", rows);
@@ -450,13 +556,15 @@ impl DeliveryLedgerTrait for DeliveryLedger {
     fn reset_to_pending(&self, event_id: &str) -> Result<(), LedgerError> {
         let now = chrono::Utc::now().timestamp();
 
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "UPDATE delivery_ledger
+        let conn = self.writer.lock().unwrap();
+        let rows = conn
+            .execute(
+                "UPDATE delivery_ledger
              SET status = 'pending', available_at = ?1, last_error = NULL
              WHERE event_id = ?2 AND status IN ('failed', 'dlq')",
-            params![now, event_id],
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+                params![now, event_id],
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         if rows == 0 {
             return Err(LedgerError::NotFound(event_id.to_string()));
@@ -467,20 +575,22 @@ impl DeliveryLedgerTrait for DeliveryLedger {
     }
 
     fn get_retry_history(&self, entry_id: &str) -> Result<Vec<serde_json::Value>, LedgerError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.reader.lock().unwrap();
 
         // Query retry_log column by entry id
-        let retry_log_str: String = conn.query_row(
-            "SELECT COALESCE(retry_log, '[]') FROM delivery_ledger WHERE id = ?1",
-            params![entry_id],
-            |row| row.get(0),
-        ).map_err(|e| {
-            if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
-                LedgerError::NotFound(entry_id.to_string())
-            } else {
-                LedgerError::DatabaseError(e.to_string())
-            }
-        })?;
+        let retry_log_str: String = conn
+            .query_row(
+                "SELECT COALESCE(retry_log, '[]') FROM delivery_ledger WHERE id = ?1",
+                params![entry_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
+                    LedgerError::NotFound(entry_id.to_string())
+                } else {
+                    LedgerError::DatabaseError(e.to_string())
+                }
+            })?;
 
         // Parse JSON array
         let retry_log: Vec<serde_json::Value> = serde_json::from_str(&retry_log_str)
@@ -491,13 +601,15 @@ impl DeliveryLedgerTrait for DeliveryLedger {
 
     fn dismiss_dlq(&self, event_id: &str) -> Result<(), LedgerError> {
         let now = chrono::Utc::now().timestamp();
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "UPDATE delivery_ledger
+        let conn = self.writer.lock().unwrap();
+        let rows = conn
+            .execute(
+                "UPDATE delivery_ledger
              SET status = 'delivered', delivered_at = ?1
              WHERE event_id = ?2 AND status = 'dlq'",
-            params![now, event_id],
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+                params![now, event_id],
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         if rows == 0 {
             return Err(LedgerError::NotFound(event_id.to_string()));
@@ -508,21 +620,23 @@ impl DeliveryLedgerTrait for DeliveryLedger {
     }
 
     fn set_attempted_target(&self, event_id: &str, target_json: &str) -> Result<(), LedgerError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.writer.lock().unwrap();
         conn.execute(
             "UPDATE delivery_ledger SET delivered_to = ?1 WHERE event_id = ?2",
             params![target_json, event_id],
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        )
+        .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
         Ok(())
     }
 
     fn mark_target_paused(&self, event_id: &str, reason: &str) -> Result<(), LedgerError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.writer.lock().unwrap();
         conn.execute(
             "UPDATE delivery_ledger SET status = 'target_paused', last_error = ?1
              WHERE event_id = ?2 AND status = 'in_flight'",
             params![reason, event_id],
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        )
+        .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
         Ok(())
     }
 
@@ -531,8 +645,10 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             return Ok(0);
         }
 
-        let conn = self.conn.lock().unwrap();
-        let placeholders: Vec<String> = endpoint_ids.iter().enumerate()
+        let conn = self.writer.lock().unwrap();
+        let placeholders: Vec<String> = endpoint_ids
+            .iter()
+            .enumerate()
             .map(|(i, _)| format!("?{}", i + 1))
             .collect();
         let sql = format!(
@@ -542,12 +658,15 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             placeholders.join(", ")
         );
 
-        let mut stmt = conn.prepare(&sql)
+        let mut stmt = conn
+            .prepare(&sql)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
-        let params: Vec<&dyn rusqlite::types::ToSql> = endpoint_ids.iter()
+        let params: Vec<&dyn rusqlite::types::ToSql> = endpoint_ids
+            .iter()
             .map(|id| id as &dyn rusqlite::types::ToSql)
             .collect();
-        let rows = stmt.execute(params.as_slice())
+        let rows = stmt
+            .execute(params.as_slice())
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         if rows > 0 {
@@ -566,8 +685,10 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         }
 
         let now = chrono::Utc::now().timestamp();
-        let conn = self.conn.lock().unwrap();
-        let placeholders: Vec<String> = endpoint_ids.iter().enumerate()
+        let conn = self.writer.lock().unwrap();
+        let placeholders: Vec<String> = endpoint_ids
+            .iter()
+            .enumerate()
             .map(|(i, _)| format!("?{}", i + 2)) // +2 because ?1 is `now`
             .collect();
         let sql = format!(
@@ -582,13 +703,14 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         for id in endpoint_ids {
             params.push(Box::new(id.to_string()));
         }
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter()
-            .map(|p| p.as_ref())
-            .collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
 
-        let mut stmt = conn.prepare(&sql)
+        let mut stmt = conn
+            .prepare(&sql)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
-        let rows = stmt.execute(param_refs.as_slice())
+        let rows = stmt
+            .execute(param_refs.as_slice())
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         if rows > 0 {
@@ -606,8 +728,10 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             return Ok(0);
         }
 
-        let conn = self.conn.lock().unwrap();
-        let placeholders: Vec<String> = endpoint_ids.iter().enumerate()
+        let conn = self.reader.lock().unwrap();
+        let placeholders: Vec<String> = endpoint_ids
+            .iter()
+            .enumerate()
             .map(|(i, _)| format!("?{}", i + 1))
             .collect();
         let sql = format!(
@@ -617,31 +741,70 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             placeholders.join(", ")
         );
 
-        let mut stmt = conn.prepare(&sql)
+        let mut stmt = conn
+            .prepare(&sql)
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
-        let params: Vec<&dyn rusqlite::types::ToSql> = endpoint_ids.iter()
+        let params: Vec<&dyn rusqlite::types::ToSql> = endpoint_ids
+            .iter()
             .map(|id| id as &dyn rusqlite::types::ToSql)
             .collect();
-        let count: i64 = stmt.query_row(params.as_slice(), |row| row.get(0))
+        let count: i64 = stmt
+            .query_row(params.as_slice(), |row| row.get(0))
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
         Ok(count as usize)
+    }
+
+    fn get_source_status_counts(&self) -> Result<Vec<SourceStatusCount>, LedgerError> {
+        let conn = self.reader.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "WITH latest_delivered AS (
+                    SELECT event_type, MAX(COALESCE(delivered_at, created_at)) AS latest_delivered_at
+                    FROM delivery_ledger
+                    WHERE status = 'delivered'
+                    GROUP BY event_type
+                 )
+                 SELECT d.event_type, d.status, COUNT(*)
+                 FROM delivery_ledger d
+                 LEFT JOIN latest_delivered ld ON ld.event_type = d.event_type
+                 WHERE d.status IN ('pending', 'in_flight')
+                    OR (d.status IN ('failed', 'dlq', 'target_paused')
+                        AND d.created_at > COALESCE(ld.latest_delivered_at, 0))
+                    OR (d.status = 'delivered' AND COALESCE(d.delivered_at, d.created_at) > strftime('%s', 'now') - 86400)
+                 GROUP BY d.event_type, d.status",
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(SourceStatusCount {
+                    source_id: row.get(0)?,
+                    status: row.get(1)?,
+                    count: row.get::<_, i64>(2)? as usize,
+                })
+            })
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?
+            .filter_map(Result::ok)
+            .collect();
+
+        Ok(rows)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_enqueue_and_claim() {
         let ledger = DeliveryLedger::open_in_memory().unwrap();
 
         // Enqueue
-        let event_id = ledger.enqueue(
-            "test.event",
-            serde_json::json!({"key": "value"})
-        ).unwrap();
+        let event_id = ledger
+            .enqueue("test.event", serde_json::json!({"key": "value"}))
+            .unwrap();
 
         assert!(!event_id.is_empty());
 
@@ -690,7 +853,9 @@ mod tests {
         // Simulate 5 failures (default max_retries)
         for i in 0..5 {
             ledger.claim_batch(1).unwrap();
-            let status = ledger.mark_failed(&event_id, &format!("Error {}", i)).unwrap();
+            let status = ledger
+                .mark_failed(&event_id, &format!("Error {}", i))
+                .unwrap();
 
             if i < 4 {
                 assert_eq!(status, DeliveryStatus::Failed);
@@ -725,10 +890,16 @@ mod tests {
 
         // Verify structure
         assert!(history[0].get("at").is_some());
-        assert_eq!(history[0].get("error").unwrap().as_str().unwrap(), "Connection refused");
+        assert_eq!(
+            history[0].get("error").unwrap().as_str().unwrap(),
+            "Connection refused"
+        );
         assert_eq!(history[0].get("attempt").unwrap().as_u64().unwrap(), 1);
 
-        assert_eq!(history[1].get("error").unwrap().as_str().unwrap(), "Timeout");
+        assert_eq!(
+            history[1].get("error").unwrap().as_str().unwrap(),
+            "Timeout"
+        );
         assert_eq!(history[1].get("attempt").unwrap().as_u64().unwrap(), 2);
     }
 
@@ -738,5 +909,132 @@ mod tests {
         let result = ledger.get_retry_history("nonexistent-id");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), LedgerError::NotFound(_)));
+    }
+
+    #[test]
+    fn test_source_status_counts_ignore_recovered_dlq_after_later_delivery() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+
+        let failed_event = ledger
+            .enqueue(
+                "desktop-activity",
+                serde_json::json!({"step": "old-failure"}),
+            )
+            .unwrap();
+
+        for _ in 0..5 {
+            let status = ledger
+                .mark_failed(&failed_event, "HTTP error: 404")
+                .unwrap();
+            let is_dlq = matches!(status, DeliveryStatus::Dlq);
+            if !is_dlq {
+                ledger.claim_batch(1).unwrap();
+            }
+        }
+
+        let recovered_event = ledger
+            .enqueue("desktop-activity", serde_json::json!({"step": "recovered"}))
+            .unwrap();
+        ledger.mark_delivered(&recovered_event, None).unwrap();
+
+        let counts = ledger.get_source_status_counts().unwrap();
+        let desktop_counts: HashMap<String, usize> = counts
+            .into_iter()
+            .filter(|row| row.source_id == "desktop-activity")
+            .map(|row| (row.status, row.count))
+            .collect();
+
+        assert_eq!(desktop_counts.get("delivered"), Some(&1));
+        assert!(!desktop_counts.contains_key("dlq"));
+    }
+
+    #[test]
+    fn test_source_status_counts_keep_unresolved_dlq_without_later_delivery() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+
+        let failed_event = ledger
+            .enqueue("claude-stats", serde_json::json!({"step": "still-broken"}))
+            .unwrap();
+
+        for _ in 0..5 {
+            let status = ledger
+                .mark_failed(&failed_event, "HTTP error: 403")
+                .unwrap();
+            let is_dlq = matches!(status, DeliveryStatus::Dlq);
+            if !is_dlq {
+                ledger.claim_batch(1).unwrap();
+            }
+        }
+
+        let counts = ledger.get_source_status_counts().unwrap();
+        let claude_counts: HashMap<String, usize> = counts
+            .into_iter()
+            .filter(|row| row.source_id == "claude-stats")
+            .map(|row| (row.status, row.count))
+            .collect();
+
+        assert_eq!(claude_counts.get("dlq"), Some(&1));
+    }
+
+    #[test]
+    fn test_source_status_counts_use_delivered_at_not_created_at_for_recovery() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+
+        let recovered_event = ledger
+            .enqueue(
+                "desktop-activity",
+                serde_json::json!({"step": "retried-later"}),
+            )
+            .unwrap();
+        ledger.mark_delivered(&recovered_event, None).unwrap();
+
+        // Simulate an old event that was only delivered much later.
+        {
+            let conn = ledger.writer.lock().unwrap();
+            conn.execute(
+                "UPDATE delivery_ledger
+                 SET created_at = ?1, delivered_at = ?2
+                 WHERE event_id = ?3",
+                params![1_i64, 200_i64, recovered_event],
+            )
+            .unwrap();
+        }
+
+        let failed_event = ledger
+            .enqueue(
+                "desktop-activity",
+                serde_json::json!({"step": "older-failure"}),
+            )
+            .unwrap();
+        {
+            let conn = ledger.writer.lock().unwrap();
+            conn.execute(
+                "UPDATE delivery_ledger
+                 SET created_at = ?1
+                 WHERE event_id = ?2",
+                params![100_i64, failed_event],
+            )
+            .unwrap();
+        }
+
+        for _ in 0..5 {
+            let status = ledger
+                .mark_failed(&failed_event, "HTTP error: 404")
+                .unwrap();
+            let is_dlq = matches!(status, DeliveryStatus::Dlq);
+            if !is_dlq {
+                ledger.claim_batch(1).unwrap();
+            }
+        }
+
+        let counts = ledger.get_source_status_counts().unwrap();
+        let desktop_counts: HashMap<String, usize> = counts
+            .into_iter()
+            .filter(|row| row.source_id == "desktop-activity")
+            .map(|row| (row.status, row.count))
+            .collect();
+
+        assert_eq!(desktop_counts.get("delivered"), Some(&1));
+        assert!(!desktop_counts.contains_key("dlq"));
     }
 }

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Settings } from "lucide-react";
 import { useDeliveryStatus } from "../api/hooks/useDeliveryStatus";
@@ -14,6 +15,7 @@ import { SummaryStats } from "./SummaryStats";
 import { SkeletonCard } from "./Skeleton";
 import { DashboardPipelineRow } from "./pipeline/DashboardPipelineRow";
 import { FlowModal } from "./pipeline/FlowModal";
+import { formatNextPushLabel, getNextPushBySource } from "./pipeline/scheduling";
 import { VelocityChart } from "./pipeline/VelocityChart";
 import { ActivityLogPreview } from "./pipeline/ActivityLogPreview";
 import { usePipelineFlow } from "./pipeline/usePipelineFlow";
@@ -79,6 +81,12 @@ export function DashboardView() {
   const queryClient = useQueryClient();
   const createBinding = useCreateBinding();
   const removeBinding = useRemoveBinding();
+  const [scheduleNowMs, setScheduleNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setScheduleNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const flow = usePipelineFlow({
     sources,
@@ -103,6 +111,11 @@ export function DashboardView() {
   const unboundSources = categorized
     ? [...categorized.paused, ...categorized.available]
     : [];
+
+  const nextPushBySource = useMemo(
+    () => getNextPushBySource(allBindings || [], scheduleNowMs),
+    [allBindings, scheduleNowMs]
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-primary">
@@ -159,6 +172,7 @@ export function DashboardView() {
                     category={category}
                     bindings={getBindingsForSource(source.id, allBindings)}
                     gap={getGapForSource(source.id, gaps)}
+                    nextPushLabel={formatNextPushLabel(nextPushBySource.get(source.id), scheduleNowMs)}
                     trafficLightStatus={flow.getTrafficLightStatus(
                       source.id,
                       source.enabled
@@ -211,6 +225,7 @@ export function DashboardView() {
                     category={category}
                     bindings={[]}
                     gap={null}
+                    nextPushLabel={null}
                     trafficLightStatus="grey"
                     isPushing={false}
                     onAddTarget={flow.handleAddTarget}

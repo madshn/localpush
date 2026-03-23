@@ -8,15 +8,22 @@
     "notes": [
       "Watch session JSONL files (or a derived local cache); period windows are derived from event timestamps, not filesystem paths",
       "Leaf metrics only; aggregate metrics are computed downstream",
-      "Versioned model leaves are withheld until per-model token attribution is provably correct"
+      "Versioned model leaves are withheld until per-model token attribution is provably correct",
+      "Metrics are emitted for every day in the configured window, including zero-activity days"
     ],
     "per_model_versioned_metrics_emitted": false,
     "schema_version": 2,
-    "selected_window": "yesterday",
+    "selected_window": {
+      "days": 1,
+      "end_date_exclusive": "2026-02-24",
+      "mode": "recent_days",
+      "start_date": "2026-02-23"
+    },
     "sessions_in_window": 6,
+    "latest_date": "2026-02-23",
+    "latest_day_sessions": 6,
     "source_family": "codex",
-    "source_type": "stats",
-    "target_date": "2026-02-23"
+    "source_type": "stats"
   },
   "metrics": [
     {

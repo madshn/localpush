@@ -7,7 +7,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use super::{PreviewField, Source, SourceError, SourcePreview};
 
@@ -105,9 +105,11 @@ impl DesktopActivityState {
     }
 }
 
+pub type SharedDesktopActivityState = Arc<Mutex<DesktopActivityState>>;
+
 /// Desktop Activity source — tracks computer usage sessions.
 pub struct DesktopActivitySource {
-    activity_state: Mutex<DesktopActivityState>,
+    activity_state: SharedDesktopActivityState,
 }
 
 impl Default for DesktopActivitySource {
@@ -118,9 +120,15 @@ impl Default for DesktopActivitySource {
 
 impl DesktopActivitySource {
     pub fn new() -> Self {
-        Self {
-            activity_state: Mutex::new(DesktopActivityState::new()),
-        }
+        Self::with_state(Arc::new(Mutex::new(DesktopActivityState::new())))
+    }
+
+    pub fn with_state(activity_state: SharedDesktopActivityState) -> Self {
+        Self { activity_state }
+    }
+
+    pub fn shared_state(&self) -> SharedDesktopActivityState {
+        self.activity_state.clone()
     }
 }
 
@@ -164,6 +172,14 @@ impl Source for DesktopActivitySource {
                 "generated_at": Utc::now().to_rfc3339(),
             }
         }))
+    }
+
+    fn has_meaningful_payload(&self, payload: &serde_json::Value) -> bool {
+        payload
+            .get("sessions")
+            .and_then(|value| value.as_array())
+            .map(|sessions| !sessions.is_empty())
+            .unwrap_or(false)
     }
 
     fn preview(&self) -> Result<SourcePreview, SourceError> {
@@ -236,7 +252,10 @@ mod tests {
         let source = DesktopActivitySource::new();
         assert_eq!(source.id(), "desktop-activity");
         assert_eq!(source.name(), "Desktop Activity");
-        assert!(source.watch_path().is_none(), "desktop-activity is a non-file source");
+        assert!(
+            source.watch_path().is_none(),
+            "desktop-activity is a non-file source"
+        );
     }
 
     #[test]
@@ -273,7 +292,10 @@ mod tests {
 
         // Go idle (>= threshold)
         let session = state.tick(IDLE_THRESHOLD_SECS);
-        assert!(session.is_some(), "session should complete when idle threshold reached");
+        assert!(
+            session.is_some(),
+            "session should complete when idle threshold reached"
+        );
 
         let session = session.unwrap();
         assert!(session.duration_minutes >= 0.0);
@@ -315,7 +337,10 @@ mod tests {
 
         let drained = state.drain_completed();
         assert_eq!(drained.len(), 1);
-        assert!(state.completed.is_empty(), "drain should clear completed sessions");
+        assert!(
+            state.completed.is_empty(),
+            "drain should clear completed sessions"
+        );
     }
 
     #[test]
@@ -336,5 +361,26 @@ mod tests {
         assert_eq!(preview.title, "Desktop Activity");
         assert!(!preview.fields.is_empty());
         assert!(preview.fields[0].value.contains("Inactive"));
+    }
+
+    #[test]
+    fn test_shared_state_is_drained_by_parse() {
+        let shared = Arc::new(Mutex::new(DesktopActivityState::new()));
+        {
+            let mut state = shared.lock().unwrap();
+            state.tick(1.0);
+            state.tick(IDLE_THRESHOLD_SECS);
+            assert_eq!(state.completed.len(), 1);
+        }
+
+        let source = DesktopActivitySource::with_state(shared.clone());
+        let payload = source.parse().unwrap();
+
+        assert_eq!(payload["session_count"], 1);
+        assert_eq!(
+            shared.lock().unwrap().completed.len(),
+            0,
+            "parse should drain the shared completed-session buffer"
+        );
     }
 }

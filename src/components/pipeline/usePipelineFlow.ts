@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef, useCallback, startTransition } from "react";
+import { useState, useRef, useCallback, startTransition } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import type { QueryClient } from "@tanstack/react-query";
 import type { UseMutationResult } from "@tanstack/react-query";
+import { useSourceStatusCounts } from "../../api/hooks/useDeliveryQueue";
 import { logger } from "../../utils/logger";
 import type {
   FlowState,
-  DeliveryStatus,
   DeliveryMode,
   SourcePreview,
   SourceData,
@@ -54,31 +54,12 @@ export function usePipelineFlow({
   const [previewLoading, setPreviewLoading] = useState<
     Record<string, boolean>
   >({});
-  const [deliveryStatuses, setDeliveryStatuses] = useState<
-    Record<string, DeliveryStatus>
-  >({});
   const [pushingSource, setPushingSource] = useState<string | null>(null);
+  const [isConfirming, setIsConfirming] = useState<string | null>(null);
+  const [isEnabling, setIsEnabling] = useState<string | null>(null);
+  const [isDisabling, setIsDisabling] = useState<string | null>(null);
   const idleFlowStatesRef = useRef<Record<string, FlowState>>({});
-
-  useEffect(() => {
-    loadDeliveryStatus();
-    // loadDeliveryStatus is stable — intentionally not in deps
-  }, [sources]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const loadDeliveryStatus = async () => {
-    try {
-      const status = await invoke<DeliveryStatus>("get_delivery_status");
-      if (sources) {
-        const statuses: Record<string, DeliveryStatus> = {};
-        sources.forEach((source) => {
-          statuses[source.id] = status;
-        });
-        setDeliveryStatuses(statuses);
-      }
-    } catch (error) {
-      logger.error("Failed to load delivery status", { error });
-    }
-  };
+  const { data: sourceStatusCounts } = useSourceStatusCounts();
 
   const getFlowState = useCallback(
     (sourceId: string): FlowState => {
@@ -112,6 +93,7 @@ export function usePipelineFlow({
 
   const handleDisable = async (sourceId: string) => {
     logger.debug("Disabling source", { sourceId });
+    setIsDisabling(sourceId);
     try {
       await invoke("disable_source", { sourceId });
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
@@ -120,6 +102,8 @@ export function usePipelineFlow({
     } catch (error) {
       logger.error("Failed to disable source", { sourceId, error });
       toast.error(`Failed to disable source: ${error}`);
+    } finally {
+      setIsDisabling(null);
     }
   };
 
@@ -131,6 +115,7 @@ export function usePipelineFlow({
       const existingBindings =
         allBindings?.filter((b) => b.source_id === sourceId) || [];
       if (existingBindings.length > 0) {
+        setIsEnabling(sourceId);
         try {
           await invoke("enable_source", { sourceId });
           await queryClient.invalidateQueries({ queryKey: ["sources"] });
@@ -142,6 +127,8 @@ export function usePipelineFlow({
         } catch (error) {
           logger.error("Failed to re-enable source", { sourceId, error });
           toast.error(`Failed to enable source: ${error}`);
+        } finally {
+          setIsEnabling(null);
         }
       } else {
         updateFlowState(sourceId, { step: "preview" });
@@ -298,6 +285,7 @@ export function usePipelineFlow({
     const alreadyEnabled = source?.enabled ?? false;
     const isEditing = state.isEditing;
 
+    setIsConfirming(sourceId);
     try {
       const preserveKey =
         isEditing && !state.authHeaderValue && state.existingAuthCredentialKey
@@ -345,6 +333,8 @@ export function usePipelineFlow({
     } catch (error) {
       logger.error("Failed to save binding", { sourceId, error });
       toast.error(`Failed to connect target: ${error}`);
+    } finally {
+      setIsConfirming(null);
     }
   };
 
@@ -372,6 +362,7 @@ export function usePipelineFlow({
   const handlePushNow = (sourceId: string) => {
     logger.info("Push Now triggered", { sourceId });
     setPushingSource(sourceId);
+    const toastId = toast("Checking for new data...");
     const pushedAt = Date.now();
     const scheduleAfterPaint =
       typeof requestAnimationFrame === "function"
@@ -381,22 +372,45 @@ export function usePipelineFlow({
     scheduleAfterPaint(() => {
       invoke<string>("trigger_source_push", { sourceId })
         .then((result) => {
+          const elapsed = Date.now() - pushedAt;
+          const remaining = Math.max(0, 800 - elapsed);
+
+          if (
+            result === "skipped:no_data" ||
+            result === "skipped:unchanged" ||
+            result === "skipped:no_bindings"
+          ) {
+            logger.debug("Push skipped", { sourceId, result });
+            setTimeout(() => {
+              toast.success(
+                result === "skipped:no_data"
+                  ? "Nothing new to push"
+                  : result === "skipped:unchanged"
+                    ? "No changes since last push"
+                    : "No active bindings for this source",
+                { id: toastId }
+              );
+              setPushingSource(null);
+            }, remaining);
+            return;
+          }
+
           logger.debug("Push enqueued", { sourceId, result });
           startTransition(() => {
             void queryClient.invalidateQueries({ queryKey: ["deliveryQueue"] });
             void queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
           });
           // Keep "Pushing..." visible for at least 800ms so the state change is perceptible
-          const elapsed = Date.now() - pushedAt;
-          const remaining = Math.max(0, 800 - elapsed);
           setTimeout(() => {
-            toast.success("Push enqueued — delivering shortly");
+            toast.success("Push enqueued — delivering shortly", {
+              id: toastId,
+            });
             setPushingSource(null);
           }, remaining);
         })
         .catch((error) => {
           logger.error("Manual push failed", { sourceId, error });
-          toast.error(`Push failed: ${error}`);
+          toast.error(`Push failed: ${error}`, { id: toastId });
           setPushingSource(null);
         });
     });
@@ -405,21 +419,40 @@ export function usePipelineFlow({
   const getTrafficLightStatus = useCallback(
     (sourceId: string, enabled: boolean): TrafficLightStatus => {
       if (!enabled) return "grey";
-      const status = deliveryStatuses[sourceId];
-      if (!status) return "grey";
-      if (status.failed_count > 0) return "red";
-      if (status.pending_count > 0) return "yellow";
-      if (status.overall === "active" || status.overall === "success")
-        return "green";
+      if (!sourceStatusCounts) return "grey";
+      const counts = sourceStatusCounts.filter(
+        (c) => c.source_id === sourceId
+      );
+      if (counts.length === 0) return "grey";
+      const hasFailed = counts.some(
+        (c) => (c.status === "failed" || c.status === "dlq") && c.count > 0
+      );
+      if (hasFailed) return "red";
+      const hasTargetPaused = counts.some(
+        (c) => c.status === "target_paused" && c.count > 0
+      );
+      if (hasTargetPaused) return "orange";
+      const hasPending = counts.some(
+        (c) =>
+          (c.status === "pending" || c.status === "in_flight") && c.count > 0
+      );
+      if (hasPending) return "yellow";
+      const hasDelivered = counts.some(
+        (c) => c.status === "delivered" && c.count > 0
+      );
+      if (hasDelivered) return "green";
       return "grey";
     },
-    [deliveryStatuses]
+    [sourceStatusCounts]
   );
 
   return {
     flowStates,
     previewLoading,
     pushingSource,
+    isConfirming,
+    isEnabling,
+    isDisabling,
     getFlowState,
     getTrafficLightStatus,
     handleEnableClick,

@@ -1,10 +1,12 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
-use crate::source_config::PropertyDef;
+use crate::config::AppConfig;
+use crate::source_config::{window_setting_for_source, PropertyDef, SourceConfigStore};
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
 pub struct CodexTokenUsage {
@@ -140,10 +142,9 @@ fn normalize_model_key_parts(model_id: &str) -> (String, String, String) {
 
     if let Some(stripped) = model.strip_prefix("claude-") {
         let without_date = if stripped.len() > 9
-            && stripped
-                .rsplit_once('-')
-                .is_some_and(|(_, last)| last.len() == 8 && last.chars().all(|c| c.is_ascii_digit()))
-        {
+            && stripped.rsplit_once('-').is_some_and(|(_, last)| {
+                last.len() == 8 && last.chars().all(|c| c.is_ascii_digit())
+            }) {
             stripped
                 .rsplit_once('-')
                 .map(|(head, _)| head)
@@ -154,13 +155,19 @@ fn normalize_model_key_parts(model_id: &str) -> (String, String, String) {
         let mut parts = without_date.split('-');
         let family = parts.next().unwrap_or("claude").to_string();
         let version = sanitize_version(&parts.collect::<Vec<_>>().join("-"));
-        return ("anthropic".into(), family, if version.is_empty() { "unknown".into() } else { version });
+        return (
+            "anthropic".into(),
+            family,
+            if version.is_empty() {
+                "unknown".into()
+            } else {
+                version
+            },
+        );
     }
 
     if model.starts_with("gpt-") && model.ends_with("-codex") {
-        let version = model
-            .trim_start_matches("gpt-")
-            .trim_end_matches("-codex");
+        let version = model.trim_start_matches("gpt-").trim_end_matches("-codex");
         return ("openai".into(), "codex".into(), sanitize_version(version));
     }
 
@@ -313,8 +320,9 @@ pub(crate) fn parse_codex_session_file(path: &Path) -> Result<CodexSessionRecord
                             else {
                                 continue;
                             };
-                            let last_usage =
-                                info.get("last_token_usage").and_then(CodexTokenUsage::from_value);
+                            let last_usage = info
+                                .get("last_token_usage")
+                                .and_then(CodexTokenUsage::from_value);
                             if total_usage.total >= max_total.total {
                                 max_total = total_usage.clone();
                             }
@@ -442,16 +450,18 @@ pub(crate) fn collect_codex_sessions(
 pub struct CodexSessionsSource {
     sessions_root: PathBuf,
     recent_within_days: Option<i64>,
+    config: Option<Arc<AppConfig>>,
 }
 
 impl CodexSessionsSource {
-    pub fn new() -> Result<Self, SourceError> {
+    pub fn new(config: Arc<AppConfig>) -> Result<Self, SourceError> {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .map_err(|_| SourceError::ParseError("Could not determine home directory".into()))?;
         Ok(Self {
             sessions_root: PathBuf::from(home).join(".codex").join("sessions"),
             recent_within_days: Some(7),
+            config: Some(config),
         })
     }
 
@@ -459,11 +469,22 @@ impl CodexSessionsSource {
         Self {
             sessions_root: path.into(),
             recent_within_days: None,
+            config: None,
         }
     }
 
+    fn window_days(&self) -> Option<i64> {
+        if let Some(config) = &self.config {
+            let def = window_setting_for_source(self.id())
+                .expect("codex-sessions should have a window setting definition");
+            return Some(SourceConfigStore::new(config.clone()).get_window_days(self.id(), &def));
+        }
+
+        self.recent_within_days
+    }
+
     fn sessions(&self) -> Vec<CodexSessionRecord> {
-        collect_codex_sessions(&self.sessions_root, self.recent_within_days)
+        collect_codex_sessions(&self.sessions_root, self.window_days())
     }
 }
 
@@ -486,6 +507,7 @@ impl Source for CodexSessionsSource {
 
     fn parse(&self) -> Result<Value, SourceError> {
         let sessions = self.sessions();
+        let window_days = self.window_days();
 
         let session_values: Vec<Value> = sessions
             .iter()
@@ -513,10 +535,8 @@ impl Source for CodexSessionsSource {
             .collect();
 
         let mut sum = CodexTokenUsage::default();
-        let total_duration_seconds: i64 = sessions
-            .iter()
-            .filter_map(|s| s.session_span_seconds)
-            .sum();
+        let total_duration_seconds: i64 =
+            sessions.iter().filter_map(|s| s.session_span_seconds).sum();
         let total_agentic_seconds: i64 = sessions.iter().filter_map(|s| s.agentic_seconds).sum();
         for s in &sessions {
             sum.add_assign(&s.token_totals);
@@ -534,8 +554,8 @@ impl Source for CodexSessionsSource {
                 "duration_basis": "session_meta.timestamp_to_last_event_timestamp",
                 "dedupe_basis": "one_record_per_jsonl_session_file",
                 "window": {
-                    "mode": if self.recent_within_days.is_some() { "recent_days" } else { "all_in_path" },
-                    "days": self.recent_within_days,
+                    "mode": if window_days.is_some() { "recent_days" } else { "all_in_path" },
+                    "days": window_days,
                 },
                 "unsupported_metrics": ["cache_creation_tokens"],
                 "notes": [
@@ -561,15 +581,26 @@ impl Source for CodexSessionsSource {
     fn preview(&self) -> Result<SourcePreview, SourceError> {
         let sessions = self.sessions();
         let total_tokens: u64 = sessions.iter().map(|s| s.token_totals.total).sum();
+        let window_days = self.window_days();
         let summary = if sessions.is_empty() {
-            "No Codex sessions found".to_string()
+            match window_days {
+                Some(days) => format!("No Codex sessions in last {} days", days),
+                None => "No Codex sessions found".to_string(),
+            }
         } else {
-            format!("{} sessions, {} tokens", sessions.len(), format_number(total_tokens))
+            format!(
+                "{} sessions, {} tokens",
+                sessions.len(),
+                format_number(total_tokens)
+            )
         };
 
         let mut fields = vec![
             PreviewField {
-                label: "Sessions".into(),
+                label: match window_days {
+                    Some(days) => format!("Sessions ({}d)", days),
+                    None => "Sessions".into(),
+                },
                 value: sessions.len().to_string(),
                 sensitive: false,
             },
@@ -582,7 +613,10 @@ impl Source for CodexSessionsSource {
         if let Some(latest) = sessions.first() {
             fields.push(PreviewField {
                 label: "Latest Session".into(),
-                value: latest.title.clone().unwrap_or_else(|| "Codex session".into()),
+                value: latest
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| "Codex session".into()),
                 sensitive: false,
             });
             if let Some(project) = &latest.project_path {
@@ -607,7 +641,9 @@ impl Source for CodexSessionsSource {
             PropertyDef {
                 key: "sessions".into(),
                 label: "Sessions".into(),
-                description: "Session list with token totals and context".into(),
+                description:
+                    "Session list with token totals and context from the configured data window"
+                        .into(),
                 default_enabled: true,
                 privacy_sensitive: true,
             },
@@ -619,6 +655,10 @@ impl Source for CodexSessionsSource {
                 privacy_sensitive: false,
             },
         ]
+    }
+
+    fn has_meaningful_payload(&self, payload: &serde_json::Value) -> bool {
+        payload["summary"]["sessions_count"].as_u64().unwrap_or(0) > 0
     }
 }
 
@@ -661,7 +701,8 @@ mod tests {
         let source = CodexSessionsSource::new_with_path(fixture_dir());
         let actual = normalize(source.parse().unwrap());
         let expected_path = fixture_base().join("expected/codex-sessions.json");
-        let expected: Value = serde_json::from_str(&fs::read_to_string(expected_path).unwrap()).unwrap();
+        let expected: Value =
+            serde_json::from_str(&fs::read_to_string(expected_path).unwrap()).unwrap();
         if expected.get("_status").and_then(|v| v.as_str()) == Some("pending") {
             // Placeholder is allowed before goldens are generated.
             return;

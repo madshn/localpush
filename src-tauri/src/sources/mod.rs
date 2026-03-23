@@ -5,22 +5,23 @@ use thiserror::Error;
 
 use crate::source_config::PropertyDef;
 
-pub mod claude_stats;
-pub mod claude_sessions;
-pub mod codex_sessions;
-pub mod codex_stats;
-pub mod apple_podcasts;
 pub mod apple_notes;
 pub mod apple_photos;
+pub mod apple_podcasts;
+pub mod claude_sessions;
+pub mod claude_sessions_collector;
+pub mod claude_stats;
+pub mod codex_sessions;
+pub mod codex_stats;
 pub mod desktop_activity;
 
-pub use claude_stats::ClaudeStatsSource;
-pub use claude_sessions::ClaudeSessionsSource;
-pub use codex_sessions::CodexSessionsSource;
-pub use codex_stats::CodexStatsSource;
-pub use apple_podcasts::ApplePodcastsSource;
 pub use apple_notes::AppleNotesSource;
 pub use apple_photos::ApplePhotosSource;
+pub use apple_podcasts::ApplePodcastsSource;
+pub use claude_sessions::ClaudeSessionsSource;
+pub use claude_stats::ClaudeStatsSource;
+pub use codex_sessions::CodexSessionsSource;
+pub use codex_stats::CodexStatsSource;
 pub use desktop_activity::DesktopActivitySource;
 
 /// Errors that can occur when parsing or accessing sources
@@ -59,6 +60,24 @@ pub struct SourcePreview {
     pub last_updated: Option<DateTime<Utc>>,
 }
 
+fn default_fingerprint_payload(payload: &serde_json::Value) -> serde_json::Value {
+    let mut normalized = payload.clone();
+
+    if let Some(obj) = normalized.as_object_mut() {
+        obj.remove("timestamp");
+
+        if let Some(meta) = obj.get_mut("metadata").and_then(|m| m.as_object_mut()) {
+            meta.remove("generated_at");
+        }
+
+        if let Some(meta) = obj.get_mut("meta").and_then(|m| m.as_object_mut()) {
+            meta.remove("generated_at");
+        }
+    }
+
+    normalized
+}
+
 /// Trait that all sources must implement
 pub trait Source: Send + Sync {
     /// Unique identifier for this source (e.g., "claude-stats")
@@ -86,5 +105,21 @@ pub trait Source: Send + Sync {
     /// Default implementation returns empty (no configurable properties).
     fn available_properties(&self) -> Vec<PropertyDef> {
         vec![]
+    }
+
+    /// Whether the filtered payload contains enough signal to be worth delivering.
+    ///
+    /// Default: `true` — specific sources should override this to suppress
+    /// empty snapshots or zero-activity aggregates.
+    fn has_meaningful_payload(&self, _payload: &serde_json::Value) -> bool {
+        true
+    }
+
+    /// Normalize the payload used for change detection between pushes.
+    ///
+    /// Default removes volatile freshness timestamps so scheduled deliveries only
+    /// fire when the substantive content changes.
+    fn fingerprint_payload(&self, payload: &serde_json::Value) -> serde_json::Value {
+        default_fingerprint_payload(payload)
     }
 }

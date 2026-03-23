@@ -5,14 +5,17 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::bindings::SourceBinding;
-use crate::source_config::{PropertyState, SourceConfigStore};
+use crate::delivery_worker::resolve_binding_auth;
+use crate::source_config::{PropertyState, SourceConfigStore, WindowSettingState};
+use crate::source_manager::PreparedPayload;
 use crate::state::AppState;
-use crate::traits::{DeliveryStatus, Target, WebhookAuth};
+use crate::traits::{DeliveryStatus, SourceStatusCount, Target};
 
 #[derive(Debug, Serialize)]
 pub struct AppInfoResponse {
     pub version: String,
     pub build_profile: String,
+    pub build_number: String,
 }
 
 #[tauri::command]
@@ -24,6 +27,9 @@ pub fn get_app_info() -> AppInfoResponse {
         } else {
             "release".to_string()
         },
+        build_number: option_env!("LOCALPUSH_BUILD_NUMBER")
+            .unwrap_or("dev")
+            .to_string(),
     }
 }
 
@@ -39,6 +45,7 @@ pub struct DeliveryStatusResponse {
     pub pending_count: usize,
     pub failed_count: usize,
     pub last_delivery: Option<String>,
+    pub dlq_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,12 +73,6 @@ pub struct DeliveryQueueItem {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct WebhookConfig {
-    pub url: String,
-    pub auth: WebhookAuth,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct CustomTargetConfig {
     pub name: String,
     pub webhook_url: String,
@@ -83,11 +84,15 @@ pub struct CustomTargetConfig {
     pub auth_password: Option<String>,
 }
 
-/// Get the current delivery status
+/// Get the current delivery status (runs off main thread)
 #[tauri::command]
-pub fn get_delivery_status(state: State<'_, AppState>) -> Result<DeliveryStatusResponse, String> {
+pub async fn get_delivery_status(
+    state: State<'_, AppState>,
+) -> Result<DeliveryStatusResponse, String> {
     tracing::debug!(command = "get_delivery_status", "Command invoked");
-    match state.ledger.get_stats() {
+    let ledger = state.ledger.clone();
+
+    tauri::async_runtime::spawn_blocking(move || match ledger.get_stats() {
         Ok(stats) => {
             let overall = if stats.dlq > 0 || stats.failed > 0 || stats.target_paused > 0 {
                 "error"
@@ -97,27 +102,36 @@ pub fn get_delivery_status(state: State<'_, AppState>) -> Result<DeliveryStatusR
                 "active"
             };
 
-            tracing::debug!(
-                pending = stats.pending,
-                in_flight = stats.in_flight,
-                failed = stats.failed,
-                target_paused = stats.target_paused,
-                overall = %overall,
-                "Delivery status retrieved"
-            );
-
             Ok(DeliveryStatusResponse {
                 overall: overall.to_string(),
                 pending_count: stats.pending + stats.in_flight,
                 failed_count: stats.failed + stats.target_paused,
-                last_delivery: None, // TODO: Track last delivery timestamp
+                last_delivery: None,
+                dlq_count: stats.dlq,
             })
         }
         Err(e) => {
             tracing::error!(error = %e, "Failed to get delivery status");
             Err(e.to_string())
         }
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Lightweight per-source status counts for traffic light indicators (runs off main thread).
+#[tauri::command]
+pub async fn get_source_status_counts(
+    state: State<'_, AppState>,
+) -> Result<Vec<SourceStatusCount>, String> {
+    tracing::debug!(command = "get_source_status_counts", "Command invoked");
+    let ledger = state.ledger.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        ledger.get_source_status_counts().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Get available data sources
@@ -126,68 +140,74 @@ pub fn get_sources(state: State<'_, AppState>) -> Result<Vec<SourceResponse>, St
     tracing::info!(command = "get_sources", "Command invoked");
     let sources = state.source_manager.list_sources();
     tracing::debug!(source_count = sources.len(), "Sources retrieved");
-    Ok(sources.into_iter().map(|s| SourceResponse {
-        id: s.id.clone(),
-        description: format!("Data from {}", s.name),
-        name: s.name,
-        enabled: s.enabled,
-        last_sync: None, // TODO: track last sync time
-        watch_path: s.watch_path.map(|p| p.display().to_string()),
-    }).collect())
+    Ok(sources
+        .into_iter()
+        .map(|s| SourceResponse {
+            id: s.id.clone(),
+            description: format!("Data from {}", s.name),
+            name: s.name,
+            enabled: s.enabled,
+            last_sync: None, // TODO: track last sync time
+            watch_path: s.watch_path.map(|p| p.display().to_string()),
+        })
+        .collect())
 }
 
-/// Get the delivery queue
+/// Get the delivery queue (runs off main thread to avoid UI blocking)
 #[tauri::command]
-pub fn get_delivery_queue(state: State<'_, AppState>) -> Result<Vec<DeliveryQueueItem>, String> {
+pub async fn get_delivery_queue(
+    state: State<'_, AppState>,
+) -> Result<Vec<DeliveryQueueItem>, String> {
     tracing::debug!(command = "get_delivery_queue", "Command invoked");
-    let mut items = Vec::new();
+    let ledger = state.ledger.clone();
 
-    for status in [
-        DeliveryStatus::Pending,
-        DeliveryStatus::InFlight,
-        DeliveryStatus::Failed,
-        DeliveryStatus::Dlq,
-        DeliveryStatus::TargetPaused,
-        DeliveryStatus::Delivered,
-    ] {
-        match state.ledger.get_by_status(status) {
-            Ok(entries) => {
-                for entry in entries {
-                    items.push(DeliveryQueueItem {
-                        id: entry.id,
-                        event_type: entry.event_type,
-                        status: entry.status.as_str().to_string(),
-                        retry_count: entry.retry_count,
-                        last_error: entry.last_error,
-                        created_at: chrono::DateTime::from_timestamp(entry.created_at, 0)
-                            .map(|dt| dt.to_rfc3339())
-                            .unwrap_or_default(),
-                        delivered_at: entry.delivered_at
-                            .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                            .map(|dt| dt.to_rfc3339()),
-                        payload: entry.payload,
-                        trigger_type: entry.trigger_type,
-                        delivered_to: entry.delivered_to,
-                    });
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut items = Vec::new();
+
+        for status in [
+            DeliveryStatus::Pending,
+            DeliveryStatus::InFlight,
+            DeliveryStatus::Failed,
+            DeliveryStatus::Dlq,
+            DeliveryStatus::TargetPaused,
+            DeliveryStatus::Delivered,
+        ] {
+            match ledger.get_by_status(status) {
+                Ok(entries) => {
+                    for entry in entries {
+                        items.push(DeliveryQueueItem {
+                            id: entry.id,
+                            event_type: entry.event_type,
+                            status: entry.status.as_str().to_string(),
+                            retry_count: entry.retry_count,
+                            last_error: entry.last_error,
+                            created_at: chrono::DateTime::from_timestamp(entry.created_at, 0)
+                                .map(|dt| dt.to_rfc3339())
+                                .unwrap_or_default(),
+                            delivered_at: entry.delivered_at
+                                .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                                .map(|dt| dt.to_rfc3339()),
+                            payload: entry.payload,
+                            trigger_type: entry.trigger_type,
+                            delivered_to: entry.delivered_to,
+                        });
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(status = %status.as_str(), error = %e, "Failed to get entries by status");
+                    return Err(e.to_string());
                 }
             }
-            Err(e) => {
-                tracing::error!(status = %status.as_str(), error = %e, "Failed to get entries by status");
-                return Err(e.to_string());
-            }
         }
-    }
 
-    tracing::debug!(queue_size = items.len(), "Delivery queue retrieved");
-    Ok(items)
+        tracing::debug!(queue_size = items.len(), "Delivery queue retrieved");
+        Ok(items)
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// Enable a data source
 #[tauri::command]
-pub fn enable_source(
-    state: State<'_, AppState>,
-    source_id: String,
-) -> Result<(), String> {
+pub fn enable_source(state: State<'_, AppState>, source_id: String) -> Result<(), String> {
     tracing::info!(command = "enable_source", source_id = %source_id, "Command invoked");
     match state.source_manager.enable(&source_id) {
         Ok(()) => {
@@ -203,10 +223,7 @@ pub fn enable_source(
 
 /// Disable a data source
 #[tauri::command]
-pub fn disable_source(
-    state: State<'_, AppState>,
-    source_id: String,
-) -> Result<(), String> {
+pub fn disable_source(state: State<'_, AppState>, source_id: String) -> Result<(), String> {
     tracing::info!(command = "disable_source", source_id = %source_id, "Command invoked");
     match state.source_manager.disable(&source_id) {
         Ok(()) => {
@@ -220,68 +237,6 @@ pub fn disable_source(
     }
 }
 
-/// Add a webhook target
-#[tauri::command]
-pub async fn add_webhook_target(
-    state: State<'_, AppState>,
-    config: WebhookConfig,
-) -> Result<(), String> {
-    tracing::info!(command = "add_webhook_target", url = %config.url, "Command invoked");
-
-    // Store URL in config
-    if let Err(e) = state.config.set("webhook_url", &config.url) {
-        tracing::error!(error = %e, "Failed to store webhook URL");
-        return Err(e.to_string());
-    }
-
-    // Store auth as JSON in config
-    let auth_json = serde_json::to_string(&config.auth).map_err(|e| {
-        tracing::error!(error = %e, "Failed to serialize auth");
-        e.to_string()
-    })?;
-    if let Err(e) = state.config.set("webhook_auth_json", &auth_json) {
-        tracing::error!(error = %e, "Failed to store webhook auth");
-        return Err(e.to_string());
-    }
-
-    // Also store in keychain for security
-    let cred_key = "webhook:default";
-    let cred_value = serde_json::to_string(&config.auth).map_err(|e| {
-        tracing::error!(error = %e, "Failed to serialize auth for keychain");
-        e.to_string()
-    })?;
-    if let Err(e) = state.credentials.store(cred_key, &cred_value) {
-        tracing::error!(error = %e, "Failed to store webhook credentials in keychain");
-        return Err(e.to_string());
-    }
-
-    tracing::info!(url = %config.url, "Webhook target configured successfully");
-    Ok(())
-}
-
-/// Test a webhook connection
-#[tauri::command]
-pub async fn test_webhook(
-    state: State<'_, AppState>,
-    config: WebhookConfig,
-) -> Result<String, String> {
-    tracing::info!(command = "test_webhook", url = %config.url, "Command invoked");
-    match state.webhook_client.test(&config.url, &config.auth).await {
-        Ok(response) => {
-            tracing::info!(
-                url = %config.url,
-                duration_ms = response.duration_ms,
-                "Webhook test successful"
-            );
-            Ok(format!("Connected! Response in {}ms", response.duration_ms))
-        }
-        Err(e) => {
-            tracing::error!(url = %config.url, error = %e, "Webhook test failed");
-            Err(e.to_string())
-        }
-    }
-}
-
 /// Get a preview of data from a source (Radical Transparency)
 #[tauri::command]
 pub fn get_source_preview(
@@ -289,11 +244,10 @@ pub fn get_source_preview(
     source_id: String,
 ) -> Result<serde_json::Value, String> {
     tracing::info!(command = "get_source_preview", source_id = %source_id, "Command invoked");
-    let source = state.source_manager.get_source(&source_id)
-        .ok_or_else(|| {
-            tracing::error!(source_id = %source_id, "Unknown source");
-            format!("Unknown source: {}", source_id)
-        })?;
+    let source = state.source_manager.get_source(&source_id).ok_or_else(|| {
+        tracing::error!(source_id = %source_id, "Unknown source");
+        format!("Unknown source: {}", source_id)
+    })?;
 
     match source.preview() {
         Ok(preview) => {
@@ -319,45 +273,15 @@ pub fn get_source_sample_payload(
     source_id: String,
 ) -> Result<serde_json::Value, String> {
     tracing::info!(command = "get_source_sample_payload", source_id = %source_id, "Command invoked");
-    let source = state.source_manager.get_source(&source_id)
-        .ok_or_else(|| {
-            tracing::error!(source_id = %source_id, "Unknown source for sample payload");
-            format!("Unknown source: {}", source_id)
-        })?;
+    let source = state.source_manager.get_source(&source_id).ok_or_else(|| {
+        tracing::error!(source_id = %source_id, "Unknown source for sample payload");
+        format!("Unknown source: {}", source_id)
+    })?;
 
     source.parse().map_err(|e| {
         tracing::error!(source_id = %source_id, error = %e, "Failed to generate sample payload");
         e.to_string()
     })
-}
-
-/// Get webhook configuration
-#[tauri::command]
-pub fn get_webhook_config(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    tracing::info!(command = "get_webhook_config", "Command invoked");
-
-    match state.config.get("webhook_url") {
-        Ok(url) => {
-            match state.config.get("webhook_auth_json") {
-                Ok(auth_json) => {
-                    let auth = auth_json.and_then(|j| serde_json::from_str::<WebhookAuth>(&j).ok());
-                    tracing::debug!(has_url = url.is_some(), has_auth = auth.is_some(), "Webhook config retrieved");
-                    Ok(serde_json::json!({
-                        "url": url.unwrap_or_default(),
-                        "auth": auth
-                    }))
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "Failed to get webhook auth");
-                    Err(e.to_string())
-                }
-            }
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to get webhook url");
-            Err(e.to_string())
-        }
-    }
 }
 
 /// Get a setting value
@@ -450,12 +374,81 @@ pub async fn connect_n8n_target(
         .set(&format!("target.{}.type", target_id), "n8n");
 
     // Register target
-    state
-        .target_manager
-        .register(std::sync::Arc::new(target));
+    state.target_manager.register(std::sync::Arc::new(target));
 
     tracing::info!(target_id = %target_id, "n8n target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
+}
+
+/// Update an existing n8n target in place and resume paused deliveries on success.
+#[tauri::command]
+pub async fn update_n8n_target(
+    state: State<'_, AppState>,
+    target_id: String,
+    instance_url: String,
+    api_key: String,
+) -> Result<serde_json::Value, String> {
+    tracing::info!(
+        command = "update_n8n_target",
+        target_id = %target_id,
+        url = %instance_url,
+        "Command invoked"
+    );
+
+    let target =
+        crate::targets::N8nTarget::new(target_id.clone(), instance_url.clone(), api_key.clone());
+
+    // Test the updated target before persisting anything.
+    let info = target.test_connection().await.map_err(|e| {
+        tracing::error!(target_id = %target_id, error = %e, "n8n update test failed");
+        e.to_string()
+    })?;
+
+    let cred_key = format!("n8n:{}", target_id);
+    state
+        .credentials
+        .store(&cred_key, &api_key)
+        .map_err(|e| format!("Failed to store n8n API key: {}", e))?;
+
+    state
+        .config
+        .set(&format!("target.{}.url", target_id), &instance_url)
+        .map_err(|e| format!("Failed to save n8n URL: {}", e))?;
+    state
+        .config
+        .set(&format!("target.{}.type", target_id), "n8n")
+        .map_err(|e| format!("Failed to save n8n target type: {}", e))?;
+
+    // Overwrite the existing target registration with fresh credentials.
+    state.target_manager.register(std::sync::Arc::new(target));
+
+    state.health_tracker.mark_reconnected(&target_id);
+
+    let endpoint_ids: Vec<String> = state
+        .binding_store
+        .list_all()
+        .into_iter()
+        .filter(|b| b.target_id == target_id)
+        .map(|b| b.endpoint_id)
+        .collect();
+    let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
+    let resumed = state
+        .ledger
+        .resume_target_deliveries(&ep_refs)
+        .map_err(|e| format!("Failed to resume deliveries: {}", e))?;
+
+    tracing::info!(
+        target_id = %target_id,
+        resumed_count = resumed,
+        "n8n target updated successfully"
+    );
+
+    Ok(serde_json::json!({
+        "target_id": target_id,
+        "status": "healthy",
+        "resumed_count": resumed,
+        "target_info": serde_json::to_value(info).unwrap_or_default(),
+    }))
 }
 
 /// Connect an ntfy target (server URL + optional topic + auth)
@@ -497,9 +490,7 @@ pub async fn connect_ntfy_target(
         .config
         .set(&format!("target.{}.type", target_id), "ntfy");
     if let Some(ref t) = topic {
-        let _ = state
-            .config
-            .set(&format!("target.{}.topic", target_id), t);
+        let _ = state.config.set(&format!("target.{}.topic", target_id), t);
     }
     if let Some(ref token) = auth_token {
         let cred_key = format!("ntfy:{}", target_id);
@@ -508,9 +499,7 @@ pub async fn connect_ntfy_target(
         }
     }
 
-    state
-        .target_manager
-        .register(std::sync::Arc::new(target));
+    state.target_manager.register(std::sync::Arc::new(target));
 
     tracing::info!(target_id = %target_id, "ntfy target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
@@ -543,7 +532,8 @@ pub async fn connect_make_target(
     })?;
 
     // Extract team_id from test_connection response
-    let team_id = info.details
+    let team_id = info
+        .details
         .get("team_id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
@@ -573,7 +563,7 @@ pub async fn connect_make_target(
         target_id.clone(),
         zone_url.clone(),
         api_key.clone(),
-        team_id
+        team_id,
     );
     state
         .target_manager
@@ -600,11 +590,12 @@ pub async fn connect_zapier_target(
             .next()
             .unwrap_or("0")
     );
-    let target = crate::targets::ZapierTarget::new(target_id.clone(), name.clone(), webhook_url.clone())
-        .map_err(|e| {
-            tracing::error!(error = %e, "Invalid Zapier webhook URL");
-            e.to_string()
-        })?;
+    let target =
+        crate::targets::ZapierTarget::new(target_id.clone(), name.clone(), webhook_url.clone())
+            .map_err(|e| {
+                tracing::error!(error = %e, "Invalid Zapier webhook URL");
+                e.to_string()
+            })?;
 
     // Test connection before persisting
     let info = target.test_connection().await.map_err(|e| {
@@ -624,9 +615,7 @@ pub async fn connect_zapier_target(
         .set(&format!("target.{}.type", target_id), "zapier");
 
     // Register target
-    state
-        .target_manager
-        .register(std::sync::Arc::new(target));
+    state.target_manager.register(std::sync::Arc::new(target));
 
     tracing::info!(target_id = %target_id, "Zapier target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
@@ -653,32 +642,52 @@ pub async fn connect_custom_target(
     let auth = match config.auth_type.as_str() {
         "none" => crate::targets::AuthType::None,
         "bearer" => {
-            let token = config.auth_token.as_ref().ok_or_else(|| {
-                tracing::error!("Bearer auth requires token");
-                "Bearer auth requires token".to_string()
-            })?.clone();
+            let token = config
+                .auth_token
+                .as_ref()
+                .ok_or_else(|| {
+                    tracing::error!("Bearer auth requires token");
+                    "Bearer auth requires token".to_string()
+                })?
+                .clone();
             crate::targets::AuthType::Bearer { token }
         }
         "header" => {
-            let name = config.auth_header_name.as_ref().ok_or_else(|| {
-                tracing::error!("Header auth requires header name");
-                "Header auth requires header name".to_string()
-            })?.clone();
-            let value = config.auth_header_value.as_ref().ok_or_else(|| {
-                tracing::error!("Header auth requires header value");
-                "Header auth requires header value".to_string()
-            })?.clone();
+            let name = config
+                .auth_header_name
+                .as_ref()
+                .ok_or_else(|| {
+                    tracing::error!("Header auth requires header name");
+                    "Header auth requires header name".to_string()
+                })?
+                .clone();
+            let value = config
+                .auth_header_value
+                .as_ref()
+                .ok_or_else(|| {
+                    tracing::error!("Header auth requires header value");
+                    "Header auth requires header value".to_string()
+                })?
+                .clone();
             crate::targets::AuthType::Header { name, value }
         }
         "basic" => {
-            let username = config.auth_username.as_ref().ok_or_else(|| {
-                tracing::error!("Basic auth requires username");
-                "Basic auth requires username".to_string()
-            })?.clone();
-            let password = config.auth_password.as_ref().ok_or_else(|| {
-                tracing::error!("Basic auth requires password");
-                "Basic auth requires password".to_string()
-            })?.clone();
+            let username = config
+                .auth_username
+                .as_ref()
+                .ok_or_else(|| {
+                    tracing::error!("Basic auth requires username");
+                    "Basic auth requires username".to_string()
+                })?
+                .clone();
+            let password = config
+                .auth_password
+                .as_ref()
+                .ok_or_else(|| {
+                    tracing::error!("Basic auth requires password");
+                    "Basic auth requires password".to_string()
+                })?
+                .clone();
             crate::targets::AuthType::Basic { username, password }
         }
         _ => {
@@ -688,12 +697,16 @@ pub async fn connect_custom_target(
     };
 
     // Create target
-    let target =
-        crate::targets::CustomTarget::new(target_id.clone(), config.name.clone(), config.webhook_url.clone(), auth)
-            .map_err(|e| {
-                tracing::error!(error = %e, "Invalid custom webhook configuration");
-                e.to_string()
-            })?;
+    let target = crate::targets::CustomTarget::new(
+        target_id.clone(),
+        config.name.clone(),
+        config.webhook_url.clone(),
+        auth,
+    )
+    .map_err(|e| {
+        tracing::error!(error = %e, "Invalid custom webhook configuration");
+        e.to_string()
+    })?;
 
     // Test connection before persisting
     let info = target.test_connection().await.map_err(|e| {
@@ -740,16 +753,18 @@ pub async fn connect_custom_target(
     let _ = state
         .config
         .set(&format!("target.{}.type", target_id), "custom");
-    let _ = state
-        .config
-        .set(&format!("target.{}.auth_type", target_id), &config.auth_type);
+    let _ = state.config.set(
+        &format!("target.{}.auth_type", target_id),
+        &config.auth_type,
+    );
 
     // Store non-secret auth metadata
     if config.auth_type == "header" {
         if let Some(ref header_name) = config.auth_header_name {
-            let _ = state
-                .config
-                .set(&format!("target.{}.auth_header_name", target_id), header_name);
+            let _ = state.config.set(
+                &format!("target.{}.auth_header_name", target_id),
+                header_name,
+            );
         }
     } else if config.auth_type == "basic" {
         if let Some(ref username) = config.auth_username {
@@ -760,9 +775,7 @@ pub async fn connect_custom_target(
     }
 
     // Register target
-    state
-        .target_manager
-        .register(std::sync::Arc::new(target));
+    state.target_manager.register(std::sync::Arc::new(target));
 
     tracing::info!(target_id = %target_id, "Custom webhook target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
@@ -776,7 +789,16 @@ pub async fn list_targets(state: State<'_, AppState>) -> Result<Vec<serde_json::
     Ok(targets
         .into_iter()
         .map(|(id, name, target_type)| {
-            serde_json::json!({ "id": id, "name": name, "target_type": target_type })
+            let base_url = state
+                .target_manager
+                .get(&id)
+                .map(|target| target.base_url().to_string());
+            serde_json::json!({
+                "id": id,
+                "name": name,
+                "target_type": target_type,
+                "base_url": base_url,
+            })
         })
         .collect())
 }
@@ -809,15 +831,15 @@ pub async fn get_target_health(
         let degradation = state.health_tracker.is_degraded(target_id);
 
         // Get endpoint_ids for this target to count paused deliveries
-        let endpoint_ids: Vec<String> = state.binding_store.list_all()
+        let endpoint_ids: Vec<String> = state
+            .binding_store
+            .list_all()
             .into_iter()
             .filter(|b| b.target_id == *target_id)
             .map(|b| b.endpoint_id)
             .collect();
         let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
-        let queued_count = state.ledger
-            .count_paused_for_target(&ep_refs)
-            .unwrap_or(0);
+        let queued_count = state.ledger.count_paused_for_target(&ep_refs).unwrap_or(0);
 
         let health = if let Some(info) = degradation {
             serde_json::json!({
@@ -853,19 +875,28 @@ pub async fn reconnect_target(
 ) -> Result<serde_json::Value, String> {
     tracing::info!(command = "reconnect_target", target_id = %target_id, "Command invoked");
 
+    let target_type = state
+        .target_manager
+        .get(&target_id)
+        .map(|target| target.target_type().to_string())
+        .ok_or_else(|| format!("Target not found: {}", target_id))?;
+
+    let endpoint_ids: Vec<String> = state
+        .binding_store
+        .list_all()
+        .into_iter()
+        .filter(|b| b.target_id == target_id)
+        .map(|b| b.endpoint_id)
+        .collect();
+    let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
+
     // Test the target's connection
     match state.target_manager.test_connection(&target_id).await {
         Ok(info) => {
             // Connection succeeded — mark healthy and resume deliveries
             state.health_tracker.mark_reconnected(&target_id);
-
-            let endpoint_ids: Vec<String> = state.binding_store.list_all()
-                .into_iter()
-                .filter(|b| b.target_id == target_id)
-                .map(|b| b.endpoint_id)
-                .collect();
-            let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
-            let resumed = state.ledger
+            let resumed = state
+                .ledger
                 .resume_target_deliveries(&ep_refs)
                 .map_err(|e| format!("Failed to resume deliveries: {}", e))?;
 
@@ -884,7 +915,18 @@ pub async fn reconnect_target(
         }
         Err(e) => {
             let err_str = e.to_string();
-            let needs_reauth = err_str.contains("Token") || err_str.contains("Auth") || err_str.contains("401") || err_str.contains("403");
+            if target_type == "n8n" {
+                if let Some(result) =
+                    try_reconnect_via_bound_webhook(&state, &target_id, &ep_refs).await?
+                {
+                    return Ok(result);
+                }
+            }
+
+            let needs_reauth = err_str.contains("Token")
+                || err_str.contains("Auth")
+                || err_str.contains("401")
+                || err_str.contains("403");
             tracing::warn!(target_id = %target_id, error = %err_str, needs_reauth = %needs_reauth, "Reconnect failed");
 
             if needs_reauth {
@@ -894,6 +936,81 @@ pub async fn reconnect_target(
             }
         }
     }
+}
+
+async fn try_reconnect_via_bound_webhook(
+    state: &AppState,
+    target_id: &str,
+    endpoint_refs: &[&str],
+) -> Result<Option<serde_json::Value>, String> {
+    let bindings: Vec<SourceBinding> = state
+        .binding_store
+        .list_all()
+        .into_iter()
+        .filter(|b| b.target_id == target_id)
+        .collect();
+
+    if bindings.is_empty() {
+        return Ok(None);
+    }
+
+    let mut last_error: Option<String> = None;
+
+    for binding in &bindings {
+        let auth = resolve_binding_auth(binding, state.credentials.as_ref());
+        match state
+            .webhook_client
+            .test(&binding.endpoint_url, &auth)
+            .await
+        {
+            Ok(response) => {
+                tracing::info!(
+                    target_id = %target_id,
+                    endpoint_id = %binding.endpoint_id,
+                    status = response.status,
+                    "Target recovered via bound webhook probe"
+                );
+                state.health_tracker.mark_reconnected(target_id);
+                let resumed = state
+                    .ledger
+                    .resume_target_deliveries(endpoint_refs)
+                    .map_err(|e| format!("Failed to resume deliveries: {}", e))?;
+
+                return Ok(Some(serde_json::json!({
+                    "target_id": target_id,
+                    "status": "healthy",
+                    "resumed_count": resumed,
+                    "recovery_mode": "bound_webhook",
+                    "target_info": {
+                        "id": target_id,
+                        "name": "n8n",
+                        "target_type": "n8n",
+                        "base_url": binding.endpoint_url,
+                        "connected": true,
+                        "details": {
+                            "endpoint_id": binding.endpoint_id,
+                            "endpoint_name": binding.endpoint_name,
+                        }
+                    }
+                })));
+            }
+            Err(err) => {
+                last_error = Some(err.to_string());
+                tracing::warn!(
+                    target_id = %target_id,
+                    endpoint_id = %binding.endpoint_id,
+                    error = %err,
+                    "Bound webhook probe failed"
+                );
+            }
+        }
+    }
+
+    if let Some(err) = last_error {
+        return Err(format!("Reconnect failed: {}", err));
+    }
+
+    Ok(None)
 }
 
 /// List endpoints for a specific target.
@@ -907,18 +1024,18 @@ pub async fn list_target_endpoints(
 
     // Try live endpoint listing first
     match state.target_manager.list_endpoints(&target_id).await {
-        Ok(endpoints) => {
-            endpoints
-                .into_iter()
-                .map(|e| serde_json::to_value(e).map_err(|e| e.to_string()))
-                .collect()
-        }
+        Ok(endpoints) => endpoints
+            .into_iter()
+            .map(|e| serde_json::to_value(e).map_err(|e| e.to_string()))
+            .collect(),
         Err(e) => {
             tracing::warn!(target_id = %target_id, error = %e, "Live endpoint listing failed, falling back to existing bindings");
 
             // Fall back to endpoints from existing bindings for this target (deduplicated)
             // Infer auth_type from the registered target's type
-            let auth_type = state.target_manager.get(&target_id)
+            let auth_type = state
+                .target_manager
+                .get(&target_id)
                 .map(|t| match t.target_type() {
                     "google-sheets" => "oauth2",
                     _ => "custom",
@@ -930,14 +1047,16 @@ pub async fn list_target_endpoints(
             let fallback: Vec<serde_json::Value> = bindings
                 .into_iter()
                 .filter(|b| b.target_id == target_id && seen.insert(b.endpoint_id.clone()))
-                .map(|b| serde_json::json!({
-                    "id": b.endpoint_id,
-                    "name": b.endpoint_name,
-                    "url": b.endpoint_url,
-                    "authenticated": true,
-                    "auth_type": auth_type,
-                    "metadata": {}
-                }))
+                .map(|b| {
+                    serde_json::json!({
+                        "id": b.endpoint_id,
+                        "name": b.endpoint_name,
+                        "url": b.endpoint_url,
+                        "authenticated": true,
+                        "auth_type": auth_type,
+                        "metadata": {}
+                    })
+                })
                 .collect();
 
             if fallback.is_empty() {
@@ -990,10 +1109,13 @@ pub fn create_binding(
             if !auth_value.is_empty() {
                 // New auth value provided — store in credential store
                 let cred_key = format!("binding:{}:{}", source_id, endpoint_id);
-                state.credentials.store(&cred_key, auth_value).map_err(|e| {
-                    tracing::error!(error = %e, "Failed to store binding credential");
-                    e.to_string()
-                })?;
+                state
+                    .credentials
+                    .store(&cred_key, auth_value)
+                    .map_err(|e| {
+                        tracing::error!(error = %e, "Failed to store binding credential");
+                        e.to_string()
+                    })?;
                 auth_credential_key = Some(cred_key);
             } else if let Some(ref existing_key) = preserve_auth_credential_key {
                 // No new value but existing credential key — preserve it
@@ -1063,9 +1185,7 @@ pub fn get_source_bindings(
 
 /// List all bindings across all sources
 #[tauri::command]
-pub fn list_all_bindings(
-    state: State<'_, AppState>,
-) -> Result<Vec<serde_json::Value>, String> {
+pub fn list_all_bindings(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     tracing::info!(command = "list_all_bindings", "Command invoked");
     let bindings = state.binding_store.list_all();
     bindings
@@ -1084,23 +1204,30 @@ pub fn trigger_source_push(
 ) -> Result<String, String> {
     tracing::info!(command = "trigger_source_push", source_id = %source_id, "Command invoked");
 
-    // Parse and filter payload based on enabled properties
-    let payload = state.source_manager.parse_and_filter(&source_id).map_err(|e| {
-        tracing::error!(source_id = %source_id, error = %e, "Source parse/filter failed");
-        e.to_string()
-    })?;
+    let payload = match state
+        .source_manager
+        .prepare_payload_for_delivery(&source_id)
+        .map_err(|e| {
+            tracing::error!(source_id = %source_id, error = %e, "Source parse/filter failed");
+            e.to_string()
+        })? {
+        PreparedPayload::Deliver(payload) => payload,
+        PreparedPayload::Skip(reason) => {
+            tracing::info!(
+                source_id = %source_id,
+                reason = reason.as_str(),
+                "Manual push skipped"
+            );
+            return Ok(format!("skipped:{}", reason.as_str()));
+        }
+    };
 
     // "Push Now" delivers to ALL bindings (including scheduled ones), not just on_change.
     // Create one targeted delivery per binding for independent tracking.
     let bindings = state.binding_store.get_for_source(&source_id);
     if bindings.is_empty() {
-        // No bindings — fall back to legacy fan-out (global webhook)
-        let event_id = state.ledger.enqueue_manual(&source_id, payload).map_err(|e| {
-            tracing::error!(source_id = %source_id, error = %e, "Ledger enqueue failed");
-            e.to_string()
-        })?;
-        tracing::info!(source_id = %source_id, event_id = %event_id, "Manual push enqueued (legacy fan-out)");
-        return Ok(event_id);
+        tracing::info!(source_id = %source_id, "Manual push skipped: no bindings");
+        return Ok("skipped:no_bindings".to_string());
     }
 
     let mut first_event_id = String::new();
@@ -1115,7 +1242,8 @@ pub fn trigger_source_push(
         })?;
 
         // Write target display info immediately so the activity log shows it
-        let (target_type, base_url) = state.target_manager
+        let (target_type, base_url) = state
+            .target_manager
             .get(&binding.target_id)
             .map(|t| (t.target_type().to_string(), t.base_url().to_string()))
             .unwrap_or_else(|| ("webhook".to_string(), String::new()));
@@ -1133,6 +1261,10 @@ pub fn trigger_source_push(
             first_event_id = event_id;
         }
     }
+
+    let _ = state
+        .source_manager
+        .remember_payload_fingerprint(&source_id, &payload);
 
     tracing::info!(source_id = %source_id, binding_count = bindings.len(), "Manual push enqueued to all bindings");
     Ok(first_event_id)
@@ -1186,11 +1318,8 @@ pub async fn connect_google_sheets_target(
         client_secret,
     };
 
-    let target = crate::targets::GoogleSheetsTarget::new(
-        target_id.clone(),
-        email.clone(),
-        tokens.clone(),
-    );
+    let target =
+        crate::targets::GoogleSheetsTarget::new(target_id.clone(), email.clone(), tokens.clone());
 
     // Test connection before persisting
     let info = target.test_connection().await.map_err(|e| {
@@ -1206,9 +1335,10 @@ pub async fn connect_google_sheets_target(
     }
 
     // Store config
-    let _ = state
-        .config
-        .set(&format!("target.{}.url", target_id), "https://sheets.google.com");
+    let _ = state.config.set(
+        &format!("target.{}.url", target_id),
+        "https://sheets.google.com",
+    );
     let _ = state
         .config
         .set(&format!("target.{}.type", target_id), "google-sheets");
@@ -1217,9 +1347,7 @@ pub async fn connect_google_sheets_target(
         .set(&format!("target.{}.email", target_id), &email);
 
     // Register target
-    state
-        .target_manager
-        .register(std::sync::Arc::new(target));
+    state.target_manager.register(std::sync::Arc::new(target));
 
     tracing::info!(target_id = %target_id, email = %email, "Google Sheets target connected successfully");
     serde_json::to_value(info).map_err(|e| e.to_string())
@@ -1255,11 +1383,8 @@ pub async fn reauth_google_sheets_target(
     };
 
     // Create new target instance with same ID
-    let target = crate::targets::GoogleSheetsTarget::new(
-        target_id.clone(),
-        email.clone(),
-        tokens.clone(),
-    );
+    let target =
+        crate::targets::GoogleSheetsTarget::new(target_id.clone(), email.clone(), tokens.clone());
 
     // Test connection — fail early if tokens are bad
     let info = target.test_connection().await.map_err(|e| {
@@ -1280,22 +1405,20 @@ pub async fn reauth_google_sheets_target(
         .set(&format!("target.{}.email", target_id), &email);
 
     // Re-register — HashMap::insert replaces old entry, bindings still reference same target_id
-    state
-        .target_manager
-        .register(std::sync::Arc::new(target));
+    state.target_manager.register(std::sync::Arc::new(target));
 
     // Mark healthy and resume paused deliveries
     state.health_tracker.mark_reconnected(&target_id);
 
-    let endpoint_ids: Vec<String> = state.binding_store.list_all()
+    let endpoint_ids: Vec<String> = state
+        .binding_store
+        .list_all()
         .into_iter()
         .filter(|b| b.target_id == target_id)
         .map(|b| b.endpoint_id)
         .collect();
     let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
-    let resumed = state.ledger
-        .resume_target_deliveries(&ep_refs)
-        .unwrap_or(0);
+    let resumed = state.ledger.resume_target_deliveries(&ep_refs).unwrap_or(0);
 
     tracing::info!(
         target_id = %target_id,
@@ -1368,6 +1491,58 @@ pub fn set_source_property(
         property = %property,
         enabled = enabled,
         "Source property updated"
+    );
+
+    Ok(())
+}
+
+/// Get data window settings for a source, if supported.
+#[tauri::command]
+pub fn get_source_window_setting(
+    state: State<'_, AppState>,
+    source_id: String,
+) -> Result<Option<WindowSettingState>, String> {
+    tracing::info!(
+        command = "get_source_window_setting",
+        source_id = %source_id,
+        "Command invoked"
+    );
+
+    state
+        .source_manager
+        .get_source(&source_id)
+        .ok_or_else(|| format!("Source {} not found", source_id))?;
+
+    let config_store = SourceConfigStore::new(state.config.clone());
+    Ok(config_store.get_window_state(&source_id))
+}
+
+/// Set data window days for a source.
+#[tauri::command]
+pub fn set_source_window_days(
+    state: State<'_, AppState>,
+    source_id: String,
+    days: i64,
+) -> Result<(), String> {
+    tracing::info!(
+        command = "set_source_window_days",
+        source_id = %source_id,
+        days = days,
+        "Command invoked"
+    );
+
+    state
+        .source_manager
+        .get_source(&source_id)
+        .ok_or_else(|| format!("Source {} not found", source_id))?;
+
+    let config_store = SourceConfigStore::new(state.config.clone());
+    config_store.set_window_days(&source_id, days)?;
+
+    tracing::info!(
+        source_id = %source_id,
+        days = days,
+        "Source data window updated"
     );
 
     Ok(())
@@ -1481,10 +1656,7 @@ pub fn get_dlq_count(state: State<'_, AppState>) -> Result<u32, String> {
 
 /// Dismiss a DLQ entry (marks it as handled)
 #[tauri::command]
-pub fn dismiss_dlq_entry(
-    state: State<'_, AppState>,
-    entry_id: String,
-) -> Result<(), String> {
+pub fn dismiss_dlq_entry(state: State<'_, AppState>, entry_id: String) -> Result<(), String> {
     tracing::info!(command = "dismiss_dlq_entry", entry_id = %entry_id, "Command invoked");
 
     // Find the entry by event_id (convert entry_id to event_id)
@@ -1541,10 +1713,13 @@ pub fn replay_delivery_by_id(
 
     // Re-enqueue with the same payload and target
     let new_event_id = if let Some(ref target_id) = entry.target_endpoint_id {
-        state.ledger.enqueue_targeted(&entry.event_type, entry.payload, target_id)
+        state
+            .ledger
+            .enqueue_targeted(&entry.event_type, entry.payload, target_id)
     } else {
         state.ledger.enqueue(&entry.event_type, entry.payload)
-    }.map_err(|e| {
+    }
+    .map_err(|e| {
         tracing::error!(entry_id = %entry_id, error = %e, "Failed to replay delivery");
         e.to_string()
     })?;
@@ -1552,17 +1727,21 @@ pub fn replay_delivery_by_id(
     // Carry forward target display info from original entry if available
     if let Some(ref target_ep_id) = entry.target_endpoint_id {
         // Look up binding for this source+endpoint to build display JSON
-        let binding = state.binding_store
+        let binding = state
+            .binding_store
             .get_for_source(&entry.event_type)
             .into_iter()
             .find(|b| b.endpoint_id == *target_ep_id);
         if let Some(binding) = binding {
-            let (target_type, base_url) = state.target_manager
+            let (target_type, base_url) = state
+                .target_manager
                 .get(&binding.target_id)
                 .map(|t| (t.target_type().to_string(), t.base_url().to_string()))
                 .unwrap_or_else(|| ("webhook".to_string(), String::new()));
             let target_json = binding.build_delivered_to_json(&target_type, &base_url);
-            let _ = state.ledger.set_attempted_target(&new_event_id, &target_json);
+            let _ = state
+                .ledger
+                .set_attempted_target(&new_event_id, &target_json);
         }
     }
 
@@ -1579,11 +1758,10 @@ pub fn replay_delivery_by_id(
 #[tauri::command]
 pub fn open_feedback() -> Result<(), String> {
     tracing::info!(command = "open_feedback", "Command invoked");
-    open::that("https://github.com/madshn/localpush/issues")
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to open feedback URL");
-            format!("Failed to open browser: {}", e)
-        })
+    open::that("https://github.com/madshn/localpush/issues").map_err(|e| {
+        tracing::error!(error = %e, "Failed to open feedback URL");
+        format!("Failed to open browser: {}", e)
+    })
 }
 
 /// Timeline gap structure for scheduled deliveries that didn't happen
@@ -1599,9 +1777,7 @@ pub struct TimelineGap {
 
 /// Get timeline gaps for scheduled deliveries
 #[tauri::command]
-pub fn get_timeline_gaps(
-    state: State<'_, AppState>,
-) -> Result<Vec<TimelineGap>, String> {
+pub fn get_timeline_gaps(state: State<'_, AppState>) -> Result<Vec<TimelineGap>, String> {
     tracing::debug!(command = "get_timeline_gaps", "Command invoked");
 
     let mut gaps = Vec::new();
@@ -1634,13 +1810,8 @@ pub fn get_timeline_gaps(
         };
 
         // Calculate expected delivery time for today
-        let today_target = now
-            .date_naive()
-            .and_time(target_time);
-        let today_target_ts = match today_target
-            .and_local_timezone(now.timezone())
-            .single()
-        {
+        let today_target = now.date_naive().and_time(target_time);
+        let today_target_ts = match today_target.and_local_timezone(now.timezone()).single() {
             Some(dt) => dt.timestamp(),
             None => continue,
         };
@@ -1666,7 +1837,8 @@ pub fn get_timeline_gaps(
         }
 
         // Check if delivery happened after today's target time
-        let has_delivered_today = binding.last_scheduled_at
+        let has_delivered_today = binding
+            .last_scheduled_at
             .map(|last| last >= today_target_ts)
             .unwrap_or(false);
 
@@ -1685,7 +1857,8 @@ pub fn get_timeline_gaps(
                     .map(|dt| dt.to_rfc3339())
                     .unwrap_or_default(),
                 delivery_mode: binding.delivery_mode.clone(),
-                last_delivered_at: binding.last_scheduled_at
+                last_delivered_at: binding
+                    .last_scheduled_at
                     .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
                     .map(|dt| dt.to_rfc3339()),
             });

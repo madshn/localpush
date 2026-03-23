@@ -6,6 +6,7 @@ import { TargetSetup } from "./TargetSetup";
 interface AppInfo {
   version: string;
   build_profile: string;
+  build_number: string;
 }
 
 export function SettingsPanel() {
@@ -79,6 +80,12 @@ export function SettingsPanel() {
           </div>
           <div className="flex justify-between">
             <span>Build</span>
+            <span className="font-mono text-text-primary">
+              {appInfo?.build_number ?? "..."}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span>Channel</span>
             <span className="font-mono text-text-primary">
               {appInfo?.build_profile ?? "..."}
             </span>

@@ -21,7 +21,7 @@ pub enum DeliveryStatus {
     InFlight,
     Delivered,
     Failed,
-    Dlq, // Dead Letter Queue
+    Dlq,          // Dead Letter Queue
     TargetPaused, // Target is degraded — delivery queued until reconnect
 }
 
@@ -69,11 +69,7 @@ pub struct DeliveryEntry {
 /// Testing: In-memory storage
 pub trait DeliveryLedgerTrait: Send + Sync {
     /// Enqueue a new delivery
-    fn enqueue(
-        &self,
-        event_type: &str,
-        payload: serde_json::Value,
-    ) -> Result<String, LedgerError>;
+    fn enqueue(&self, event_type: &str, payload: serde_json::Value) -> Result<String, LedgerError>;
 
     /// Enqueue a targeted delivery (for a specific endpoint only)
     fn enqueue_targeted(
@@ -112,7 +108,11 @@ pub trait DeliveryLedgerTrait: Send + Sync {
     fn claim_batch(&self, limit: usize) -> Result<Vec<DeliveryEntry>, LedgerError>;
 
     /// Mark a delivery as successfully completed, optionally recording which target received it
-    fn mark_delivered(&self, event_id: &str, delivered_to: Option<String>) -> Result<(), LedgerError>;
+    fn mark_delivered(
+        &self,
+        event_id: &str,
+        delivered_to: Option<String>,
+    ) -> Result<(), LedgerError>;
 
     /// Mark a delivery as failed (will retry or move to DLQ)
     fn mark_failed(&self, event_id: &str, error: &str) -> Result<DeliveryStatus, LedgerError>;
@@ -152,6 +152,17 @@ pub trait DeliveryLedgerTrait: Send + Sync {
 
     /// Count deliveries paused for any of the given endpoint IDs.
     fn count_paused_for_target(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError>;
+
+    /// Get per-source status counts (lightweight — no payload deserialization).
+    /// Returns Vec of (event_type, status, count) tuples for recent entries.
+    fn get_source_status_counts(&self) -> Result<Vec<SourceStatusCount>, LedgerError>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceStatusCount {
+    pub source_id: String,
+    pub status: String,
+    pub count: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

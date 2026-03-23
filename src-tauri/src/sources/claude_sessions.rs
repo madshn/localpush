@@ -1,9 +1,12 @@
 use super::{PreviewField, Source, SourceError, SourcePreview};
-use crate::source_config::PropertyDef;
+use crate::config::AppConfig;
+use crate::source_config::{window_setting_for_source, PropertyDef, SourceConfigStore};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::{debug, info, warn};
 
@@ -56,16 +59,17 @@ struct TokenSummary {
 /// Claude Code session activity source.
 ///
 /// Watches `~/.claude/projects/` and aggregates session metadata + token usage
-/// from sessions modified within the last 7 days.
+/// from sessions modified within a configurable recent-day window.
 ///
 /// Primary discovery: scan JSONL files directly in project directories.
 /// Fallback: parse sessions-index.json (older Claude Code versions).
 pub struct ClaudeSessionsSource {
     claude_projects_dir: PathBuf,
+    config: Option<Arc<AppConfig>>,
 }
 
 impl ClaudeSessionsSource {
-    pub fn new() -> Result<Self, SourceError> {
+    pub fn new(config: Arc<AppConfig>) -> Result<Self, SourceError> {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .map_err(|_| {
@@ -74,13 +78,25 @@ impl ClaudeSessionsSource {
 
         let claude_projects_dir = PathBuf::from(home).join(".claude").join("projects");
 
-        Ok(Self { claude_projects_dir })
+        Ok(Self {
+            claude_projects_dir,
+            config: Some(config),
+        })
     }
 
     /// Constructor with custom path (for testing)
     pub fn new_with_path(path: impl Into<PathBuf>) -> Self {
         Self {
             claude_projects_dir: path.into(),
+            config: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_with_path_and_config(path: impl Into<PathBuf>, config: Arc<AppConfig>) -> Self {
+        Self {
+            claude_projects_dir: path.into(),
+            config: Some(config),
         }
     }
 
@@ -143,8 +159,12 @@ impl ClaudeSessionsSource {
 
                 // Parse JSONL content for metadata and tokens
                 let jsonl_path_str = path.to_string_lossy().to_string();
-                let (info, tokens) =
-                    Self::parse_jsonl_session(&session_id, &jsonl_path_str, &project_name, modified_dt);
+                let (info, tokens) = Self::parse_jsonl_session(
+                    &session_id,
+                    &jsonl_path_str,
+                    &project_name,
+                    modified_dt,
+                );
 
                 results.push((info, tokens));
             }
@@ -197,7 +217,10 @@ impl ClaudeSessionsSource {
             };
 
             let msg_type = obj.get("type").and_then(|t| t.as_str());
-            let ts = obj.get("timestamp").and_then(|t| t.as_str()).map(|s| s.to_string());
+            let ts = obj
+                .get("timestamp")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string());
 
             match msg_type {
                 Some("user") => {
@@ -259,6 +282,7 @@ impl ClaudeSessionsSource {
                         tokens.model = obj
                             .pointer("/message/model")
                             .and_then(|m| m.as_str())
+                            .filter(|m| *m != "<synthetic>")
                             .map(|s| s.to_string());
                     }
 
@@ -391,6 +415,7 @@ impl ClaudeSessionsSource {
                 summary.model = obj
                     .pointer("/message/model")
                     .and_then(|m| m.as_str())
+                    .filter(|m| *m != "<synthetic>")
                     .map(|s| s.to_string());
             }
         }
@@ -398,7 +423,16 @@ impl ClaudeSessionsSource {
         summary
     }
 
-    /// Collect sessions modified within the last 7 days, sorted newest first.
+    fn window_days(&self) -> i64 {
+        let Some(config) = &self.config else {
+            return 7;
+        };
+        let def = window_setting_for_source(self.id())
+            .expect("claude-sessions should have a window setting definition");
+        SourceConfigStore::new(config.clone()).get_window_days(self.id(), &def)
+    }
+
+    /// Collect sessions modified within the configured recent-day window, sorted newest first.
     ///
     /// Uses two discovery strategies:
     /// 1. Primary: scan JSONL files directly (works with current Claude Code)
@@ -406,12 +440,15 @@ impl ClaudeSessionsSource {
     ///
     /// Results are deduplicated by session ID, preferring JSONL-discovered sessions.
     fn recent_sessions(&self) -> Vec<(SessionInfo, TokenSummary)> {
-        let cutoff = Utc::now() - chrono::Duration::days(7);
+        let window_days = self.window_days();
+        let cutoff = Utc::now() - chrono::Duration::days(window_days);
 
         // Primary: scan JSONL files directly
         let mut results = self.scan_jsonl_sessions(cutoff);
-        let mut seen_ids: std::collections::HashSet<String> =
-            results.iter().map(|(info, _)| info.session_id.clone()).collect();
+        let mut seen_ids: std::collections::HashSet<String> = results
+            .iter()
+            .map(|(info, _)| info.session_id.clone())
+            .collect();
 
         // Fallback: sessions-index.json (may find sessions with JSONL in different locations)
         for (_dir, entries) in self.scan_session_indices() {
@@ -457,8 +494,86 @@ impl ClaudeSessionsSource {
         // Most recently modified first
         results.sort_by(|a, b| b.0.modified.cmp(&a.0.modified));
 
-        info!("Found {} recent sessions (last 7d)", results.len());
+        info!(
+            window_days = window_days,
+            session_count = results.len(),
+            "Found recent Claude sessions"
+        );
         results
+    }
+
+    fn payload_sessions(&self) -> Vec<(SessionInfo, TokenSummary)> {
+        let recent = self.recent_sessions();
+        let Some(cah_root) = Self::cah_repos_root() else {
+            return recent;
+        };
+
+        let before = recent.len();
+        let filtered: Vec<_> = recent
+            .into_iter()
+            .filter(|(info, _)| {
+                !Self::is_cah_managed_project(info.project_path.as_deref(), &cah_root)
+            })
+            .collect();
+        let excluded = before.saturating_sub(filtered.len());
+
+        if excluded > 0 {
+            info!(
+                cah_repos_root = %cah_root.display(),
+                excluded_sessions = excluded,
+                "Filtered CAH-managed Claude sessions from delivery payload"
+            );
+        }
+
+        filtered
+    }
+
+    fn cah_repos_root() -> Option<PathBuf> {
+        if let Ok(root) = env::var("CAH_REPOS_ROOT") {
+            let trimmed = root.trim();
+            if !trimmed.is_empty() {
+                return Some(Self::expand_home_path(trimmed));
+            }
+        }
+
+        if let Ok(sandbox_root) = env::var("SANDBOX_ROOT") {
+            let trimmed = sandbox_root.trim();
+            if !trimmed.is_empty() {
+                return Some(Self::expand_home_path(trimmed).join("repos"));
+            }
+        }
+
+        Self::home_dir().map(|home| home.join("local-cloud-agent-host").join("repos"))
+    }
+
+    fn home_dir() -> Option<PathBuf> {
+        env::var("HOME")
+            .or_else(|_| env::var("USERPROFILE"))
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+    }
+
+    fn expand_home_path(path: &str) -> PathBuf {
+        if path == "~" {
+            return Self::home_dir().unwrap_or_else(|| PathBuf::from(path));
+        }
+
+        if let Some(rest) = path.strip_prefix("~/") {
+            if let Some(home) = Self::home_dir() {
+                return home.join(rest);
+            }
+        }
+
+        PathBuf::from(path)
+    }
+
+    fn is_cah_managed_project(project_path: Option<&str>, cah_repos_root: &Path) -> bool {
+        let Some(project_path) = project_path else {
+            return false;
+        };
+
+        Self::expand_home_path(project_path).starts_with(cah_repos_root)
     }
 
     /// Calculate duration in seconds between created and modified timestamps
@@ -517,7 +632,7 @@ impl Source for ClaudeSessionsSource {
     }
 
     fn parse(&self) -> Result<serde_json::Value, SourceError> {
-        let recent = self.recent_sessions();
+        let recent = self.payload_sessions();
 
         let sessions: Vec<serde_json::Value> = recent
             .iter()
@@ -551,11 +666,12 @@ impl Source for ClaudeSessionsSource {
         Ok(serde_json::json!({
             "source": "claude_code_sessions",
             "timestamp": Utc::now().to_rfc3339(),
+            "window_days": self.window_days(),
             "sessions": sessions,
             "summary": {
-                "sessions_7d": recent.len(),
-                "total_tokens_7d": total_tokens,
-                "total_duration_7d_seconds": total_duration,
+                "sessions_in_window": recent.len(),
+                "total_tokens_in_window": total_tokens,
+                "total_duration_in_window_seconds": total_duration,
             }
         }))
     }
@@ -563,9 +679,10 @@ impl Source for ClaudeSessionsSource {
     fn preview(&self) -> Result<SourcePreview, SourceError> {
         let recent = self.recent_sessions();
         let total_tokens: u64 = recent.iter().map(|(_, t)| t.input + t.output).sum();
+        let window_days = self.window_days();
 
         let summary = if recent.is_empty() {
-            "No sessions in last 7 days".to_string()
+            format!("No sessions in last {} days", window_days)
         } else {
             format!(
                 "{} sessions, {} tokens",
@@ -576,7 +693,7 @@ impl Source for ClaudeSessionsSource {
 
         let mut fields = vec![
             PreviewField {
-                label: "Sessions (7d)".to_string(),
+                label: format!("Sessions ({}d)", window_days),
                 value: recent.len().to_string(),
                 sensitive: false,
             },
@@ -617,7 +734,8 @@ impl Source for ClaudeSessionsSource {
             PropertyDef {
                 key: "sessions".to_string(),
                 label: "Sessions".to_string(),
-                description: "Session list with metadata from the last 7 days".to_string(),
+                description: "Session list with metadata from the configured data window"
+                    .to_string(),
                 default_enabled: true,
                 privacy_sensitive: false,
             },
@@ -652,12 +770,36 @@ impl Source for ClaudeSessionsSource {
             },
         ]
     }
+
+    fn has_meaningful_payload(&self, payload: &serde_json::Value) -> bool {
+        payload["summary"]["sessions_in_window"]
+            .as_u64()
+            .unwrap_or(0)
+            > 0
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AppConfig;
+    use std::sync::{Arc, Mutex, OnceLock};
     use tempfile::TempDir;
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn set_env_var(key: &str, value: &str) {
+        // Test-only helper: environment mutations are serialized via env_lock().
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_env_var(key: &str) {
+        // Test-only helper: environment mutations are serialized via env_lock().
+        unsafe { std::env::remove_var(key) }
+    }
 
     /// Create a test directory with a JSONL session file (new format)
     fn setup_jsonl_test_dir() -> TempDir {
@@ -780,6 +922,21 @@ mod tests {
     }
 
     #[test]
+    fn test_window_setting_changes_preview_copy() {
+        let dir = TempDir::new().unwrap();
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        config
+            .set("source_window.claude-sessions.days", "30")
+            .unwrap();
+
+        let source = ClaudeSessionsSource::new_with_path_and_config(dir.path(), config);
+        let preview = source.preview().unwrap();
+
+        assert_eq!(preview.summary, "No sessions in last 30 days");
+        assert_eq!(preview.fields[0].label, "Sessions (30d)");
+    }
+
+    #[test]
     fn test_extract_tokens_multiple_messages() {
         let dir = TempDir::new().unwrap();
         let jsonl = concat!(
@@ -845,5 +1002,74 @@ mod tests {
         let result = source.parse().unwrap();
         let sessions = result["sessions"].as_array().unwrap();
         assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn test_parse_filters_cah_managed_sessions_from_payload_only() {
+        let _env_guard = env_lock();
+        let dir = TempDir::new().unwrap();
+        let cah_root = dir.path().join("cah").join("repos");
+        let office_root = dir.path().join("ops");
+        fs::create_dir_all(&cah_root).unwrap();
+        fs::create_dir_all(&office_root).unwrap();
+
+        set_env_var("CAH_REPOS_ROOT", cah_root.to_str().unwrap());
+        remove_env_var("SANDBOX_ROOT");
+
+        let project_dir = dir.path().join("-Users-test-project");
+        fs::create_dir_all(&project_dir).unwrap();
+
+        let now = Utc::now();
+        let session_a = format!(
+            concat!(
+                r#"{{"type":"user","sessionId":"office-session","timestamp":"{created}","cwd":"{office}","gitBranch":"main","message":{{"role":"user","content":"office prompt"}}}}"#,
+                "\n",
+                r#"{{"type":"assistant","timestamp":"{modified}","message":{{"model":"claude-opus-4-6","usage":{{"input_tokens":10,"output_tokens":5}}}}}}"#
+            ),
+            created = (now - chrono::Duration::hours(1)).to_rfc3339(),
+            modified = now.to_rfc3339(),
+            office = office_root.join("bob").to_string_lossy(),
+        );
+        fs::write(project_dir.join("office-session.jsonl"), session_a).unwrap();
+
+        let session_b = format!(
+            concat!(
+                r#"{{"type":"user","sessionId":"cah-session","timestamp":"{created}","cwd":"{cah}","gitBranch":"main","message":{{"role":"user","content":"cah prompt"}}}}"#,
+                "\n",
+                r#"{{"type":"assistant","timestamp":"{modified}","message":{{"model":"claude-sonnet-4-6","usage":{{"input_tokens":20,"output_tokens":7}}}}}}"#
+            ),
+            created = (now - chrono::Duration::minutes(30)).to_rfc3339(),
+            modified = now.to_rfc3339(),
+            cah = cah_root.join("associate/rex").to_string_lossy(),
+        );
+        fs::write(project_dir.join("cah-session.jsonl"), session_b).unwrap();
+
+        let source = ClaudeSessionsSource::new_with_path(dir.path());
+
+        let payload = source.parse().unwrap();
+        let delivered_sessions = payload["sessions"].as_array().unwrap();
+        assert_eq!(delivered_sessions.len(), 1);
+        assert_eq!(delivered_sessions[0]["id"], "office-session");
+
+        let preview = source.preview().unwrap();
+        assert!(
+            preview.summary.contains("2 sessions"),
+            "preview should still include CAH sessions locally, got: {}",
+            preview.summary
+        );
+
+        remove_env_var("CAH_REPOS_ROOT");
+    }
+
+    #[test]
+    fn test_cah_repos_root_falls_back_to_sandbox_root() {
+        let _env_guard = env_lock();
+        remove_env_var("CAH_REPOS_ROOT");
+        set_env_var("SANDBOX_ROOT", "/tmp/test-sandbox");
+
+        let root = ClaudeSessionsSource::cah_repos_root().unwrap();
+        assert_eq!(root, PathBuf::from("/tmp/test-sandbox").join("repos"));
+
+        remove_env_var("SANDBOX_ROOT");
     }
 }

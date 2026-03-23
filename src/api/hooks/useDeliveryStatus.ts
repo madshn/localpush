@@ -8,6 +8,7 @@ export interface DeliveryStatus {
   pendingCount: number;
   failedCount: number;
   lastDelivery: string | null;
+  dlqCount: number;
 }
 
 async function getDeliveryStatus(): Promise<DeliveryStatus> {
@@ -30,6 +31,6 @@ export function useDeliveryStatus() {
   return useQuery({
     queryKey: ["deliveryStatus"],
     queryFn: getDeliveryStatus,
-    refetchInterval: () => visibleRefetchInterval(5000), // Poll every 5 seconds (visible only)
+    refetchInterval: () => visibleRefetchInterval(30_000), // Safety-net poll; events drive real-time updates
   });
 }

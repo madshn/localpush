@@ -93,6 +93,6 @@ export function useDlqCount() {
   return useQuery({
     queryKey: ["dlqCount"],
     queryFn: getDlqCount,
-    refetchInterval: () => visibleRefetchInterval(5000), // Poll every 5s to keep badge updated (visible only)
+    refetchInterval: () => visibleRefetchInterval(30_000), // Safety-net poll; events drive real-time updates
   });
 }

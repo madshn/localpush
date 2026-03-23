@@ -29,6 +29,7 @@ describe("DashboardPipelineRow", () => {
         category="active"
         bindings={[]}
         gap={null}
+        nextPushLabel={null}
         trafficLightStatus="green"
         isPushing={false}
         {...mockHandlers}
@@ -54,6 +55,7 @@ describe("DashboardPipelineRow", () => {
         category="active"
         bindings={[]}
         gap={mockGap}
+        nextPushLabel={null}
         trafficLightStatus="yellow"
         isPushing={false}
         {...mockHandlers}
@@ -79,6 +81,7 @@ describe("DashboardPipelineRow", () => {
         category="active"
         bindings={[]}
         gap={mockGap}
+        nextPushLabel={null}
         trafficLightStatus="yellow"
         isPushing={false}
         {...mockHandlers}
@@ -104,6 +107,7 @@ describe("DashboardPipelineRow", () => {
         category="active"
         bindings={[]}
         gap={mockGap}
+        nextPushLabel={null}
         trafficLightStatus="yellow"
         isPushing={false}
         {...mockHandlers}
@@ -129,6 +133,7 @@ describe("DashboardPipelineRow", () => {
         category="active"
         bindings={[]}
         gap={mockGap}
+        nextPushLabel={null}
         trafficLightStatus="yellow"
         isPushing={false}
         {...mockHandlers}

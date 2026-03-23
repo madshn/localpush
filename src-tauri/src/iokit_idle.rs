@@ -21,9 +21,9 @@ extern "C" {
 }
 
 // CoreFoundation FFI declarations
+use core_foundation_sys::base::{kCFAllocatorDefault, CFRelease};
 use core_foundation_sys::number::{kCFNumberSInt64Type, CFNumberGetValue};
 use core_foundation_sys::string::CFStringCreateWithCString;
-use core_foundation_sys::base::{kCFAllocatorDefault, CFRelease};
 
 const K_IO_MASTER_PORT_DEFAULT: u32 = 0;
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
@@ -35,8 +35,8 @@ const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
 pub fn get_idle_seconds() -> Result<f64, String> {
     unsafe {
         // Find the IOHIDSystem service
-        let service_name = CString::new("IOHIDSystem")
-            .map_err(|e| format!("CString error: {}", e))?;
+        let service_name =
+            CString::new("IOHIDSystem").map_err(|e| format!("CString error: {}", e))?;
         let matching = IOServiceMatching(service_name.as_ptr());
         if matching.is_null() {
             return Err("IOServiceMatching returned null".to_string());
@@ -49,8 +49,7 @@ pub fn get_idle_seconds() -> Result<f64, String> {
         }
 
         // Create CFString for "HIDIdleTime" property key
-        let key_name = CString::new("HIDIdleTime")
-            .map_err(|e| format!("CString error: {}", e))?;
+        let key_name = CString::new("HIDIdleTime").map_err(|e| format!("CString error: {}", e))?;
         let cf_key = CFStringCreateWithCString(
             kCFAllocatorDefault,
             key_name.as_ptr(),

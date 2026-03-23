@@ -1,8 +1,8 @@
 //! Reqwest-based webhook client implementation
 
-use std::time::{Duration, Instant};
+use crate::traits::{WebhookAuth, WebhookClient, WebhookError, WebhookResponse};
 use reqwest::Client;
-use crate::traits::{WebhookClient, WebhookAuth, WebhookError, WebhookResponse};
+use std::time::{Duration, Instant};
 
 const TIMEOUT_SECONDS: u64 = 25;
 
@@ -17,11 +17,18 @@ impl ReqwestWebhookClient {
             .build()
             .map_err(|e| WebhookError::NetworkError(e.to_string()))?;
 
-        tracing::debug!("Initialized webhook client with {}s timeout", TIMEOUT_SECONDS);
+        tracing::debug!(
+            "Initialized webhook client with {}s timeout",
+            TIMEOUT_SECONDS
+        );
         Ok(Self { client })
     }
 
-    fn apply_auth(&self, request: reqwest::RequestBuilder, auth: &WebhookAuth) -> reqwest::RequestBuilder {
+    fn apply_auth(
+        &self,
+        request: reqwest::RequestBuilder,
+        auth: &WebhookAuth,
+    ) -> reqwest::RequestBuilder {
         match auth {
             WebhookAuth::None => request,
             WebhookAuth::Header { name, value } => {
@@ -59,13 +66,13 @@ impl WebhookClient for ReqwestWebhookClient {
         tracing::info!("Sending webhook to: {}", url);
 
         // Validate URL
-        reqwest::Url::parse(url)
-            .map_err(|e| WebhookError::InvalidUrl(e.to_string()))?;
+        reqwest::Url::parse(url).map_err(|e| WebhookError::InvalidUrl(e.to_string()))?;
 
         let start = Instant::now();
 
         // Build request
-        let request = self.client
+        let request = self
+            .client
             .post(url)
             .header("Content-Type", "application/json")
             .json(payload);
@@ -73,21 +80,18 @@ impl WebhookClient for ReqwestWebhookClient {
         let request = self.apply_auth(request, auth);
 
         // Send request
-        let response = request
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    tracing::warn!("Webhook timeout: {}", url);
-                    WebhookError::Timeout
-                } else if e.is_connect() || e.is_request() {
-                    tracing::warn!("Network error: {}", e);
-                    WebhookError::NetworkError(e.to_string())
-                } else {
-                    tracing::error!("Unexpected error: {}", e);
-                    WebhookError::NetworkError(e.to_string())
-                }
-            })?;
+        let response = request.send().await.map_err(|e| {
+            if e.is_timeout() {
+                tracing::warn!("Webhook timeout: {}", url);
+                WebhookError::Timeout
+            } else if e.is_connect() || e.is_request() {
+                tracing::warn!("Network error: {}", e);
+                WebhookError::NetworkError(e.to_string())
+            } else {
+                tracing::error!("Unexpected error: {}", e);
+                WebhookError::NetworkError(e.to_string())
+            }
+        })?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
         let status = response.status().as_u16();
@@ -98,7 +102,11 @@ impl WebhookClient for ReqwestWebhookClient {
             _ => None,
         };
 
-        tracing::info!("Webhook response: status={}, duration={}ms", status, duration_ms);
+        tracing::info!(
+            "Webhook response: status={}, duration={}ms",
+            status,
+            duration_ms
+        );
 
         // Check for HTTP errors
         if !(200..300).contains(&status) {
@@ -157,28 +165,40 @@ mod tests {
         let _ = client.apply_auth(request, &WebhookAuth::None);
 
         let request = client.client.post("https://example.com");
-        let _ = client.apply_auth(request, &WebhookAuth::Header {
-            name: "X-Api-Key".to_string(),
-            value: "test".to_string(),
-        });
+        let _ = client.apply_auth(
+            request,
+            &WebhookAuth::Header {
+                name: "X-Api-Key".to_string(),
+                value: "test".to_string(),
+            },
+        );
 
         let request = client.client.post("https://example.com");
-        let _ = client.apply_auth(request, &WebhookAuth::Bearer {
-            token: "test-token".to_string(),
-        });
+        let _ = client.apply_auth(
+            request,
+            &WebhookAuth::Bearer {
+                token: "test-token".to_string(),
+            },
+        );
 
         let request = client.client.post("https://example.com");
-        let _ = client.apply_auth(request, &WebhookAuth::Basic {
-            username: "user".to_string(),
-            password: "pass".to_string(),
-        });
+        let _ = client.apply_auth(
+            request,
+            &WebhookAuth::Basic {
+                username: "user".to_string(),
+                password: "pass".to_string(),
+            },
+        );
 
         let request = client.client.post("https://example.com");
-        let _ = client.apply_auth(request, &WebhookAuth::Custom {
-            headers: vec![
-                ("Authorization".to_string(), "Bearer test-token".to_string()),
-                ("X-Custom".to_string(), "value".to_string()),
-            ],
-        });
+        let _ = client.apply_auth(
+            request,
+            &WebhookAuth::Custom {
+                headers: vec![
+                    ("Authorization".to_string(), "Bearer test-token".to_string()),
+                    ("X-Custom".to_string(), "value".to_string()),
+                ],
+            },
+        );
     }
 }

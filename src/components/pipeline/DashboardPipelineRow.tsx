@@ -15,6 +15,7 @@ interface DashboardPipelineRowProps {
   trafficLightStatus: TrafficLightStatus;
   isPushing: boolean;
   gap: TimelineGap | null;
+  nextPushLabel: string | null;
   onAddTarget: (sourceId: string) => void;
   onEditBinding: (sourceId: string, endpointId: string) => void;
   onPushNow: (sourceId: string) => void;
@@ -26,6 +27,7 @@ const statusStripe: Record<TrafficLightStatus, string> = {
   green: "bg-success",
   yellow: "bg-warning",
   red: "bg-error",
+  orange: "bg-warning",
   grey: "bg-text-secondary/30",
 };
 
@@ -56,6 +58,7 @@ function DashboardPipelineRowComponent({
   trafficLightStatus,
   isPushing,
   gap,
+  nextPushLabel,
   onAddTarget,
   onEditBinding,
   onPushNow,
@@ -86,6 +89,7 @@ function DashboardPipelineRowComponent({
             sourceId={source.id}
             name={source.name}
             category={category}
+            nextPushLabel={nextPushLabel}
           />
 
           {/* Connector (fan-out) */}
@@ -213,7 +217,8 @@ function areEqual(
     prev.bindings === next.bindings &&
     prev.trafficLightStatus === next.trafficLightStatus &&
     prev.isPushing === next.isPushing &&
-    prev.gap === next.gap
+    prev.gap === next.gap &&
+    prev.nextPushLabel === next.nextPushLabel
   );
 }
 

@@ -1,40 +1,109 @@
 //! SQLite-based application configuration store
 
-use rusqlite::{Connection, params};
-use std::sync::Mutex;
 use crate::traits::LedgerError;
+use rusqlite::{params, Connection, OpenFlags};
+use std::path::Path;
+use std::sync::Mutex;
 
 pub struct AppConfig {
-    conn: Mutex<Connection>,
+    writer: Mutex<Connection>,
+    reader: Mutex<Connection>,
+}
+
+fn apply_writer_pragmas(conn: &Connection) -> Result<(), LedgerError> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA busy_timeout = 5000;",
+    )
+    .map_err(|e| LedgerError::DatabaseError(e.to_string()))
+}
+
+fn apply_reader_pragmas(conn: &Connection) -> Result<(), LedgerError> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 5000;
+         PRAGMA query_only = ON;",
+    )
+    .map_err(|e| LedgerError::DatabaseError(e.to_string()))
+}
+
+fn init_table_on(conn: &Connection) -> Result<(), LedgerError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS app_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );",
+    )
+    .map_err(|e| LedgerError::DatabaseError(e.to_string()))
 }
 
 impl AppConfig {
-    /// Create config table in an existing database connection
+    /// Create config table in an existing database connection (legacy helper used by tests/migrations)
     pub fn init_table(conn: &Connection) -> Result<(), LedgerError> {
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS app_config (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at INTEGER NOT NULL
-            );"
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))
+        init_table_on(conn)
     }
 
-    /// Open standalone in-memory config (for testing)
+    /// Open or create a config database at the given path.
+    pub fn open(path: &Path) -> Result<Self, LedgerError> {
+        let writer =
+            Connection::open(path).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        apply_writer_pragmas(&writer)?;
+        init_table_on(&writer)?;
+
+        let reader =
+            Connection::open(path).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        apply_reader_pragmas(&reader)?;
+
+        Ok(Self {
+            writer: Mutex::new(writer),
+            reader: Mutex::new(reader),
+        })
+    }
+
+    /// Open standalone in-memory config (for testing).
+    ///
+    /// Uses a unique named shared-cache URI so both connections see the same in-memory database
+    /// while remaining isolated from other test instances running in parallel.
     pub fn open_in_memory() -> Result<Self, LedgerError> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
-        Self::init_table(&conn)?;
-        Ok(Self { conn: Mutex::new(conn) })
-    }
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let uri = format!("file:config_mem_{}?mode=memory&cache=shared", id);
 
-    /// Wrap an existing connection (config table must already be initialized)
-    pub fn from_connection(conn: Connection) -> Self {
-        Self { conn: Mutex::new(conn) }
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_SHARED_CACHE;
+
+        let writer = Connection::open_with_flags(&uri, flags)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        writer
+            .execute_batch("PRAGMA busy_timeout = 5000;")
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        init_table_on(&writer)?;
+
+        let reader = Connection::open_with_flags(&uri, flags)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        reader
+            .execute_batch(
+                "PRAGMA busy_timeout = 5000;
+             PRAGMA query_only = ON;",
+            )
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        Ok(Self {
+            writer: Mutex::new(writer),
+            reader: Mutex::new(reader),
+        })
     }
 
     pub fn get(&self, key: &str) -> Result<Option<String>, LedgerError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.reader.lock().unwrap();
         let result = conn.query_row(
             "SELECT value FROM app_config WHERE key = ?1",
             params![key],
@@ -52,21 +121,20 @@ impl AppConfig {
     pub fn set(&self, key: &str, value: &str) -> Result<(), LedgerError> {
         tracing::debug!(key = %key, "Config set");
         let now = chrono::Utc::now().timestamp();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.writer.lock().unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?1, ?2, ?3)",
             params![key, value, now],
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        )
+        .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
         Ok(())
     }
 
     pub fn delete(&self, key: &str) -> Result<(), LedgerError> {
         tracing::debug!(key = %key, "Config delete");
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "DELETE FROM app_config WHERE key = ?1",
-            params![key],
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        let conn = self.writer.lock().unwrap();
+        conn.execute("DELETE FROM app_config WHERE key = ?1", params![key])
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
         Ok(())
     }
 
@@ -76,7 +144,7 @@ impl AppConfig {
 
     /// Get all key-value pairs where the key starts with the given prefix
     pub fn get_by_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>, LedgerError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.reader.lock().unwrap();
         let mut stmt = conn
             .prepare("SELECT key, value FROM app_config WHERE key LIKE ?1")
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
@@ -102,7 +170,9 @@ mod tests {
     fn test_set_and_get() {
         let config = AppConfig::open_in_memory().unwrap();
 
-        config.set("webhook_url", "https://example.com/webhook").unwrap();
+        config
+            .set("webhook_url", "https://example.com/webhook")
+            .unwrap();
         let value = config.get("webhook_url").unwrap();
 
         assert_eq!(value, Some("https://example.com/webhook".to_string()));

@@ -89,7 +89,7 @@ export function useDeliveryQueueRaw() {
   return useQuery({
     queryKey: DELIVERY_QUEUE_QUERY_KEY,
     queryFn: fetchDeliveryQueue,
-    refetchInterval: () => visibleRefetchInterval(5000),
+    refetchInterval: () => visibleRefetchInterval(30_000),
   });
 }
 
@@ -98,7 +98,7 @@ export function useDeliveryQueue() {
     queryKey: DELIVERY_QUEUE_QUERY_KEY,
     queryFn: fetchDeliveryQueue,
     select: (items) => items.map(normalizeDeliveryItem),
-    refetchInterval: () => visibleRefetchInterval(5000),
+    refetchInterval: () => visibleRefetchInterval(30_000),
   });
 }
 
@@ -107,6 +107,23 @@ export function useDeliveryQueueCounts() {
     queryKey: DELIVERY_QUEUE_QUERY_KEY,
     queryFn: fetchDeliveryQueue,
     select: countQueue,
-    refetchInterval: () => visibleRefetchInterval(5000),
+    refetchInterval: () => visibleRefetchInterval(30_000),
+  });
+}
+
+// Lightweight per-source status counts — no payload deserialization
+export interface SourceStatusCount {
+  source_id: string;
+  status: string;
+  count: number;
+}
+
+export function useSourceStatusCounts() {
+  return useQuery({
+    queryKey: ["sourceStatusCounts"],
+    queryFn: async () => {
+      return await invoke<SourceStatusCount[]>("get_source_status_counts");
+    },
+    refetchInterval: () => visibleRefetchInterval(30_000),
   });
 }
