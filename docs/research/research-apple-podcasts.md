@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-06
 **Target App:** LocalPush (Tauri 2.0 macOS)
-**Template:** Claude Stats source (`~/dev/localpush/src-tauri/src/sources/claude_stats.rs`)
+**Template:** Claude Stats source (`~/builds/localpush/src-tauri/src/sources/claude_stats.rs`)
 
 ---
 

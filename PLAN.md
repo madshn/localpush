@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Working Directory** | `/Users/madsnissen/dev/localpush/.worktrees/targets-dashboard` |
+| **Working Directory** | `/Users/madsnissen/builds/localpush/.worktrees/targets-dashboard` |
 | **Git Branch** | `feature/targets-dashboard` |
 | **Worktree Mode** | true |
 

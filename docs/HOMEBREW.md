@@ -21,7 +21,7 @@ Two repositories:
 ### 1. Tag and Release
 
 ```bash
-# In main repo: /Users/madsnissen/dev/localpush
+# In main repo: /Users/madsnissen/builds/localpush
 npm run bump:version -- minor
 git tag v0.1.0
 git push origin v0.1.0
@@ -39,7 +39,7 @@ This triggers GitHub Actions to:
 After the release is published (wait for GitHub Actions to complete):
 
 ```bash
-# In main repo: /Users/madsnissen/dev/localpush
+# In main repo: /Users/madsnissen/builds/localpush
 ./scripts/update-cask.sh 0.1.0
 ```
 
@@ -49,10 +49,12 @@ This script:
 - Updates version and hash in the Cask formula
 - Prints next steps
 
+`scripts/update-cask.sh` looks for the tap checkout at `./tmp/homebrew-localpush` inside this repo by default. If your local clone lives elsewhere, set `LOCALPUSH_TAP_DIR=/absolute/path/to/homebrew-localpush` before running it.
+
 ### 3. Commit and Push Tap
 
 ```bash
-cd /Users/madsnissen/dev/homebrew-localpush
+cd "${LOCALPUSH_TAP_DIR:-/Users/madsnissen/builds/localpush/tmp/homebrew-localpush}"
 git add Casks/localpush.rb
 git commit -m "Update to v0.1.0"
 git push origin main
@@ -73,7 +75,7 @@ brew upgrade --cask localpush
 The tap repo needs to be pushed to GitHub once:
 
 ```bash
-cd /Users/madsnissen/dev/homebrew-localpush
+cd "${LOCALPUSH_TAP_DIR:-/Users/madsnissen/builds/localpush/tmp/homebrew-localpush}"
 
 # Create GitHub repo (using gh CLI)
 gh repo create madshn/homebrew-localpush --public --source=. --remote=origin --description="Homebrew tap for LocalPush"
@@ -113,7 +115,7 @@ Test the Cask locally before pushing:
 
 ```bash
 # Install from local tap
-brew install --cask /Users/madsnissen/dev/homebrew-localpush/Casks/localpush.rb
+brew install --cask "${LOCALPUSH_TAP_DIR:-/Users/madsnissen/builds/localpush/tmp/homebrew-localpush}/Casks/localpush.rb"
 
 # Verify installation
 ls -la /Applications/LocalPush.app
@@ -122,7 +124,7 @@ ls -la /Applications/LocalPush.app
 brew uninstall --cask localpush
 
 # Test zap
-brew install --cask /Users/madsnissen/dev/homebrew-localpush/Casks/localpush.rb
+brew install --cask "${LOCALPUSH_TAP_DIR:-/Users/madsnissen/builds/localpush/tmp/homebrew-localpush}/Casks/localpush.rb"
 brew uninstall --zap --cask localpush
 ls ~/Library/Application\ Support/ | grep localpush  # Should be empty
 ```

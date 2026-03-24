@@ -16,7 +16,7 @@
 
 **Example path:**
 ```
-~/.claude/projects/-Users-madsnissen-ops-bob/60394d86-f4f4-4ea1-a2b9-d2480ce8c3ec.jsonl
+~/.claude/projects/-Users-madsnissen-team-bob/60394d86-f4f4-4ea1-a2b9-d2480ce8c3ec.jsonl
 ```
 
 ### Session Index
@@ -31,7 +31,7 @@
 ```json
 {
   "sessionId": "3d94df65-c74f-4652-8374-0de8919453f3",
-  "fullPath": "/Users/madsnissen/.claude/projects/-Users-madsnissen-ops-bob/3d94df65-c74f-4652-8374-0de8919453f3.jsonl",
+  "fullPath": "/Users/madsnissen/.claude/projects/-Users-madsnissen-team-bob/3d94df65-c74f-4652-8374-0de8919453f3.jsonl",
   "fileMtime": 1768979655292,
   "firstPrompt": "No prompt",
   "summary": "Mira adopted: Runtime ops agent setup complete",
@@ -39,7 +39,7 @@
   "created": "2026-01-20T20:39:37.130Z",
   "modified": "2026-01-20T20:45:09.062Z",
   "gitBranch": "main",
-  "projectPath": "/Users/madsnissen/ops/bob",
+  "projectPath": "/Users/madsnissen/team/bob",
   "isSidechain": false
 }
 ```
@@ -70,7 +70,7 @@
   "display": "continue work on localpush...",
   "pastedContents": {},
   "timestamp": 1770333452570,
-  "project": "/Users/madsnissen/ops/bob",
+  "project": "/Users/madsnissen/team/bob",
   "sessionId": "60394d86-f4f4-4ea1-a2b9-d2480ce8c3ec"
 }
 ```
@@ -100,7 +100,7 @@
   "type": "user",
   "sessionId": "60394d86-f4f4-4ea1-a2b9-d2480ce8c3ec",
   "timestamp": "2026-02-05T21:45:11.525Z",
-  "cwd": "/Users/madsnissen/ops/bob",
+  "cwd": "/Users/madsnissen/team/bob",
   "gitBranch": "main",
   "version": "2.1.32",
   "message": {
@@ -251,7 +251,7 @@ To push session data IMMEDIATELY when a session ends (not on next file watch), a
   "timestamp": "2026-02-06T10:05:16Z",
   "session": {
     "id": "60394d86-f4f4-4ea1-a2b9-d2480ce8c3ec",
-    "project_path": "/Users/madsnissen/ops/bob",
+    "project_path": "/Users/madsnissen/team/bob",
     "git_branch": "main",
     "title": "LocalPush Layer 2 planning and source design",
     "start_time": "2026-02-05T21:44:48Z",
@@ -384,4 +384,3 @@ The `auto-rename-session.sh` hook generates session titles. If this hook is NOT 
 - Layer 1: Medium (file watching + JSONL parsing)
 - Layer 2: Low (hook writes, LocalPush reads simple JSONL)
 - Layer 3: High (correlation across multiple data sources)
-

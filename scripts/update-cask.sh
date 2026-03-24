@@ -3,8 +3,18 @@
 set -euo pipefail
 
 VERSION="${1:?Usage: update-cask.sh <version>}"
-TAP_DIR="/Users/madsnissen/dev/homebrew-localpush"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEFAULT_TAP_DIR="$(cd "$REPO_ROOT/.." && pwd)/homebrew-localpush"
+DEFAULT_TAP_DIR="$REPO_ROOT/tmp/homebrew-localpush"
+TAP_DIR="${LOCALPUSH_TAP_DIR:-$DEFAULT_TAP_DIR}"
 CASK_FILE="$TAP_DIR/Casks/localpush.rb"
+
+if [ ! -f "$CASK_FILE" ]; then
+  echo "Homebrew tap repo not found at: $TAP_DIR" >&2
+  echo "Set LOCALPUSH_TAP_DIR to your local homebrew-localpush checkout." >&2
+  exit 1
+fi
 
 # Download DMG and compute SHA
 DMG_URL="https://github.com/madshn/localpush/releases/download/v${VERSION}/LocalPush_${VERSION}_universal.dmg"

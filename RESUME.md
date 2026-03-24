@@ -1,7 +1,7 @@
 # LocalPush Resume Prompt
 
 **Last Updated:** 2026-02-09
-**Project Path:** `~/dev/localpush`
+**Project Path:** `~/builds/localpush`
 **Branch:** `main`
 **GitHub:** https://github.com/madshn/localpush
 **Vision Doc:** https://www.notion.so/ownbrain/LocalPush-Open-Source-File-Webhook-Bridge-2fbc84e67cc481b69522f87f17b9aed7
@@ -14,7 +14,7 @@
 Copy and paste this to continue work:
 
 ```
-Resume LocalPush at ~/dev/localpush (branch: main). Read CLAUDE.md for full architecture and PC identity.
+Resume LocalPush at ~/builds/localpush (branch: main). Read CLAUDE.md for full architecture and PC identity.
 
 STATUS: v0.2 merged to main. Full delivery pipeline verified end-to-end. 80 unit + 5 integration tests passing.
 
@@ -100,12 +100,12 @@ Bob can build the landing page now — all visual direction and content approved
 ## Verification
 
 ```bash
-cd ~/dev/localpush/src-tauri
+cd ~/builds/localpush/src-tauri
 cargo test                    # 80 + 5 tests
 cargo clippy -- -D warnings   # Clean
 
 # Dev server
-cd ~/dev/localpush
+cd ~/builds/localpush
 npx tauri dev
 ```
 

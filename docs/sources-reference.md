@@ -110,7 +110,7 @@ When LocalPush builds the delivery payload, it excludes Claude sessions rooted i
   "sessions": [
     {
       "id": "9c2f545b-c23f-42fc-b96e-728e5234c609",
-      "project_path": "/Users/madsnissen/ops/bob",
+      "project_path": "/Users/madsnissen/team/bob",
       "git_branch": "main",
       "title": "Standup v2 protocol rollout to associates",
       "start_time": "2026-03-16T08:32:08.211Z",
@@ -228,9 +228,9 @@ Lists individual Codex sessions from a configurable recent-day window (default 7
   "sessions": [
     {
       "id": "019c9e87-2000-7b43-b2ff-3c11c95e5504",
-      "project_path": "/Users/madsnissen/dev/localpush",
+      "project_path": "/Users/madsnissen/builds/localpush",
       "git_branch": "main",
-      "title": "AGENTS.md instructions for /Users/madsnissen/dev/localpush...",
+      "title": "AGENTS.md instructions for /Users/madsnissen/builds/localpush...",
       "start_time": "2026-02-27T09:56:21.632+00:00",
       "end_time": "2026-02-27T10:55:53.755+00:00",
       "session_span_seconds": 3572,

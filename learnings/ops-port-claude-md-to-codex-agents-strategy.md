@@ -57,9 +57,9 @@ Remove content that is specific to Claude identity or ecosystem plugins:
 
 ## What was created here
 
-- `/Users/madsnissen/dev/localpush/AGENTS.md` (repo-level codex guide)
-- `/Users/madsnissen/dev/localpush/src/AGENTS.md` (frontend patterns)
-- `/Users/madsnissen/dev/localpush/src-tauri/AGENTS.md` (backend patterns)
+- `/Users/madsnissen/builds/localpush/AGENTS.md` (repo-level codex guide)
+- `/Users/madsnissen/builds/localpush/src/AGENTS.md` (frontend patterns)
+- `/Users/madsnissen/builds/localpush/src-tauri/AGENTS.md` (backend patterns)
 
 This matches the existing `CLAUDE.md` hierarchy and keeps guidance local to the code being edited.
 

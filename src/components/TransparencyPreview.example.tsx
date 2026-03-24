@@ -17,7 +17,7 @@ const claudeCodePreview = {
     { label: "Sessions", value: "23", sensitive: false },
     { label: "Files modified", value: "47", sensitive: false },
     { label: "API Key", value: "sk-ant-api03-abc123xyz789", sensitive: true },
-    { label: "Project path", value: "/Users/madsnissen/dev/localpush", sensitive: false },
+    { label: "Project path", value: "/Users/madsnissen/builds/localpush", sensitive: false },
   ],
 };
 
