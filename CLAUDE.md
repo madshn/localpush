@@ -156,10 +156,14 @@ LocalPush is designed for easy extension. The trait-based architecture means add
 Sources (Southbound)          Bindings              Targets (Northbound)
 ────────────────────         ─────────             ───────────────────
 claude-stats ──────┐                               ┌── n8n (webhook endpoints)
-claude-sessions ───┤── SourceBinding ──────────────┤── ntfy (push topics)
-apple-podcasts ────┤   (source→endpoint)           └── (future: Make, Zapier...)
+claude-sessions ───┤                               ├── ntfy (push topics)
+codex-stats ───────┤── SourceBinding ──────────────┤
+codex-sessions ────┤   (source→endpoint)           └── (future: Make, Zapier...)
+apple-podcasts ────┤
 apple-notes ───────┤
-apple-photos ──────┘
+apple-photos ──────┤
+cic-task-output ───┤
+desktop-activity ──┘
                     │
               SourceManager          DeliveryWorker
               (parse + enqueue)      (poll ledger → resolve bindings → POST)

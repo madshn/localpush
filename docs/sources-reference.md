@@ -15,6 +15,7 @@ All available data sources, their configurable properties, and real payload exam
 | `apple-podcasts` | Apple Podcasts | FSEvents on Podcasts SQLite DB | `recent_episodes`, `episode_links`, `transcript_snippets`, `podcast_metadata` |
 | `apple-notes` | Apple Notes | FSEvents on NoteStore.sqlite, JXA for reads | `recent_notes`, `folder_stats` |
 | `apple-photos` | Apple Photos | FSEvents on Photos.sqlite | `library_stats`, `recent_photos`, `photo_location`, `photo_faces`, `photo_labels` |
+| `cic-task-output` | CiC Task File Output | FSEvents on `~/Downloads` (recursive) | *(none)* |
 | `desktop-activity` | Desktop Activity | IOKit idle time polling (no file watch) | *(none)* |
 
 ---
@@ -267,6 +268,8 @@ Lists individual Codex sessions from a configurable recent-day window (default 7
 
 Reads Apple Podcasts Core Data SQLite database directly (read-only). Requires Full Disk Access. Returns episodes from the last 7 days with play data, extracted links, and optional transcript snippets.
 
+Transcript snippets are most reliable when the Apple Podcasts app is running locally. In practice, Apple Podcasts usually needs to be open on your Mac for listening-history transcripts to be generated and available for LocalPush to include in push payloads.
+
 **Watch path:** `~/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Documents/MTLibrary.sqlite`
 
 ### Properties
@@ -399,6 +402,28 @@ Reads Photos.sqlite directly (read-only). Schema-adaptive — handles column var
 ```
 
 Returns up to 50 recent photos. Only non-trashed assets (`ZTRASHEDSTATE = 0`). Album count uses `ZKIND = 2` (user albums). `-180.0` coordinates indicate missing GPS data. `labels` always empty pending implementation.
+
+---
+
+## cic-task-output
+
+Watches `~/Downloads` for `claude-task-*.json` files and delivers the file contents as-is. Files ending in `_state.json` are ignored. On successful delivery, LocalPush either archives the file to `~/Downloads/.claude-task-archive/` or deletes it, depending on app config.
+
+**Watch path:** `~/Downloads`
+
+### Properties
+
+None — no configurable payload properties. Runtime behavior is controlled through app config keys such as `source.cic-task-output.archive_path` and `source.cic-task-output.post_process`.
+
+### Sample Payload
+
+```json
+{
+  "slug": "linkedin-harvest"
+}
+```
+
+The payload is the raw JSON body from the claimed task file; LocalPush does not wrap or reshape it. Delivery claims one file at a time, remembers the claimed path per queued event, and automatically flushes the next pending task file after a successful delivery. If a binding sends `X-Metrick-Source`, LocalPush appends the task type parsed from the filename, for example `localpush.cic-task-output.linkedin`.
 
 ---
 

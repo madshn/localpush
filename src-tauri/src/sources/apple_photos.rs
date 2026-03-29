@@ -1,4 +1,4 @@
-use super::{PreviewField, Source, SourceError, SourcePreview};
+use super::{file_change_hint, PreviewField, Source, SourceError, SourcePreview};
 use crate::source_config::PropertyDef;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
@@ -477,6 +477,16 @@ impl Source for ApplePhotosSource {
 
     fn watch_path(&self) -> Option<PathBuf> {
         Some(self.db_path.clone())
+    }
+
+    fn delivery_change_hint(&self) -> Result<Option<String>, SourceError> {
+        Ok(file_change_hint(&self.db_path)?.map(|hint| {
+            format!(
+                "day:{}:{}",
+                Utc::now().date_naive().format("%Y-%m-%d"),
+                hint
+            )
+        }))
     }
 
     fn parse(&self) -> Result<serde_json::Value, SourceError> {

@@ -1,4 +1,4 @@
-use super::{PreviewField, Source, SourceError, SourcePreview};
+use super::{recursive_path_change_hint, PreviewField, Source, SourceError, SourcePreview};
 use crate::config::AppConfig;
 use crate::source_config::{window_setting_for_source, PropertyDef, SourceConfigStore};
 use chrono::{DateTime, Utc};
@@ -629,6 +629,19 @@ impl Source for ClaudeSessionsSource {
 
     fn watch_recursive(&self) -> bool {
         true
+    }
+
+    fn delivery_change_hint(&self) -> Result<Option<String>, SourceError> {
+        Ok(
+            recursive_path_change_hint(&self.claude_projects_dir, None)?.map(|hint| {
+                format!(
+                    "day:{}:window:{}:{}",
+                    Utc::now().date_naive().format("%Y-%m-%d"),
+                    self.window_days(),
+                    hint
+                )
+            }),
+        )
     }
 
     fn parse(&self) -> Result<serde_json::Value, SourceError> {

@@ -33,6 +33,7 @@ const prettifyEventType = (eventType: string): string => {
   const prettyNames: Record<string, string> = {
     'claude-stats': 'Claude Stats',
     'claude-sessions': 'Claude Sessions',
+    'cic-task-output': 'CiC Task Output',
     'apple-podcasts': 'Apple Podcasts',
     'apple-notes': 'Apple Notes',
     'apple-photos': 'Apple Photos',

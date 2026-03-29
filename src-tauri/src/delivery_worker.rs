@@ -5,6 +5,8 @@
 
 use crate::bindings::{BindingStore, SourceBinding};
 use crate::events;
+use crate::source_manager::SourceManager;
+use crate::sources::Source;
 use crate::target_health::TargetHealthTracker;
 use crate::target_manager::TargetManager;
 use crate::traits::{
@@ -116,21 +118,48 @@ pub(crate) fn resolve_binding_auth(
     WebhookAuth::Custom { headers }
 }
 
+fn rewrite_auth_headers_for_event(
+    mut auth: WebhookAuth,
+    source: Option<&Arc<dyn Source>>,
+    event_id: &str,
+) -> WebhookAuth {
+    if let (WebhookAuth::Custom { headers }, Some(source)) = (&mut auth, source) {
+        if let Err(error) = source.rewrite_delivery_headers(event_id, headers) {
+            tracing::warn!(
+                source_id = %source.id(),
+                event_id = %event_id,
+                error = %error,
+                "Failed to rewrite delivery headers"
+            );
+        }
+    }
+
+    auth
+}
+
 /// Resolve delivery targets for an entry.
 ///
 /// If `target_endpoint_id` is set (targeted/scheduled/manual delivery), return only that
 /// specific binding's endpoint. Otherwise, filter to on_change bindings only.
 fn resolve_targets(
     source_id: &str,
+    event_id: &str,
     target_endpoint_id: Option<&str>,
     binding_store: &BindingStore,
     credentials: &dyn CredentialStore,
+    source_manager: Option<&SourceManager>,
 ) -> Vec<ResolvedTarget> {
+    let source = source_manager.and_then(|manager| manager.get_source(source_id));
+
     if let Some(ep_id) = target_endpoint_id {
         // Targeted delivery: find the specific binding
         let bindings = binding_store.get_for_source(source_id);
         if let Some(b) = bindings.into_iter().find(|b| b.endpoint_id == ep_id) {
-            let auth = resolve_binding_auth(&b, credentials);
+            let auth = rewrite_auth_headers_for_event(
+                resolve_binding_auth(&b, credentials),
+                source.as_ref(),
+                event_id,
+            );
             return vec![ResolvedTarget {
                 url: b.endpoint_url,
                 auth,
@@ -157,7 +186,11 @@ fn resolve_targets(
         return on_change_bindings
             .into_iter()
             .map(|b| {
-                let auth = resolve_binding_auth(&b, credentials);
+                let auth = rewrite_auth_headers_for_event(
+                    resolve_binding_auth(&b, credentials),
+                    source.as_ref(),
+                    event_id,
+                );
                 ResolvedTarget {
                     url: b.endpoint_url,
                     auth,
@@ -217,6 +250,7 @@ pub async fn process_batch(
     credentials: &dyn CredentialStore,
     target_manager: Option<&TargetManager>,
     health_tracker: Option<&TargetHealthTracker>,
+    source_manager: Option<&SourceManager>,
     batch_size: usize,
 ) -> BatchResult {
     let entries = match ledger.claim_batch(batch_size) {
@@ -232,9 +266,11 @@ pub async fn process_batch(
     for entry in entries {
         let targets = resolve_targets(
             &entry.event_type,
+            &entry.event_id,
             entry.target_endpoint_id.as_deref(),
             binding_store,
             credentials,
+            source_manager,
         );
 
         if targets.is_empty() {
@@ -416,6 +452,33 @@ pub async fn process_batch(
                 .is_ok()
             {
                 result.delivered += 1;
+                if let Some(sm) = source_manager {
+                    match sm.handle_delivery_success(
+                        &entry.event_type,
+                        &entry.event_id,
+                        &entry.payload,
+                    ) {
+                        Ok(true) => {
+                            if let Err(e) = sm.flush_source_on_change(&entry.event_type) {
+                                tracing::warn!(
+                                    source_id = %entry.event_type,
+                                    event_id = %entry.event_id,
+                                    error = %e,
+                                    "Failed to continue source backlog after successful delivery"
+                                );
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                source_id = %entry.event_type,
+                                event_id = %entry.event_id,
+                                error = %e,
+                                "Source post-delivery hook failed"
+                            );
+                        }
+                    }
+                }
             }
         } else if all_degraded {
             // All targets were degraded — pause this entry instead of burning retries
@@ -491,6 +554,7 @@ pub fn spawn_worker(
     credentials: Arc<dyn CredentialStore>,
     target_manager: Arc<TargetManager>,
     health_tracker: Arc<TargetHealthTracker>,
+    source_manager: Arc<SourceManager>,
     app_handle: tauri::AppHandle,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
@@ -518,6 +582,7 @@ pub fn spawn_worker(
                 &*credentials,
                 Some(&target_manager),
                 Some(&health_tracker),
+                Some(&source_manager),
                 10,
             )
             .await;
@@ -588,9 +653,13 @@ mod tests {
     use super::*;
     use crate::bindings::SourceBinding;
     use crate::config::AppConfig;
-    use crate::mocks::{InMemoryCredentialStore, RecordedWebhookClient};
+    use crate::mocks::{InMemoryCredentialStore, ManualFileWatcher, RecordedWebhookClient};
+    use crate::source_manager::SourceManager;
+    use crate::sources::CicTaskOutputSource;
     use crate::traits::DeliveryStatus;
     use crate::DeliveryLedger;
+    use std::fs;
+    use tempfile::TempDir;
 
     fn test_credentials() -> InMemoryCredentialStore {
         InMemoryCredentialStore::new()
@@ -633,11 +702,100 @@ mod tests {
             .enqueue("my-source", serde_json::json!({"data": 1}))
             .unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         assert_eq!(result.failed, 0);
         assert_eq!(webhook.call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_cic_task_success_archives_file_and_queues_next_file() {
+        let temp = TempDir::new().unwrap();
+        let downloads = temp.path().join("Downloads");
+        let archive = downloads.join(".claude-task-archive");
+        fs::create_dir_all(&downloads).unwrap();
+
+        let first = downloads.join("claude-task-alpha-2026-03-24T08-00-00Z.json");
+        let second = downloads.join("claude-task-beta-2026-03-24T09-00-00Z.json");
+        fs::write(
+            &first,
+            serde_json::to_vec(&serde_json::json!({"slug": "alpha"})).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            &second,
+            serde_json::to_vec(&serde_json::json!({"slug": "beta"})).unwrap(),
+        )
+        .unwrap();
+
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let binding_store = Arc::new(BindingStore::new(config.clone()));
+        let source_manager = SourceManager::new(
+            ledger.clone(),
+            watcher,
+            config.clone(),
+            binding_store.clone(),
+        );
+
+        source_manager.register(Arc::new(CicTaskOutputSource::new_with_paths(
+            &downloads,
+            &archive,
+            config.clone(),
+        )));
+        source_manager.enable("cic-task-output").unwrap();
+
+        binding_store
+            .save(&SourceBinding {
+                source_id: "cic-task-output".to_string(),
+                target_id: "t1".to_string(),
+                endpoint_id: "ep1".to_string(),
+                endpoint_url: "https://target.example.com/webhook".to_string(),
+                endpoint_name: "Test Endpoint".to_string(),
+                created_at: 1000,
+                active: true,
+                headers_json: None,
+                auth_credential_key: None,
+                delivery_mode: "on_change".to_string(),
+                schedule_time: None,
+                schedule_day: None,
+                last_scheduled_at: None,
+            })
+            .unwrap();
+
+        source_manager.handle_file_event(&first).unwrap();
+        assert_eq!(source_manager.flush_source("cic-task-output").unwrap(), 1);
+
+        let webhook = RecordedWebhookClient::success();
+        let creds = InMemoryCredentialStore::new();
+        let result = process_batch(
+            &*ledger,
+            &webhook,
+            &binding_store,
+            &creds,
+            None,
+            None,
+            Some(&source_manager),
+            10,
+        )
+        .await;
+
+        assert_eq!(result.delivered, 1);
+        assert!(
+            !first.exists(),
+            "first file should be archived after delivery"
+        );
+        assert!(archive.exists(), "archive folder should be created");
+
+        let pending = ledger.get_by_status(DeliveryStatus::Pending).unwrap();
+        assert_eq!(
+            pending.len(),
+            1,
+            "next CiC file should be queued automatically"
+        );
+        assert_eq!(pending[0].payload["slug"], "beta");
     }
 
     #[tokio::test]
@@ -646,11 +804,12 @@ mod tests {
         let webhook = RecordedWebhookClient::always_fail(
             crate::traits::WebhookError::NetworkError("refused".to_string()),
         );
-        let bs = test_binding_store();
+        let bs =
+            test_binding_store_with_binding("test.event", "https://target.example.com/webhook");
         let creds = test_credentials();
         ledger.enqueue("test.event", serde_json::json!({})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, None, 10).await;
 
         assert_eq!(result.delivered, 0);
         assert_eq!(result.failed, 1);
@@ -664,10 +823,29 @@ mod tests {
     async fn test_empty_batch_is_noop() {
         let ledger = DeliveryLedger::open_in_memory().unwrap();
         let webhook = RecordedWebhookClient::success();
-        let bs = test_binding_store();
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let bs = BindingStore::new(config);
+        for source_id in ["event.a", "event.b", "event.c"] {
+            bs.save(&SourceBinding {
+                source_id: source_id.to_string(),
+                target_id: "t1".to_string(),
+                endpoint_id: format!("ep-{source_id}"),
+                endpoint_url: "https://target.example.com/webhook".to_string(),
+                endpoint_name: "Test Endpoint".to_string(),
+                created_at: 1000,
+                active: true,
+                headers_json: None,
+                auth_credential_key: None,
+                delivery_mode: "on_change".to_string(),
+                schedule_time: None,
+                schedule_day: None,
+                last_scheduled_at: None,
+            })
+            .unwrap();
+        }
         let creds = test_credentials();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, None, 10).await;
 
         assert_eq!(result.delivered, 0);
         assert_eq!(result.failed, 0);
@@ -678,7 +856,26 @@ mod tests {
     async fn test_processes_multiple_entries() {
         let ledger = DeliveryLedger::open_in_memory().unwrap();
         let webhook = RecordedWebhookClient::success();
-        let bs = test_binding_store();
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let bs = BindingStore::new(config);
+        for source_id in ["event.a", "event.b", "event.c"] {
+            bs.save(&SourceBinding {
+                source_id: source_id.to_string(),
+                target_id: "t1".to_string(),
+                endpoint_id: format!("ep-{source_id}"),
+                endpoint_url: "https://target.example.com/webhook".to_string(),
+                endpoint_name: "Test Endpoint".to_string(),
+                created_at: 1000,
+                active: true,
+                headers_json: None,
+                auth_credential_key: None,
+                delivery_mode: "on_change".to_string(),
+                schedule_time: None,
+                schedule_day: None,
+                last_scheduled_at: None,
+            })
+            .unwrap();
+        }
         let creds = test_credentials();
 
         ledger
@@ -691,7 +888,7 @@ mod tests {
             .enqueue("event.c", serde_json::json!({"c": 3}))
             .unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, None, 10).await;
 
         assert_eq!(result.delivered, 3);
         assert_eq!(webhook.call_count(), 3);
@@ -708,7 +905,7 @@ mod tests {
             .unwrap();
 
         // No bindings → entry should be marked delivered (not stuck)
-        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, None, 10).await;
 
         assert_eq!(result.delivered, 0); // resolve_targets returns empty, skipped
         assert_eq!(result.failed, 0);
@@ -760,7 +957,7 @@ mod tests {
             .enqueue("my-source", serde_json::json!({"data": 1}))
             .unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         assert_eq!(result.failed, 0);
@@ -788,6 +985,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_cic_task_binding_rewrites_x_metrick_source_with_file_type() {
+        let temp = TempDir::new().unwrap();
+        let downloads = temp.path().join("Downloads");
+        let archive = downloads.join(".claude-task-archive");
+        fs::create_dir_all(&downloads).unwrap();
+
+        let task_file = downloads.join("claude-task-linkedin-harvest-2026-03-24T08-00-00Z.json");
+        fs::write(
+            &task_file,
+            serde_json::to_vec(&serde_json::json!({"slug": "linkedin-harvest"})).unwrap(),
+        )
+        .unwrap();
+
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let binding_store = Arc::new(BindingStore::new(config.clone()));
+        let source_manager = SourceManager::new(
+            ledger.clone(),
+            watcher,
+            config.clone(),
+            binding_store.clone(),
+        );
+
+        source_manager.register(Arc::new(CicTaskOutputSource::new_with_paths(
+            &downloads, &archive, config,
+        )));
+        source_manager.enable("cic-task-output").unwrap();
+
+        let headers: Vec<(String, String)> = vec![(
+            "X-Metrick-Source".to_string(),
+            "localpush.cic-task-output".to_string(),
+        )];
+        binding_store
+            .save(&SourceBinding {
+                source_id: "cic-task-output".to_string(),
+                target_id: "t1".to_string(),
+                endpoint_id: "ep1".to_string(),
+                endpoint_url: "https://target.example.com/webhook".to_string(),
+                endpoint_name: "Test Endpoint".to_string(),
+                created_at: 1000,
+                active: true,
+                headers_json: Some(serde_json::to_string(&headers).unwrap()),
+                auth_credential_key: None,
+                delivery_mode: "on_change".to_string(),
+                schedule_time: None,
+                schedule_day: None,
+                last_scheduled_at: None,
+            })
+            .unwrap();
+
+        source_manager.handle_file_event(&task_file).unwrap();
+        assert_eq!(source_manager.flush_source("cic-task-output").unwrap(), 1);
+
+        let webhook = RecordedWebhookClient::success();
+        let creds = InMemoryCredentialStore::new();
+        let result = process_batch(
+            &*ledger,
+            &webhook,
+            &binding_store,
+            &creds,
+            None,
+            None,
+            Some(&source_manager),
+            10,
+        )
+        .await;
+
+        assert_eq!(result.delivered, 1);
+
+        let requests = webhook.requests();
+        assert_eq!(requests.len(), 1);
+        match &requests[0].auth {
+            WebhookAuth::Custom { headers } => assert_eq!(
+                headers,
+                &vec![(
+                    "X-Metrick-Source".to_string(),
+                    "localpush.cic-task-output.linkedin".to_string(),
+                )]
+            ),
+            other => panic!("Expected Custom auth, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
     async fn test_binding_without_auth_sends_none() {
         let ledger = DeliveryLedger::open_in_memory().unwrap();
         let webhook = RecordedWebhookClient::success();
@@ -797,7 +1079,7 @@ mod tests {
             .enqueue("my-source", serde_json::json!({"data": 1}))
             .unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, None, 10).await;
 
         assert_eq!(result.delivered, 1);
         let requests = webhook.requests();
@@ -810,11 +1092,12 @@ mod tests {
         let webhook = RecordedWebhookClient::always_fail(
             crate::traits::WebhookError::NetworkError("refused".to_string()),
         );
-        let bs = test_binding_store();
+        let bs =
+            test_binding_store_with_binding("test.event", "https://target.example.com/webhook");
         let creds = test_credentials();
         ledger.enqueue("test.event", serde_json::json!({})).unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, None, 10).await;
 
         assert_eq!(result.failed, 1);
         assert!(
@@ -1002,7 +1285,7 @@ mod tests {
             .enqueue("my-source", serde_json::json!({"data": 1}))
             .unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, Some(&tm), None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, Some(&tm), None, None, 10).await;
 
         assert_eq!(result.delivered, 1, "Entry should be marked delivered");
         assert_eq!(result.failed, 0);
@@ -1047,7 +1330,7 @@ mod tests {
             .enqueue("my-source", serde_json::json!({"data": 1}))
             .unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, Some(&tm), None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, Some(&tm), None, None, 10).await;
 
         assert_eq!(result.delivered, 1, "Entry should be delivered via webhook");
         assert_eq!(result.failed, 0);
@@ -1070,7 +1353,7 @@ mod tests {
             .enqueue_targeted("my-source", serde_json::json!({"data": 1}), "missing-ep")
             .unwrap();
 
-        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, 10).await;
+        let result = process_batch(&ledger, &webhook, &bs, &creds, None, None, None, 10).await;
 
         assert_eq!(result.delivered, 0, "Should NOT be marked delivered");
         assert_eq!(result.failed, 1, "Should be marked failed");

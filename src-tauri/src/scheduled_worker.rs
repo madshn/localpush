@@ -151,10 +151,7 @@ fn daily_or_weekly_due_at(binding: &SourceBinding, now: chrono::DateTime<Local>)
         .single()
         .map(|dt| dt.timestamp());
 
-    let today_target_ts = match today_target_ts {
-        Some(ts) => ts,
-        None => return None,
-    };
+    let today_target_ts = today_target_ts?;
 
     // Not yet reached target time today
     if now.timestamp() < today_target_ts {
@@ -387,6 +384,18 @@ pub fn spawn_scheduler(
                         available_at,
                     ) {
                         Ok(event_id) => {
+                            if let Err(e) = source_manager.handle_delivery_queued(
+                                &binding.source_id,
+                                &event_id,
+                                &payload,
+                            ) {
+                                tracing::warn!(
+                                    source_id = %binding.source_id,
+                                    event_id = %event_id,
+                                    error = %e,
+                                    "Failed to record source delivery bookkeeping"
+                                );
+                            }
                             let (tt, bu) = target_manager
                                 .get(&binding.target_id)
                                 .map(|t| (t.target_type().to_string(), t.base_url().to_string()))

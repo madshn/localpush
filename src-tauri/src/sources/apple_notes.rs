@@ -1,4 +1,4 @@
-use super::{PreviewField, Source, SourceError, SourcePreview};
+use super::{file_change_hint, PreviewField, Source, SourceError, SourcePreview};
 use crate::source_config::PropertyDef;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
@@ -130,6 +130,16 @@ impl Source for AppleNotesSource {
 
     fn watch_path(&self) -> Option<PathBuf> {
         Some(self.watch_db_path.clone())
+    }
+
+    fn delivery_change_hint(&self) -> Result<Option<String>, SourceError> {
+        Ok(file_change_hint(&self.watch_db_path)?.map(|hint| {
+            format!(
+                "day:{}:{}",
+                Utc::now().date_naive().format("%Y-%m-%d"),
+                hint
+            )
+        }))
     }
 
     fn parse(&self) -> Result<serde_json::Value, SourceError> {

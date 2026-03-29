@@ -29,5 +29,17 @@
       "Bash(mkfs:*)",
       "Bash(dd if=:*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/madsnissen/builds/localpush/.claude/hooks/register-session.sh"
+          }
+        ]
+      }
+    ]
   }
 }

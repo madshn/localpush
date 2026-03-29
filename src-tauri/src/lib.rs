@@ -72,7 +72,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("LocalPush starting up");
 
-    let instance_guard = instance_guard::InstanceGuard::acquire(&app.handle())?;
+    let instance_guard = instance_guard::InstanceGuard::acquire(app.handle())?;
     app.manage(instance_guard);
 
     // Initialize app state with production implementations
@@ -124,6 +124,7 @@ pub fn setup_app(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         state.credentials.clone(),
         state.target_manager.clone(),
         state.health_tracker.clone(),
+        state.source_manager.clone(),
         app.handle().clone(),
     );
 

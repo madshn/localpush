@@ -130,6 +130,7 @@ fn test_full_pipeline_enable_event_deliver() {
             &InMemoryCredentialStore::new(),
             None,
             None,
+            None,
             10,
         )
         .await;
@@ -184,6 +185,7 @@ fn test_pipeline_retry_on_webhook_failure() {
             &*webhook_fail,
             &binding_store,
             &InMemoryCredentialStore::new(),
+            None,
             None,
             None,
             10,
@@ -258,6 +260,7 @@ fn test_pipeline_multiple_events_coalesce_to_single_delivery() {
             &InMemoryCredentialStore::new(),
             None,
             None,
+            None,
             10,
         )
         .await;
@@ -297,6 +300,7 @@ fn test_orphan_recovery_then_redelivery() {
             &*webhook,
             &binding_store,
             &InMemoryCredentialStore::new(),
+            None,
             None,
             None,
             10,

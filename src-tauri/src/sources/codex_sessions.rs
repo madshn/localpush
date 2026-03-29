@@ -1,4 +1,4 @@
-use super::{PreviewField, Source, SourceError, SourcePreview};
+use super::{recursive_path_change_hint, PreviewField, Source, SourceError, SourcePreview};
 use crate::config::AppConfig;
 use crate::source_config::{window_setting_for_source, PropertyDef, SourceConfigStore};
 use chrono::{DateTime, Duration, Utc};
@@ -503,6 +503,23 @@ impl Source for CodexSessionsSource {
 
     fn watch_recursive(&self) -> bool {
         true
+    }
+
+    fn delivery_change_hint(&self) -> Result<Option<String>, SourceError> {
+        Ok(
+            recursive_path_change_hint(&self.sessions_root, None)?.map(|hint| {
+                let window = self
+                    .window_days()
+                    .map(|days| days.to_string())
+                    .unwrap_or_else(|| "all".to_string());
+                format!(
+                    "day:{}:window:{}:{}",
+                    Utc::now().date_naive().format("%Y-%m-%d"),
+                    window,
+                    hint
+                )
+            }),
+        )
     }
 
     fn parse(&self) -> Result<Value, SourceError> {

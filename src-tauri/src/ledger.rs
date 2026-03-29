@@ -935,6 +935,7 @@ mod tests {
         let recovered_event = ledger
             .enqueue("desktop-activity", serde_json::json!({"step": "recovered"}))
             .unwrap();
+        ledger.claim_batch(1).unwrap();
         ledger.mark_delivered(&recovered_event, None).unwrap();
 
         let counts = ledger.get_source_status_counts().unwrap();
@@ -986,16 +987,18 @@ mod tests {
                 serde_json::json!({"step": "retried-later"}),
             )
             .unwrap();
+        ledger.claim_batch(1).unwrap();
         ledger.mark_delivered(&recovered_event, None).unwrap();
 
         // Simulate an old event that was only delivered much later.
         {
             let conn = ledger.writer.lock().unwrap();
+            let recent_delivered_at = chrono::Utc::now().timestamp();
             conn.execute(
                 "UPDATE delivery_ledger
                  SET created_at = ?1, delivered_at = ?2
                  WHERE event_id = ?3",
-                params![1_i64, 200_i64, recovered_event],
+                params![1_i64, recent_delivered_at, recovered_event],
             )
             .unwrap();
         }

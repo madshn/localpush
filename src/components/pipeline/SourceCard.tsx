@@ -1,9 +1,10 @@
-import { Terminal, Podcast, StickyNote, Image, BarChart3 } from "lucide-react";
+import { Terminal, Podcast, StickyNote, Image, BarChart3, Download } from "lucide-react";
 import type { SourceCategory } from "./types";
 
 const sourceIcons: Record<string, { icon: typeof Terminal; color: string }> = {
   "claude-stats": { icon: Terminal, color: "text-accent" },
   "claude-sessions": { icon: Terminal, color: "text-accent" },
+  "cic-task-output": { icon: Download, color: "text-sky-400" },
   "apple-podcasts": { icon: Podcast, color: "text-purple-400" },
   "apple-notes": { icon: StickyNote, color: "text-yellow-400" },
   "apple-photos": { icon: Image, color: "text-pink-400" },

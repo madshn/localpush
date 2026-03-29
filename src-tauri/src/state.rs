@@ -325,8 +325,9 @@ impl AppState {
 
         // Register sources
         use crate::sources::{
-            AppleNotesSource, ApplePhotosSource, ApplePodcastsSource, ClaudeSessionsSource,
-            ClaudeStatsSource, CodexSessionsSource, CodexStatsSource, DesktopActivitySource,
+            AppleNotesSource, ApplePhotosSource, ApplePodcastsSource, CicTaskOutputSource,
+            ClaudeSessionsSource, ClaudeStatsSource, CodexSessionsSource, CodexStatsSource,
+            DesktopActivitySource,
         };
 
         match ClaudeStatsSource::new(config.clone()) {
@@ -385,6 +386,13 @@ impl AppState {
                 source_manager.register(Arc::new(source));
             }
             Err(e) => tracing::warn!("Apple Photos source unavailable: {}", e),
+        }
+        match CicTaskOutputSource::new(config.clone()) {
+            Ok(source) => {
+                tracing::info!("Registered CicTaskOutputSource");
+                source_manager.register(Arc::new(source));
+            }
+            Err(e) => tracing::warn!("CiC task output source unavailable: {}", e),
         }
 
         // Register Desktop Activity source (non-file, polled by worker)

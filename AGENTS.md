@@ -25,10 +25,14 @@ macOS menu bar app that watches local files and delivers them to webhooks with g
 Sources (Southbound)          Bindings              Targets (Northbound)
 ────────────────────         ─────────             ───────────────────
 claude-stats ──────┐                               ┌── n8n (webhook endpoints)
-claude-sessions ───┤── SourceBinding ──────────────┤── ntfy (push topics)
-apple-podcasts ────┤   (source→endpoint)           └── (future: Make, Zapier...)
+claude-sessions ───┤                               ├── ntfy (push topics)
+codex-stats ───────┤── SourceBinding ──────────────┤
+codex-sessions ────┤   (source→endpoint)           └── (future: Make, Zapier...)
+apple-podcasts ────┤
 apple-notes ───────┤
-apple-photos ──────┘
+apple-photos ──────┤
+cic-task-output ───┤
+desktop-activity ──┘
                     │
               SourceManager          DeliveryWorker
               (parse + enqueue)      (poll ledger → resolve bindings → POST)
@@ -77,7 +81,7 @@ Any feature that weakens these guarantees requires explicit user approval before
 
 | Path | Purpose |
 |------|---------|
-| `src-tauri/src/sources/` | Source implementations (claude-stats, apple-podcasts, etc.) |
+| `src-tauri/src/sources/` | Source implementations (Claude, Codex, Apple, CiC task output, desktop activity) |
 | `src-tauri/src/targets/` | Target implementations (n8n webhook, ntfy) |
 | `src-tauri/src/delivery/` | DeliveryWorker — polls ledger, resolves bindings, POSTs |
 | `src-tauri/src/ledger/` | SQLite WAL ledger — crash-safe event queue |

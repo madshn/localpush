@@ -1204,6 +1204,14 @@ pub fn trigger_source_push(
 ) -> Result<String, String> {
     tracing::info!(command = "trigger_source_push", source_id = %source_id, "Command invoked");
 
+    // "Push Now" delivers to ALL bindings (including scheduled ones), not just on_change.
+    // Create one targeted delivery per binding for independent tracking.
+    let bindings = state.binding_store.get_for_source(&source_id);
+    if bindings.is_empty() {
+        tracing::info!(source_id = %source_id, "Manual push skipped: no bindings");
+        return Ok("skipped:no_bindings".to_string());
+    }
+
     let payload = match state
         .source_manager
         .prepare_payload_for_delivery(&source_id)
@@ -1222,14 +1230,6 @@ pub fn trigger_source_push(
         }
     };
 
-    // "Push Now" delivers to ALL bindings (including scheduled ones), not just on_change.
-    // Create one targeted delivery per binding for independent tracking.
-    let bindings = state.binding_store.get_for_source(&source_id);
-    if bindings.is_empty() {
-        tracing::info!(source_id = %source_id, "Manual push skipped: no bindings");
-        return Ok("skipped:no_bindings".to_string());
-    }
-
     let mut first_event_id = String::new();
     for binding in &bindings {
         let event_id = state.ledger.enqueue_manual_targeted(
@@ -1240,6 +1240,10 @@ pub fn trigger_source_push(
             tracing::error!(source_id = %source_id, endpoint = %binding.endpoint_id, error = %e, "Ledger enqueue failed");
             e.to_string()
         })?;
+        state
+            .source_manager
+            .handle_delivery_queued(&source_id, &event_id, &payload)
+            .map_err(|e| e.to_string())?;
 
         // Write target display info immediately so the activity log shows it
         let (target_type, base_url) = state

@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use crate::bindings::BindingStore;
 use crate::config::AppConfig;
 use crate::source_config::SourceConfigStore;
-use crate::sources::{Source, SourceError};
+use crate::sources::{PostDeliveryAction, Source, SourceError};
 use crate::traits::{DeliveryLedgerTrait, FileWatcher, FileWatcherError, LedgerError};
 
 /// Error types for SourceManager operations
@@ -86,6 +86,7 @@ const COALESCE_WINDOW_SECS: i64 = 90;
 const STAGGER_OFFSET_SECS: i64 = 10;
 
 const DELIVERY_FINGERPRINT_KEY_PREFIX: &str = "delivery_fingerprint.";
+const DELIVERY_HINT_KEY_PREFIX: &str = "delivery_hint.";
 
 /// Registry and orchestrator for data sources
 pub struct SourceManager {
@@ -233,17 +234,40 @@ impl SourceManager {
         &self,
         source_id: &str,
     ) -> Result<(Arc<dyn Source>, serde_json::Value), SourceManagerError> {
+        self.parse_filter_with_source_mode(source_id, false)
+    }
+
+    fn prepare_filter_with_source(
+        &self,
+        source_id: &str,
+    ) -> Result<(Arc<dyn Source>, serde_json::Value), SourceManagerError> {
+        self.parse_filter_with_source_mode(source_id, true)
+    }
+
+    fn parse_filter_with_source_mode(
+        &self,
+        source_id: &str,
+        for_delivery: bool,
+    ) -> Result<(Arc<dyn Source>, serde_json::Value), SourceManagerError> {
         let source = self
             .get_source(source_id)
             .ok_or_else(|| SourceManagerError::SourceNotFound(source_id.to_string()))?;
 
-        let payload = source.parse()?;
+        let payload = if for_delivery {
+            source.prepare_for_delivery()?
+        } else {
+            source.parse()?
+        };
         let filtered = self.filter_payload(source_id, payload, &source)?;
         Ok((source, filtered))
     }
 
     fn fingerprint_key(source_id: &str) -> String {
         format!("{DELIVERY_FINGERPRINT_KEY_PREFIX}{source_id}")
+    }
+
+    fn hint_key(source_id: &str) -> String {
+        format!("{DELIVERY_HINT_KEY_PREFIX}{source_id}")
     }
 
     fn fingerprint_for_payload(
@@ -263,6 +287,29 @@ impl SourceManager {
             .map_err(SourceManagerError::from)
     }
 
+    fn last_delivery_hint(&self, source_id: &str) -> Result<Option<String>, SourceManagerError> {
+        self.config
+            .get(&Self::hint_key(source_id))
+            .map_err(SourceManagerError::from)
+    }
+
+    fn remember_delivery_hint(
+        &self,
+        source_id: &str,
+        source: &Arc<dyn Source>,
+    ) -> Result<(), SourceManagerError> {
+        match source.delivery_change_hint()? {
+            Some(hint) => self
+                .config
+                .set(&Self::hint_key(source_id), &hint)
+                .map_err(SourceManagerError::from),
+            None => self
+                .config
+                .delete(&Self::hint_key(source_id))
+                .map_err(SourceManagerError::from),
+        }
+    }
+
     pub fn remember_payload_fingerprint(
         &self,
         source_id: &str,
@@ -275,6 +322,7 @@ impl SourceManager {
         self.config
             .set(&Self::fingerprint_key(source_id), &fingerprint)
             .map_err(SourceManagerError::from)
+            .and_then(|_| self.remember_delivery_hint(source_id, &source))
     }
 
     /// Handle a file event: resolve source, record for coalescing.
@@ -305,6 +353,18 @@ impl SourceManager {
             return Ok(());
         }
 
+        let source = self
+            .get_source(&source_id)
+            .ok_or_else(|| SourceManagerError::SourceNotFound(source_id.clone()))?;
+        if !source.should_process_event(path) {
+            tracing::debug!(
+                source_id = %source_id,
+                path = %path.display(),
+                "Ignoring unrelated file event"
+            );
+            return Ok(());
+        }
+
         // Record event for coalescing (resets the 90s window)
         let now = chrono::Utc::now().timestamp();
         self.pending_events
@@ -331,18 +391,6 @@ impl SourceManager {
             return Ok(0);
         }
 
-        let filtered_payload = match self.prepare_payload_for_delivery(source_id)? {
-            PreparedPayload::Deliver(payload) => payload,
-            PreparedPayload::Skip(reason) => {
-                tracing::debug!(
-                    source_id = %source_id,
-                    reason = reason.as_str(),
-                    "Skipping source flush with no new deliverable payload"
-                );
-                return Ok(0);
-            }
-        };
-
         let bindings = self.binding_store.get_for_source(source_id);
         if bindings.is_empty() {
             tracing::debug!(source_id = %source_id, "Skipping source flush with no bindings");
@@ -364,16 +412,29 @@ impl SourceManager {
             return Ok(0);
         }
 
+        let filtered_payload = match self.prepare_payload_for_delivery(source_id)? {
+            PreparedPayload::Deliver(payload) => payload,
+            PreparedPayload::Skip(reason) => {
+                tracing::debug!(
+                    source_id = %source_id,
+                    reason = reason.as_str(),
+                    "Skipping source flush with no new deliverable payload"
+                );
+                return Ok(0);
+            }
+        };
+
         // Enqueue one targeted entry per binding with staggered available_at
         let mut enqueued = 0;
         for (i, binding) in on_change_bindings.iter().enumerate() {
             let available_at = now + (i as i64 * STAGGER_OFFSET_SECS);
-            self.ledger.enqueue_targeted_at(
+            let event_id = self.ledger.enqueue_targeted_at(
                 source_id,
                 filtered_payload.clone(),
                 &binding.endpoint_id,
                 available_at,
             )?;
+            self.handle_delivery_queued(source_id, &event_id, &filtered_payload)?;
             enqueued += 1;
             tracing::debug!(
                 source_id = %source_id,
@@ -428,12 +489,13 @@ impl SourceManager {
         let mut enqueued = 0;
         for (i, binding) in on_change_bindings.iter().enumerate() {
             let available_at = now + (i as i64 * STAGGER_OFFSET_SECS);
-            self.ledger.enqueue_targeted_at(
+            let event_id = self.ledger.enqueue_targeted_at(
                 source_id,
                 filtered_payload.clone(),
                 &binding.endpoint_id,
                 available_at,
             )?;
+            self.handle_delivery_queued(source_id, &event_id, &filtered_payload)?;
             enqueued += 1;
         }
 
@@ -505,7 +567,17 @@ impl SourceManager {
         &self,
         source_id: &str,
     ) -> Result<PreparedPayload, SourceManagerError> {
-        let (source, filtered) = self.parse_filter_with_source(source_id)?;
+        let source = self
+            .get_source(source_id)
+            .ok_or_else(|| SourceManagerError::SourceNotFound(source_id.to_string()))?;
+
+        if let Some(hint) = source.delivery_change_hint()? {
+            if self.last_delivery_hint(source_id)? == Some(hint) {
+                return Ok(PreparedPayload::Skip(DeliverySkipReason::Unchanged));
+            }
+        }
+
+        let filtered = self.prepare_filter_with_source(source_id)?.1;
 
         if !source.has_meaningful_payload(&filtered) {
             return Ok(PreparedPayload::Skip(DeliverySkipReason::NoData));
@@ -517,6 +589,35 @@ impl SourceManager {
         }
 
         Ok(PreparedPayload::Deliver(filtered))
+    }
+
+    pub fn handle_delivery_queued(
+        &self,
+        source_id: &str,
+        event_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), SourceManagerError> {
+        let source = self
+            .get_source(source_id)
+            .ok_or_else(|| SourceManagerError::SourceNotFound(source_id.to_string()))?;
+        source.on_delivery_queued(event_id, payload)?;
+        Ok(())
+    }
+
+    pub fn handle_delivery_success(
+        &self,
+        source_id: &str,
+        event_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<bool, SourceManagerError> {
+        let source = self
+            .get_source(source_id)
+            .ok_or_else(|| SourceManagerError::SourceNotFound(source_id.to_string()))?;
+
+        Ok(matches!(
+            source.on_delivery_success(event_id, payload)?,
+            PostDeliveryAction::FlushNext
+        ))
     }
 
     /// List all registered sources with their enabled state
@@ -679,6 +780,46 @@ mod tests {
         }
     }
 
+    struct HintedSignalSource {
+        path: PathBuf,
+        parse_calls: Mutex<u64>,
+        hint: Mutex<String>,
+    }
+
+    impl Source for HintedSignalSource {
+        fn id(&self) -> &str {
+            "hinted-signal"
+        }
+
+        fn name(&self) -> &str {
+            "Hinted Signal"
+        }
+
+        fn watch_path(&self) -> Option<PathBuf> {
+            Some(self.path.clone())
+        }
+
+        fn parse(&self) -> Result<serde_json::Value, SourceError> {
+            let mut parse_calls = self.parse_calls.lock().unwrap();
+            *parse_calls += 1;
+            Ok(json!({
+                "count": 1,
+                "metadata": {
+                    "source": "localpush",
+                    "source_id": "hinted-signal",
+                }
+            }))
+        }
+
+        fn preview(&self) -> Result<crate::sources::SourcePreview, SourceError> {
+            unimplemented!()
+        }
+
+        fn delivery_change_hint(&self) -> Result<Option<String>, SourceError> {
+            Ok(Some(self.hint.lock().unwrap().clone()))
+        }
+    }
+
     #[test]
     fn test_register_source() {
         let (mgr, _) = test_manager();
@@ -755,10 +896,10 @@ mod tests {
         mgr.handle_file_event(&path).unwrap();
         let count = mgr.flush_source("signal-source").unwrap();
 
-        // No bindings → falls back to single untargeted enqueue
-        assert_eq!(count, 1);
+        // No bindings → flush should skip enqueueing
+        assert_eq!(count, 0);
         let stats = ledger.get_stats().unwrap();
-        assert_eq!(stats.pending, 1);
+        assert_eq!(stats.pending, 0);
         assert!(
             !mgr.has_pending_event("signal-source"),
             "flush should clear pending event"
@@ -875,16 +1016,19 @@ mod tests {
             pending.insert("signal-source".to_string(), old_ts);
         }
 
-        // Now flush_expired should flush
+        // Now flush_expired should clear the stale pending event but skip enqueueing
         let flushed = mgr.flush_expired();
-        assert_eq!(flushed, 1, "expired events should be flushed");
+        assert_eq!(
+            flushed, 0,
+            "expired events without bindings should be skipped"
+        );
         assert!(
             !mgr.has_pending_event("signal-source"),
             "event should be cleared after flush"
         );
 
         let stats = ledger.get_stats().unwrap();
-        assert_eq!(stats.pending, 1);
+        assert_eq!(stats.pending, 0);
     }
 
     #[test]
@@ -939,6 +1083,74 @@ mod tests {
             PreparedPayload::Skip(DeliverySkipReason::Unchanged) => {}
             other => panic!("expected unchanged skip, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_prepare_payload_skips_before_parse_when_delivery_hint_is_unchanged() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().to_path_buf();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config, binding_store);
+
+        let source = Arc::new(HintedSignalSource {
+            path,
+            parse_calls: Mutex::new(0),
+            hint: Mutex::new("hint-a".to_string()),
+        });
+        mgr.register(source.clone());
+
+        let first = match mgr.prepare_payload_for_delivery("hinted-signal").unwrap() {
+            PreparedPayload::Deliver(payload) => payload,
+            other => panic!("expected deliverable payload, got {other:?}"),
+        };
+        mgr.remember_payload_fingerprint("hinted-signal", &first)
+            .unwrap();
+
+        match mgr.prepare_payload_for_delivery("hinted-signal").unwrap() {
+            PreparedPayload::Skip(DeliverySkipReason::Unchanged) => {}
+            other => panic!("expected unchanged skip, got {other:?}"),
+        }
+
+        assert_eq!(*source.parse_calls.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_prepare_payload_reparses_when_delivery_hint_changes() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().to_path_buf();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config, binding_store);
+
+        let source = Arc::new(HintedSignalSource {
+            path,
+            parse_calls: Mutex::new(0),
+            hint: Mutex::new("hint-a".to_string()),
+        });
+        mgr.register(source.clone());
+
+        let first = match mgr.prepare_payload_for_delivery("hinted-signal").unwrap() {
+            PreparedPayload::Deliver(payload) => payload,
+            other => panic!("expected deliverable payload, got {other:?}"),
+        };
+        mgr.remember_payload_fingerprint("hinted-signal", &first)
+            .unwrap();
+
+        *source.hint.lock().unwrap() = "hint-b".to_string();
+
+        match mgr.prepare_payload_for_delivery("hinted-signal").unwrap() {
+            PreparedPayload::Skip(DeliverySkipReason::Unchanged) => {}
+            other => panic!("expected unchanged skip after reparse, got {other:?}"),
+        }
+
+        assert_eq!(*source.parse_calls.lock().unwrap(), 2);
     }
 
     #[test]
