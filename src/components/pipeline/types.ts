@@ -6,20 +6,20 @@ export interface SourcePreview {
 }
 
 export interface DeliveryStatus {
-  overall: "active" | "success" | "pending" | "failed" | "unknown";
+  overall: 'active' | 'success' | 'pending' | 'failed' | 'unknown';
   pending_count: number;
   failed_count: number;
   last_delivery: string | null;
 }
 
 export type FlowStep =
-  | "idle"
-  | "preview"
-  | "pick_endpoint"
-  | "configure_delivery"
-  | "security_check";
+  | 'idle'
+  | 'preview'
+  | 'pick_endpoint'
+  | 'configure_delivery'
+  | 'security_check';
 
-export type DeliveryMode = "on_change" | "interval" | "daily" | "weekly";
+export type DeliveryMode = 'on_change' | 'interval' | 'daily' | 'weekly';
 
 export interface FlowState {
   sourceId: string;
@@ -43,7 +43,7 @@ export interface FlowState {
 
 export const defaultFlowState = (sourceId: string): FlowState => ({
   sourceId,
-  step: "idle",
+  step: 'idle',
   preview: null,
   selectedTarget: null,
   selectedEndpoint: null,
@@ -52,16 +52,16 @@ export const defaultFlowState = (sourceId: string): FlowState => ({
   selectedAuthenticated: false,
   selectedAuthType: null,
   customHeaders: [],
-  authHeaderName: "",
-  authHeaderValue: "",
+  authHeaderName: '',
+  authHeaderValue: '',
   isEditing: false,
   existingAuthCredentialKey: null,
-  deliveryMode: "on_change",
+  deliveryMode: 'on_change',
   scheduleTime: undefined,
   scheduleDay: undefined,
 });
 
-export type SourceCategory = "active" | "paused" | "available";
+export type SourceCategory = 'active' | 'paused' | 'available';
 
 export interface SourceData {
   id: string;
@@ -77,4 +77,4 @@ export interface SourceWithCategory {
   category: SourceCategory;
 }
 
-export type TrafficLightStatus = "green" | "yellow" | "red" | "orange" | "grey";
+export type TrafficLightStatus = 'green' | 'yellow' | 'red' | 'orange' | 'grey';

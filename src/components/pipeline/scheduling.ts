@@ -1,4 +1,4 @@
-import type { Binding } from "../../api/hooks/useBindings";
+import type { Binding } from '../../api/hooks/useBindings';
 
 const SCHEDULER_TICK_SECONDS = 60;
 
@@ -7,12 +7,12 @@ interface IntervalPhase {
   offsetSeconds: number;
 }
 
-function bindingKey(binding: Pick<Binding, "source_id" | "endpoint_id">): string {
+function bindingKey(binding: Pick<Binding, 'source_id' | 'endpoint_id'>): string {
   return `${binding.source_id}::${binding.endpoint_id}`;
 }
 
 function parseIntervalMinutes(binding: Binding): number {
-  const parsed = Number(binding.schedule_time ?? "15");
+  const parsed = Number(binding.schedule_time ?? '15');
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 15;
 }
 
@@ -24,7 +24,7 @@ function buildIntervalPhases(bindings: Binding[]): Map<string, IntervalPhase> {
   const byInterval = new Map<number, Binding[]>();
 
   for (const binding of bindings) {
-    if (binding.delivery_mode !== "interval") continue;
+    if (binding.delivery_mode !== 'interval') continue;
     const intervalMinutes = parseIntervalMinutes(binding);
     const group = byInterval.get(intervalMinutes) ?? [];
     group.push(binding);
@@ -65,11 +65,7 @@ function mostRecentIntervalSlot(minuteTimestamp: number, phase: IntervalPhase): 
   return candidate <= minuteTimestamp ? candidate : candidate - phase.intervalSeconds;
 }
 
-function nextIntervalPushAt(
-  binding: Binding,
-  phase: IntervalPhase,
-  nowSeconds: number,
-): number {
+function nextIntervalPushAt(binding: Binding, phase: IntervalPhase, nowSeconds: number): number {
   const minuteTimestamp = truncateToMinute(nowSeconds);
   const recentSlot = mostRecentIntervalSlot(minuteTimestamp, phase);
   const lastScheduledAt = binding.last_scheduled_at;
@@ -83,7 +79,7 @@ function nextIntervalPushAt(
 
 function nextDailyPushAt(binding: Binding, now: Date): number | null {
   if (!binding.schedule_time) return null;
-  const [hourStr, minuteStr] = binding.schedule_time.split(":");
+  const [hourStr, minuteStr] = binding.schedule_time.split(':');
   const hour = Number(hourStr);
   const minute = Number(minuteStr);
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
@@ -119,7 +115,7 @@ const weekdayMap: Record<string, number> = {
 
 function nextWeeklyPushAt(binding: Binding, now: Date): number | null {
   if (!binding.schedule_time || !binding.schedule_day) return null;
-  const [hourStr, minuteStr] = binding.schedule_time.split(":");
+  const [hourStr, minuteStr] = binding.schedule_time.split(':');
   const hour = Number(hourStr);
   const minute = Number(minuteStr);
   const targetDay = weekdayMap[binding.schedule_day.toLowerCase()];
@@ -146,18 +142,22 @@ function nextWeeklyPushAt(binding: Binding, now: Date): number | null {
   return candidate.getTime();
 }
 
-function nextPushAt(binding: Binding, intervalPhases: Map<string, IntervalPhase>, nowMs: number): number | null {
-  if (binding.delivery_mode === "interval") {
+function nextPushAt(
+  binding: Binding,
+  intervalPhases: Map<string, IntervalPhase>,
+  nowMs: number,
+): number | null {
+  if (binding.delivery_mode === 'interval') {
     const phase = intervalPhases.get(bindingKey(binding));
     if (!phase) return null;
     return nextIntervalPushAt(binding, phase, Math.floor(nowMs / 1000)) * 1000;
   }
 
-  if (binding.delivery_mode === "daily") {
+  if (binding.delivery_mode === 'daily') {
     return nextDailyPushAt(binding, new Date(nowMs));
   }
 
-  if (binding.delivery_mode === "weekly") {
+  if (binding.delivery_mode === 'weekly') {
     return nextWeeklyPushAt(binding, new Date(nowMs));
   }
 
@@ -181,12 +181,15 @@ export function getNextPushBySource(bindings: Binding[], nowMs: number): Map<str
   return nextBySource;
 }
 
-export function formatNextPushLabel(nextPushAtMs: number | null | undefined, nowMs: number): string | null {
+export function formatNextPushLabel(
+  nextPushAtMs: number | null | undefined,
+  nowMs: number,
+): string | null {
   if (nextPushAtMs == null) return null;
 
   const diffMs = nextPushAtMs - nowMs;
   if (diffMs <= 30_000) {
-    return "Next push due now";
+    return 'Next push due now';
   }
 
   const diffMinutes = Math.ceil(diffMs / 60_000);
@@ -202,10 +205,10 @@ export function formatNextPushLabel(nextPushAtMs: number | null | undefined, now
       : `Next push in ${diffHours}h`;
   }
 
-  return `Next push ${new Date(nextPushAtMs).toLocaleString("en-US", {
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
+  return `Next push ${new Date(nextPushAtMs).toLocaleString('en-US', {
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
     hour12: false,
   })}`;
 }

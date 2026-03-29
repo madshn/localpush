@@ -1,15 +1,24 @@
-import { memo, useState } from "react";
-import { Plus, Pencil, Info, X, Zap, SlidersHorizontal, AlertTriangle, RefreshCw } from "lucide-react";
-import type { Binding } from "../api/hooks/useBindings";
-import type { TargetHealth } from "../api/hooks/useTargets";
-import type { TrafficLightStatus } from "./pipeline/types";
-import { TransparencyPreview } from "./TransparencyPreview";
-import { EndpointPicker } from "./EndpointPicker";
-import { SecurityCoaching } from "./SecurityCoaching";
-import { DeliveryConfig } from "./DeliveryConfig";
-import { SourceSettings } from "./SourceSettings";
+import {
+  AlertTriangle,
+  Info,
+  Pencil,
+  Plus,
+  RefreshCw,
+  SlidersHorizontal,
+  X,
+  Zap,
+} from 'lucide-react';
+import { memo, useState } from 'react';
+import type { Binding } from '../api/hooks/useBindings';
+import type { TargetHealth } from '../api/hooks/useTargets';
+import { DeliveryConfig } from './DeliveryConfig';
+import { EndpointPicker } from './EndpointPicker';
+import type { TrafficLightStatus } from './pipeline/types';
+import { SecurityCoaching } from './SecurityCoaching';
+import { SourceSettings } from './SourceSettings';
+import { TransparencyPreview } from './TransparencyPreview';
 
-type SourceCategory = "active" | "paused" | "available";
+type SourceCategory = 'active' | 'paused' | 'available';
 
 interface SourcePreview {
   title: string;
@@ -18,14 +27,9 @@ interface SourcePreview {
   lastUpdated: string | null;
 }
 
-type DeliveryMode = "on_change" | "interval" | "daily" | "weekly";
+type DeliveryMode = 'on_change' | 'interval' | 'daily' | 'weekly';
 
-type FlowStep =
-  | "idle"
-  | "preview"
-  | "pick_endpoint"
-  | "configure_delivery"
-  | "security_check";
+type FlowStep = 'idle' | 'preview' | 'pick_endpoint' | 'configure_delivery' | 'security_check';
 
 interface FlowState {
   sourceId: string;
@@ -73,7 +77,7 @@ interface PipelineCardProps {
     endpointUrl: string,
     endpointName: string,
     authenticated: boolean,
-    authType?: string
+    authType?: string,
   ) => void;
   onDeliveryConfigConfirm: (
     sourceId: string,
@@ -82,7 +86,7 @@ interface PipelineCardProps {
     authHeaderValue: string,
     deliveryMode: DeliveryMode,
     scheduleTime: string | undefined,
-    scheduleDay: string | undefined
+    scheduleDay: string | undefined,
   ) => void;
   onSecurityConfirm: (sourceId: string) => void;
   onCancelFlow: (sourceId: string) => void;
@@ -98,51 +102,51 @@ interface PipelineCardProps {
 
 const statusConfig = {
   green: {
-    stripe: "bg-success",
-    badge: "Flowing",
-    badgeClass: "bg-success-bg text-success",
+    stripe: 'bg-success',
+    badge: 'Flowing',
+    badgeClass: 'bg-success-bg text-success',
     pulse: true,
   },
   yellow: {
-    stripe: "bg-warning",
-    badge: "Pending",
-    badgeClass: "bg-warning-bg text-warning",
+    stripe: 'bg-warning',
+    badge: 'Pending',
+    badgeClass: 'bg-warning-bg text-warning',
     pulse: false,
   },
   orange: {
-    stripe: "bg-warning",
-    badge: "Blocked",
-    badgeClass: "bg-warning-bg text-warning",
+    stripe: 'bg-warning',
+    badge: 'Blocked',
+    badgeClass: 'bg-warning-bg text-warning',
     pulse: false,
   },
   red: {
-    stripe: "bg-error",
-    badge: "Error",
-    badgeClass: "bg-error-bg text-error",
+    stripe: 'bg-error',
+    badge: 'Error',
+    badgeClass: 'bg-error-bg text-error',
     pulse: false,
   },
   grey: {
-    stripe: "bg-text-secondary/30",
-    badge: "Idle",
-    badgeClass: "bg-bg-tertiary text-text-secondary",
+    stripe: 'bg-text-secondary/30',
+    badge: 'Idle',
+    badgeClass: 'bg-bg-tertiary text-text-secondary',
     pulse: false,
   },
 } as const;
 
 function deliveryModeBadge(binding: Binding): string | null {
-  if (!binding.delivery_mode || binding.delivery_mode === "on_change") return null;
-  if (binding.delivery_mode === "interval") {
-    const mins = binding.schedule_time || "15";
+  if (!binding.delivery_mode || binding.delivery_mode === 'on_change') return null;
+  if (binding.delivery_mode === 'interval') {
+    const mins = binding.schedule_time || '15';
     return `Every ${mins}m`;
   }
-  if (binding.delivery_mode === "daily") {
-    return `Daily ${binding.schedule_time || "00:01"}`;
+  if (binding.delivery_mode === 'daily') {
+    return `Daily ${binding.schedule_time || '00:01'}`;
   }
-  if (binding.delivery_mode === "weekly") {
+  if (binding.delivery_mode === 'weekly') {
     const day = binding.schedule_day
       ? binding.schedule_day.charAt(0).toUpperCase() + binding.schedule_day.slice(1, 3)
-      : "Mon";
-    return `Weekly ${day} ${binding.schedule_time || "00:01"}`;
+      : 'Mon';
+    return `Weekly ${day} ${binding.schedule_time || '00:01'}`;
   }
   return null;
 }
@@ -178,24 +182,18 @@ function PipelineCardComponent({
   const [showDisableConfirm, setShowDisableConfirm] = useState(false);
 
   const degradedMap = new Map(
-    targetHealth
-      .filter((h) => h.status === "degraded")
-      .map((h) => [h.target_id, h])
+    targetHealth.filter((h) => h.status === 'degraded').map((h) => [h.target_id, h]),
   );
 
   const effectiveStatus =
-    category === "paused"
-      ? "grey"
-      : category === "available"
-        ? "grey"
-        : trafficLightStatus;
+    category === 'paused' ? 'grey' : category === 'available' ? 'grey' : trafficLightStatus;
   const status = statusConfig[effectiveStatus];
 
-  const isAvailable = category === "available";
-  const isPaused = category === "paused";
-  const isFlowActive = flowState.step !== "idle";
-  const badgeLabel = isPaused ? "Paused" : status.badge;
-  const badgeClass = isPaused ? "bg-bg-tertiary text-text-secondary" : status.badgeClass;
+  const isAvailable = category === 'available';
+  const isPaused = category === 'paused';
+  const isFlowActive = flowState.step !== 'idle';
+  const badgeLabel = isPaused ? 'Paused' : status.badge;
+  const badgeClass = isPaused ? 'bg-bg-tertiary text-text-secondary' : status.badgeClass;
   const showPulse = !isPaused && status.pulse;
 
   const handleEnableDisable = () => {
@@ -212,9 +210,7 @@ function PipelineCardComponent({
   };
 
   return (
-    <div
-      className={`relative bg-bg-secondary border border-border rounded-lg overflow-hidden`}
-    >
+    <div className={`relative bg-bg-secondary border border-border rounded-lg overflow-hidden`}>
       {/* Left colored stripe */}
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${status.stripe}`} />
 
@@ -234,35 +230,36 @@ function PipelineCardComponent({
                   {badgeLabel}
                 </span>
               )}
-              {category === "active" && (() => {
-                const hasScheduled = bindings?.some(
-                  (b) => b.delivery_mode && b.delivery_mode !== "on_change"
-                );
-                const allScheduled = bindings?.every(
-                  (b) => b.delivery_mode && b.delivery_mode !== "on_change"
-                );
-                if (allScheduled && bindings && bindings.length > 0) {
-                  return (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/10 text-accent">
-                      Scheduled
-                    </span>
+              {category === 'active' &&
+                (() => {
+                  const hasScheduled = bindings?.some(
+                    (b) => b.delivery_mode && b.delivery_mode !== 'on_change',
                   );
-                }
-                if (hasScheduled) {
+                  const allScheduled = bindings?.every(
+                    (b) => b.delivery_mode && b.delivery_mode !== 'on_change',
+                  );
+                  if (allScheduled && bindings && bindings.length > 0) {
+                    return (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/10 text-accent">
+                        Scheduled
+                      </span>
+                    );
+                  }
+                  if (hasScheduled) {
+                    return (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/10 text-accent">
+                        <Zap size={8} />
+                        Mixed
+                      </span>
+                    );
+                  }
                   return (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/10 text-accent">
                       <Zap size={8} />
-                      Mixed
+                      Event-driven
                     </span>
                   );
-                }
-                return (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/10 text-accent">
-                    <Zap size={8} />
-                    Event-driven
-                  </span>
-                );
-              })()}
+                })()}
               {!isAvailable && (
                 <button
                   onClick={() => setShowInfo(!showInfo)}
@@ -290,27 +287,25 @@ function PipelineCardComponent({
           <button
             className={`ml-3 shrink-0 text-xs font-medium px-3 py-1.5 rounded-md transition-colors disabled:opacity-50 ${
               source.enabled
-                ? "bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover"
+                ? 'bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover'
                 : isAvailable
-                  ? "bg-accent text-white hover:bg-accent/90 shadow-sm shadow-accent/20"
-                  : "bg-accent text-white hover:bg-accent/90"
+                  ? 'bg-accent text-white hover:bg-accent/90 shadow-sm shadow-accent/20'
+                  : 'bg-accent text-white hover:bg-accent/90'
             }`}
             onClick={handleEnableDisable}
             disabled={isLoading}
           >
-            {isLoading ? "..." : source.enabled ? "Disable" : "Configure"}
+            {isLoading ? '...' : source.enabled ? 'Disable' : 'Configure'}
           </button>
         </div>
 
         {/* Disable confirmation */}
         {showDisableConfirm && (
           <div className="mt-2 p-3 bg-warning-bg border border-warning/20 rounded-md">
-            <p className="text-xs text-warning font-medium mb-2">
-              Disable {source.name}?
-            </p>
+            <p className="text-xs text-warning font-medium mb-2">Disable {source.name}?</p>
             <p className="text-[10px] text-text-secondary mb-3">
-              This will stop watching for file changes and pause all deliveries.
-              Your target bindings will be preserved.
+              This will stop watching for file changes and pause all deliveries. Your target
+              bindings will be preserved.
             </p>
             <div className="flex items-center gap-2 justify-end">
               <button
@@ -343,28 +338,28 @@ function PipelineCardComponent({
             </div>
             <div className="flex flex-col gap-1.5 text-text-secondary">
               <div>
-                <span className="text-text-secondary/60">Type:</span>{" "}
+                <span className="text-text-secondary/60">Type:</span>{' '}
                 <span className="text-text-primary">File watcher (event-driven)</span>
               </div>
               {source.watch_path && (
                 <div>
-                  <span className="text-text-secondary/60">Watching:</span>{" "}
+                  <span className="text-text-secondary/60">Watching:</span>{' '}
                   <span className="font-mono text-[10px] text-accent break-all">
                     {source.watch_path}
                   </span>
                 </div>
               )}
               <div>
-                <span className="text-text-secondary/60">Trigger:</span>{" "}
+                <span className="text-text-secondary/60">Trigger:</span>{' '}
                 <span className="text-text-primary">On file change (FSEvents)</span>
               </div>
               <div>
-                <span className="text-text-secondary/60">Delivery:</span>{" "}
+                <span className="text-text-secondary/60">Delivery:</span>{' '}
                 <span className="text-text-primary">Within 5 seconds of trigger</span>
               </div>
               {source.enabled && bindings && (
                 <div>
-                  <span className="text-text-secondary/60">Targets:</span>{" "}
+                  <span className="text-text-secondary/60">Targets:</span>{' '}
                   <span className="text-text-primary">{bindings.length} bound</span>
                 </div>
               )}
@@ -393,11 +388,9 @@ function PipelineCardComponent({
         )}
 
         {/* Paused state: no targets connected message */}
-        {isPaused && flowState.step === "idle" && (
+        {isPaused && flowState.step === 'idle' && (
           <div className="mt-3 flex flex-col items-center gap-2 py-3 border border-dashed border-border rounded-md">
-            <p className="text-xs text-text-secondary">
-              No targets connected
-            </p>
+            <p className="text-xs text-text-secondary">No targets connected</p>
             <button
               className="inline-flex items-center gap-1 text-[11px] font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors"
               onClick={() => onAddTarget(source.id)}
@@ -409,19 +402,16 @@ function PipelineCardComponent({
         )}
 
         {/* Binding flow arrow + target (when active and idle) */}
-        {category === "active" &&
-          bindings &&
-          bindings.length > 0 &&
-          flowState.step === "idle" && (
-            <div className="mt-3">
-              <div className="flex flex-col gap-1.5">
-                {bindings.map((binding) => {
-                  const modeBadge = deliveryModeBadge(binding);
-                  const degraded = degradedMap.get(binding.target_id);
-                  return (
+        {category === 'active' && bindings && bindings.length > 0 && flowState.step === 'idle' && (
+          <div className="mt-3">
+            <div className="flex flex-col gap-1.5">
+              {bindings.map((binding) => {
+                const modeBadge = deliveryModeBadge(binding);
+                const degraded = degradedMap.get(binding.target_id);
+                return (
                   <div key={binding.endpoint_id}>
                     <div
-                      className={`flex items-center justify-between bg-bg-primary rounded-md px-3 py-2 ${degraded ? "border border-warning/30" : ""}`}
+                      className={`flex items-center justify-between bg-bg-primary rounded-md px-3 py-2 ${degraded ? 'border border-warning/30' : ''}`}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
@@ -455,13 +445,17 @@ function PipelineCardComponent({
                         <span className="text-[10px] text-warning">
                           {degraded.queued_count > 0
                             ? `${degraded.queued_count} deliveries queued`
-                            : "Target unreachable"}
-                          {degraded.reason ? ` — ${degraded.reason}` : ""}
+                            : 'Target unreachable'}
+                          {degraded.reason ? ` — ${degraded.reason}` : ''}
                         </span>
                         <button
                           className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-warning text-bg-primary hover:bg-warning/90 transition-colors"
                           onClick={() => {
-                            window.dispatchEvent(new CustomEvent("localpush:navigate", { detail: { tab: "settings" } }));
+                            window.dispatchEvent(
+                              new CustomEvent('localpush:navigate', {
+                                detail: { tab: 'settings' },
+                              }),
+                            );
                           }}
                         >
                           <RefreshCw size={9} />
@@ -470,33 +464,33 @@ function PipelineCardComponent({
                       </div>
                     )}
                   </div>
-                  );
-                })}
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex items-center justify-between mt-2">
-                <button
-                  className="inline-flex items-center gap-1 text-[10px] text-text-secondary hover:text-accent transition-colors"
-                  onClick={() => onAddTarget(source.id)}
-                  disabled={isFlowActive}
-                >
-                  <Plus size={10} />
-                  Add Target
-                </button>
-                <button
-                  className="text-[11px] font-medium px-3 py-1 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
-                  onClick={() => onPushNow(source.id)}
-                  disabled={isPushing}
-                >
-                  {isPushing ? "Pushing..." : "Push Now"}
-                </button>
-              </div>
+                );
+              })}
             </div>
-          )}
+
+            {/* Action buttons */}
+            <div className="flex items-center justify-between mt-2">
+              <button
+                className="inline-flex items-center gap-1 text-[10px] text-text-secondary hover:text-accent transition-colors"
+                onClick={() => onAddTarget(source.id)}
+                disabled={isFlowActive}
+              >
+                <Plus size={10} />
+                Add Target
+              </button>
+              <button
+                className="text-[11px] font-medium px-3 py-1 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
+                onClick={() => onPushNow(source.id)}
+                disabled={isPushing}
+              >
+                {isPushing ? 'Pushing...' : 'Push Now'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Flow Steps */}
-        {flowState.step === "preview" && flowState.preview && (
+        {flowState.step === 'preview' && flowState.preview && (
           <div className="mt-3">
             <TransparencyPreview
               sourceId={source.id}
@@ -508,7 +502,7 @@ function PipelineCardComponent({
           </div>
         )}
 
-        {flowState.step === "pick_endpoint" && (
+        {flowState.step === 'pick_endpoint' && (
           <div className="mt-3">
             <EndpointPicker
               onSelect={(
@@ -517,7 +511,7 @@ function PipelineCardComponent({
                 endpointUrl,
                 endpointName,
                 authenticated,
-                authType
+                authType,
               ) =>
                 onEndpointSelect(
                   source.id,
@@ -526,7 +520,7 @@ function PipelineCardComponent({
                   endpointUrl,
                   endpointName,
                   authenticated,
-                  authType
+                  authType,
                 )
               }
               onCancel={() => onCancelFlow(source.id)}
@@ -534,7 +528,7 @@ function PipelineCardComponent({
           </div>
         )}
 
-        {flowState.step === "configure_delivery" &&
+        {flowState.step === 'configure_delivery' &&
           flowState.selectedEndpointUrl &&
           flowState.selectedEndpointName && (
             <div className="mt-3">
@@ -545,13 +539,22 @@ function PipelineCardComponent({
                 authenticated={flowState.selectedAuthenticated}
                 authType={flowState.selectedAuthType || undefined}
                 existingAuthConfigured={!!flowState.existingAuthCredentialKey}
-                initialHeaders={flowState.customHeaders.length > 0 ? flowState.customHeaders : undefined}
+                initialHeaders={
+                  flowState.customHeaders.length > 0 ? flowState.customHeaders : undefined
+                }
                 initialAuthName={flowState.authHeaderName || undefined}
                 initialAuthValue={flowState.authHeaderValue || undefined}
                 initialDeliveryMode={flowState.deliveryMode}
                 initialScheduleTime={flowState.scheduleTime}
                 initialScheduleDay={flowState.scheduleDay}
-                onConfirm={(customHeaders, authHeaderName, authHeaderValue, deliveryMode, scheduleTime, scheduleDay) =>
+                onConfirm={(
+                  customHeaders,
+                  authHeaderName,
+                  authHeaderValue,
+                  deliveryMode,
+                  scheduleTime,
+                  scheduleDay,
+                ) =>
                   onDeliveryConfigConfirm(
                     source.id,
                     customHeaders,
@@ -559,13 +562,11 @@ function PipelineCardComponent({
                     authHeaderValue,
                     deliveryMode,
                     scheduleTime,
-                    scheduleDay
+                    scheduleDay,
                   )
                 }
                 onBack={() =>
-                  flowState.isEditing
-                    ? onCancelFlow(source.id)
-                    : onBackToEndpointPicker(source.id)
+                  flowState.isEditing ? onCancelFlow(source.id) : onBackToEndpointPicker(source.id)
                 }
                 onUnbind={
                   flowState.isEditing && flowState.selectedEndpoint
@@ -576,7 +577,7 @@ function PipelineCardComponent({
             </div>
           )}
 
-        {flowState.step === "security_check" &&
+        {flowState.step === 'security_check' &&
           flowState.selectedEndpointUrl &&
           flowState.selectedEndpointName && (
             <div className="mt-3">

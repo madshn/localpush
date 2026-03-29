@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { Bell } from "lucide-react";
-import { toast } from "sonner";
-import { useConnectNtfy } from "../api/hooks/useTargets";
-import { logger } from "../utils/logger";
+import { Bell } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { useConnectNtfy } from '../api/hooks/useTargets';
+import { logger } from '../utils/logger';
 
 interface TargetInfo {
   id: string;
@@ -14,14 +14,14 @@ interface NtfyConnectProps {
 }
 
 export function NtfyConnect({ onConnected }: NtfyConnectProps) {
-  const [serverUrl, setServerUrl] = useState("");
-  const [topic, setTopic] = useState("");
-  const [authToken, setAuthToken] = useState("");
+  const [serverUrl, setServerUrl] = useState('');
+  const [topic, setTopic] = useState('');
+  const [authToken, setAuthToken] = useState('');
   const connectMutation = useConnectNtfy();
 
   const handleUrlChange = (value: string) => {
-    if (value && !value.startsWith("http://") && !value.startsWith("https://")) {
-      setServerUrl("https://" + value);
+    if (value && !value.startsWith('http://') && !value.startsWith('https://')) {
+      setServerUrl(`https://${value}`);
     } else {
       setServerUrl(value);
     }
@@ -31,7 +31,7 @@ export function NtfyConnect({ onConnected }: NtfyConnectProps) {
     e.preventDefault();
 
     if (!serverUrl.trim()) {
-      logger.warn("ntfy connection attempt with missing server URL");
+      logger.warn('ntfy connection attempt with missing server URL');
       return;
     }
 
@@ -42,17 +42,17 @@ export function NtfyConnect({ onConnected }: NtfyConnectProps) {
         authToken: authToken.trim() || undefined,
       });
       onConnected(result);
-      setServerUrl("");
-      setTopic("");
-      setAuthToken("");
+      setServerUrl('');
+      setTopic('');
+      setAuthToken('');
     } catch (error) {
-      logger.error("ntfy connection failed", { error });
-      toast.error("ntfy connection failed");
+      logger.error('ntfy connection failed', { error });
+      toast.error('ntfy connection failed');
     }
   };
 
   const inputClass =
-    "w-full px-3 py-2 text-xs border border-border rounded-md bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent";
+    'w-full px-3 py-2 text-xs border border-border rounded-md bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent';
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -97,10 +97,8 @@ export function NtfyConnect({ onConnected }: NtfyConnectProps) {
           htmlFor="ntfy-token"
           className="block text-[11px] font-medium text-text-secondary uppercase tracking-wide mb-1.5"
         >
-          Auth Token{" "}
-          <span className="normal-case tracking-normal text-text-secondary/60">
-            (optional)
-          </span>
+          Auth Token{' '}
+          <span className="normal-case tracking-normal text-text-secondary/60">(optional)</span>
         </label>
         <input
           id="ntfy-token"
@@ -116,8 +114,8 @@ export function NtfyConnect({ onConnected }: NtfyConnectProps) {
       <div className="flex gap-2.5 p-3 bg-success/10 border border-success/20 rounded-md">
         <Bell size={16} className="text-success shrink-0 mt-0.5" />
         <p className="text-[11px] text-text-secondary leading-relaxed">
-          ntfy sends push notifications to your devices. Use a unique topic name
-          to avoid conflicts with other users on shared servers.
+          ntfy sends push notifications to your devices. Use a unique topic name to avoid conflicts
+          with other users on shared servers.
         </p>
       </div>
 
@@ -127,7 +125,7 @@ export function NtfyConnect({ onConnected }: NtfyConnectProps) {
           className="text-xs font-medium px-4 py-2 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
           disabled={connectMutation.isPending || !serverUrl.trim()}
         >
-          {connectMutation.isPending ? "Testing..." : "Test Connection"}
+          {connectMutation.isPending ? 'Testing...' : 'Test Connection'}
         </button>
       </div>
 
@@ -139,7 +137,7 @@ export function NtfyConnect({ onConnected }: NtfyConnectProps) {
 
       {connectMutation.isError && (
         <div className="text-xs text-error bg-error-bg border border-error/30 rounded-md p-2.5">
-          {connectMutation.error.message || "Connection failed"}
+          {connectMutation.error.message || 'Connection failed'}
         </div>
       )}
     </form>

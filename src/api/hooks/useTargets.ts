@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { logger } from '../../utils/logger';
@@ -86,14 +86,16 @@ export function useUpdateN8n() {
   >({
     mutationFn: async ({ targetId, instanceUrl, apiKey }) => {
       logger.debug('Updating n8n target', { targetId, instanceUrl });
-      const result = await invoke<{ target_id: string; status: string; resumed_count: number; target_info: TargetInfo }>(
-        'update_n8n_target',
-        {
-          targetId,
-          instanceUrl,
-          apiKey,
-        }
-      );
+      const result = await invoke<{
+        target_id: string;
+        status: string;
+        resumed_count: number;
+        target_info: TargetInfo;
+      }>('update_n8n_target', {
+        targetId,
+        instanceUrl,
+        apiKey,
+      });
       logger.debug('n8n target updated', { targetId, resumed: result.resumed_count });
       return result;
     },
@@ -194,19 +196,30 @@ export function useReauthGoogleSheets() {
       clientSecret: string;
     }
   >({
-    mutationFn: async ({ targetId, email, accessToken, refreshToken, expiresAt, clientId, clientSecret }) => {
+    mutationFn: async ({
+      targetId,
+      email,
+      accessToken,
+      refreshToken,
+      expiresAt,
+      clientId,
+      clientSecret,
+    }) => {
       logger.debug('Re-authenticating Google Sheets target', { targetId, email });
       const result = await invoke<{ target_id: string; status: string; resumed_count: number }>(
         'reauth_google_sheets_target',
-        { targetId, email, accessToken, refreshToken, expiresAt, clientId, clientSecret }
+        { targetId, email, accessToken, refreshToken, expiresAt, clientId, clientSecret },
       );
-      logger.debug('Google Sheets target re-authenticated', { targetId, resumed: result.resumed_count });
+      logger.debug('Google Sheets target re-authenticated', {
+        targetId,
+        resumed: result.resumed_count,
+      });
       return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['targets'] });
       queryClient.invalidateQueries({ queryKey: ['target-health'] });
-      queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
+      queryClient.invalidateQueries({ queryKey: ['deliveryStatus'] });
       toast.success('Re-authenticated successfully');
     },
     onError: (error) => {
@@ -334,7 +347,7 @@ export function useReconnectTarget() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['target-health'] });
-      queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
+      queryClient.invalidateQueries({ queryKey: ['deliveryStatus'] });
       toast.success('Target reconnected');
     },
     onError: (error) => {

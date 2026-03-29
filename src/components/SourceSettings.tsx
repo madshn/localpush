@@ -1,10 +1,10 @@
-import { Shield, X } from "lucide-react";
+import { Shield, X } from 'lucide-react';
 import {
   useSetSourceProperty,
   useSetSourceWindowDays,
   useSourceProperties,
   useSourceWindowSetting,
-} from "../api/hooks/useSourceConfig";
+} from '../api/hooks/useSourceConfig';
 
 interface SourceSettingsProps {
   sourceId: string;
@@ -44,7 +44,10 @@ export function SourceSettings({ sourceId, sourceName, onClose }: SourceSettings
       <div className="mt-2 p-3 bg-bg-primary border border-border rounded-md text-xs">
         <div className="flex items-center justify-between mb-2">
           <span className="font-medium text-text-primary">{sourceName} Properties</span>
-          <button onClick={onClose} className="p-0.5 text-text-secondary hover:text-text-primary transition-colors">
+          <button
+            onClick={onClose}
+            className="p-0.5 text-text-secondary hover:text-text-primary transition-colors"
+          >
             <X size={12} />
           </button>
         </div>
@@ -58,7 +61,10 @@ export function SourceSettings({ sourceId, sourceName, onClose }: SourceSettings
       <div className="mt-2 p-3 bg-bg-primary border border-border rounded-md text-xs">
         <div className="flex items-center justify-between mb-2">
           <span className="font-medium text-text-primary">{sourceName} Properties</span>
-          <button onClick={onClose} className="p-0.5 text-text-secondary hover:text-text-primary transition-colors">
+          <button
+            onClick={onClose}
+            className="p-0.5 text-text-secondary hover:text-text-primary transition-colors"
+          >
             <X size={12} />
           </button>
         </div>
@@ -71,7 +77,10 @@ export function SourceSettings({ sourceId, sourceName, onClose }: SourceSettings
     <div className="mt-2 p-3 bg-bg-primary border border-border rounded-md text-xs">
       <div className="flex items-center justify-between mb-2">
         <span className="font-medium text-text-primary">Data Properties</span>
-        <button onClick={onClose} className="p-0.5 text-text-secondary hover:text-text-primary transition-colors">
+        <button
+          onClick={onClose}
+          className="p-0.5 text-text-secondary hover:text-text-primary transition-colors"
+        >
           <X size={12} />
         </button>
       </div>
@@ -98,7 +107,8 @@ export function SourceSettings({ sourceId, sourceName, onClose }: SourceSettings
           </select>
           <p className="text-[10px] text-text-secondary/70 mt-1">{windowSetting.description}</p>
           <p className="text-[10px] text-text-secondary/60 mt-0.5">
-            Default {windowSetting.default_days}d, range {windowSetting.min_days}-{windowSetting.max_days}d
+            Default {windowSetting.default_days}d, range {windowSetting.min_days}-
+            {windowSetting.max_days}d
           </p>
         </div>
       )}
@@ -111,9 +121,7 @@ export function SourceSettings({ sourceId, sourceName, onClose }: SourceSettings
               className="flex items-center justify-between cursor-pointer"
             >
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                {prop.privacy_sensitive && (
-                  <Shield size={12} className="text-warning shrink-0" />
-                )}
+                {prop.privacy_sensitive && <Shield size={12} className="text-warning shrink-0" />}
                 <span className="text-text-primary truncate">{prop.label}</span>
               </div>
               <input

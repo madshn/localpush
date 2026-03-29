@@ -1,35 +1,31 @@
-import { useState, useEffect } from "react";
-import * as Tabs from "@radix-ui/react-tabs";
-import { Workflow, Activity, Settings, ExternalLink, AlertTriangle } from "lucide-react";
-import { Toaster, toast } from "sonner";
+import * as Tabs from '@radix-ui/react-tabs';
+import { Activity, AlertTriangle, ExternalLink, Settings, Workflow } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Toaster, toast } from 'sonner';
 
-import { useBackendEvents } from "./api/hooks/useBackendEvents";
-import { useDeliveryStatus } from "./api/hooks/useDeliveryStatus";
+import { useBackendEvents } from './api/hooks/useBackendEvents';
+import { useDeliveryStatus } from './api/hooks/useDeliveryStatus';
+import { ActivityLog } from './components/ActivityLog';
+import { DashboardView } from './components/DashboardView';
+import { PipelineView } from './components/PipelineView';
+import { SettingsPanel } from './components/SettingsPanel';
+import { StatusIndicator } from './components/StatusIndicator';
+import { logger } from './utils/logger';
 
-import { StatusIndicator } from "./components/StatusIndicator";
-import { PipelineView } from "./components/PipelineView";
-import { ActivityLog } from "./components/ActivityLog";
-import { SettingsPanel } from "./components/SettingsPanel";
-import { DashboardView } from "./components/DashboardView";
-import { logger } from "./utils/logger";
-
-const isDashboard = new URLSearchParams(window.location.search).has(
-  "view",
-  "dashboard"
-);
+const isDashboard = new URLSearchParams(window.location.search).has('view', 'dashboard');
 
 async function handleOpenDashboard() {
   try {
-    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const existing = await WebviewWindow.getByLabel("dashboard");
+    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+    const existing = await WebviewWindow.getByLabel('dashboard');
     if (existing) {
       await existing.setFocus();
-      logger.info("Dashboard window focused");
+      logger.info('Dashboard window focused');
       return;
     }
-    const dashboard = new WebviewWindow("dashboard", {
-      url: "/?view=dashboard",
-      title: "LocalPush Dashboard",
+    const dashboard = new WebviewWindow('dashboard', {
+      url: '/?view=dashboard',
+      title: 'LocalPush Dashboard',
       width: 1100,
       height: 700,
       minWidth: 700,
@@ -38,15 +34,15 @@ async function handleOpenDashboard() {
       decorations: true,
       resizable: true,
     });
-    dashboard.once("tauri://created", () => {
-      logger.info("Dashboard window created");
+    dashboard.once('tauri://created', () => {
+      logger.info('Dashboard window created');
     });
-    dashboard.once("tauri://error", (e) => {
-      logger.error("Dashboard window error", { error: e.payload });
-      toast.error("Failed to open dashboard window");
+    dashboard.once('tauri://error', (e) => {
+      logger.error('Dashboard window error', { error: e.payload });
+      toast.error('Failed to open dashboard window');
     });
   } catch (error) {
-    logger.error("Failed to open dashboard", { error });
+    logger.error('Failed to open dashboard', { error });
     toast.error(`Dashboard error: ${error}`);
   }
 }
@@ -55,7 +51,7 @@ function App() {
   useBackendEvents();
   const { data: status } = useDeliveryStatus();
   const dlqCount = status?.dlqCount ?? null;
-  const [activeTab, setActiveTab] = useState("pipeline");
+  const [activeTab, setActiveTab] = useState('pipeline');
 
   // Listen for cross-component tab navigation events (e.g. Reconnect → Settings)
   useEffect(() => {
@@ -63,8 +59,8 @@ function App() {
       const detail = (e as CustomEvent).detail;
       if (detail?.tab) setActiveTab(detail.tab);
     };
-    window.addEventListener("localpush:navigate", handler);
-    return () => window.removeEventListener("localpush:navigate", handler);
+    window.addEventListener('localpush:navigate', handler);
+    return () => window.removeEventListener('localpush:navigate', handler);
   }, []);
 
   // DLQ count is derived from delivery status (event-driven + 30s safety-net poll).
@@ -78,9 +74,9 @@ function App() {
           position="bottom-center"
           toastOptions={{
             style: {
-              background: "var(--color-bg-secondary)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-text-primary)",
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text-primary)',
             },
           }}
         />
@@ -93,21 +89,21 @@ function App() {
       <header className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-secondary">
         <h1 className="text-base font-semibold tracking-tight">LocalPush</h1>
         <div className="flex items-center gap-2">
-          <StatusIndicator status={status?.overall ?? "unknown"} />
+          <StatusIndicator status={status?.overall ?? 'unknown'} />
         </div>
       </header>
 
       {/* DLQ failure banner */}
       {dlqCount != null && dlqCount > 0 && (
         <div
-          onClick={() => setActiveTab("activity")}
+          onClick={() => setActiveTab('activity')}
           className="mx-4 mt-3 px-3 py-2 bg-error-bg border border-error/20 rounded-lg cursor-pointer hover:bg-error-bg/80 transition-colors"
         >
           <div className="flex items-center gap-2">
             <AlertTriangle size={14} className="text-error shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-error">
-                {dlqCount} {dlqCount === 1 ? "delivery" : "deliveries"} need attention
+                {dlqCount} {dlqCount === 1 ? 'delivery' : 'deliveries'} need attention
               </p>
             </div>
             <span className="text-[10px] text-error/80 font-medium">View →</span>
@@ -115,7 +111,11 @@ function App() {
         </div>
       )}
 
-      <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+      <Tabs.Root
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="flex-1 flex flex-col min-h-0"
+      >
         <Tabs.List className="flex gap-1 px-4 py-2 border-b border-border">
           <Tabs.Trigger value="pipeline" className="tab-trigger">
             <Workflow size={14} />
@@ -164,9 +164,9 @@ function App() {
         position="bottom-center"
         toastOptions={{
           style: {
-            background: "var(--color-bg-secondary)",
-            border: "1px solid var(--color-border)",
-            color: "var(--color-text-primary)",
+            background: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border)',
+            color: 'var(--color-text-primary)',
           },
         }}
       />

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { render, screen } from '../test/utils.tsx';
 import { StatusIndicator } from './StatusIndicator';
 
@@ -24,14 +24,10 @@ describe('StatusIndicator', () => {
   });
 
   it('renders an icon for each status', () => {
-    const { container: activeContainer } = render(
-      <StatusIndicator status="active" />
-    );
+    const { container: activeContainer } = render(<StatusIndicator status="active" />);
     expect(activeContainer.querySelector('svg')).toBeInTheDocument();
 
-    const { container: errorContainer } = render(
-      <StatusIndicator status="error" />
-    );
+    const { container: errorContainer } = render(<StatusIndicator status="error" />);
     expect(errorContainer.querySelector('svg')).toBeInTheDocument();
   });
 });

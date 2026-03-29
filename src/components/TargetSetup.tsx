@@ -1,19 +1,23 @@
-import React, { useState } from "react";
-import * as Tabs from "@radix-ui/react-tabs";
-import { Webhook, Bell, Plus, X, Zap, Cog, Table, Globe, Pencil } from "lucide-react";
-import { toast } from "sonner";
-import { signIn } from "@choochmeque/tauri-plugin-google-auth-api";
-import { useTargets, useTestTargetConnection, useReauthGoogleSheets } from "../api/hooks/useTargets";
-import { N8nConnect } from "./N8nConnect";
-import { NtfyConnect } from "./NtfyConnect";
-import { MakeConnect } from "./MakeConnect";
-import { ZapierConnect } from "./ZapierConnect";
-import { GoogleSheetsConnect } from "./GoogleSheetsConnect";
-import { CustomConnect } from "./CustomConnect";
-import { logger } from "../utils/logger";
+import { signIn } from '@choochmeque/tauri-plugin-google-auth-api';
+import * as Tabs from '@radix-ui/react-tabs';
+import { Bell, Cog, Globe, Pencil, Plus, Table, Webhook, X, Zap } from 'lucide-react';
+import React, { useState } from 'react';
+import { toast } from 'sonner';
+import {
+  useReauthGoogleSheets,
+  useTargets,
+  useTestTargetConnection,
+} from '../api/hooks/useTargets';
+import { logger } from '../utils/logger';
+import { CustomConnect } from './CustomConnect';
+import { GoogleSheetsConnect } from './GoogleSheetsConnect';
+import { MakeConnect } from './MakeConnect';
+import { N8nConnect } from './N8nConnect';
+import { NtfyConnect } from './NtfyConnect';
+import { ZapierConnect } from './ZapierConnect';
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
-const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET || "";
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET || '';
 
 interface TargetInfo {
   id: string;
@@ -31,12 +35,12 @@ export function TargetSetup() {
 
   const handleTargetConnected = (targetInfo: TargetInfo) => {
     const isEditing = editingTargetId === targetInfo.id;
-    logger.info("Target connected successfully", {
+    logger.info('Target connected successfully', {
       targetId: targetInfo.id,
       type: targetInfo.target_type,
-      mode: isEditing ? "update" : "create",
+      mode: isEditing ? 'update' : 'create',
     });
-    toast.success(isEditing ? "Target updated" : "Target connected");
+    toast.success(isEditing ? 'Target updated' : 'Target connected');
     setShowAddForm(false);
     setEditingTargetId(null);
   };
@@ -45,21 +49,26 @@ export function TargetSetup() {
 
   const handleTestConnection = async (targetId: string) => {
     setTestingTargetId(targetId);
-    setFailedTargets((prev) => { const next = { ...prev }; delete next[targetId]; return next; });
+    setFailedTargets((prev) => {
+      const next = { ...prev };
+      delete next[targetId];
+      return next;
+    });
     try {
       await testMutation.mutateAsync(targetId);
-      toast.success("Connection test successful");
+      toast.success('Connection test successful');
     } catch (error) {
       const msg = String(error);
-      logger.error("Target test failed", { targetId, error });
-      const isAuth = msg.includes("Token") || msg.includes("Auth") || msg.includes("401") || msg.includes("403");
+      logger.error('Target test failed', { targetId, error });
+      const isAuth =
+        msg.includes('Token') || msg.includes('Auth') || msg.includes('401') || msg.includes('403');
       setFailedTargets((prev) => ({
         ...prev,
         [targetId]: isAuth
-          ? "Authentication expired. Re-authenticate to restore delivery."
+          ? 'Authentication expired. Re-authenticate to restore delivery.'
           : `Connection failed: ${msg}`,
       }));
-      toast.error(isAuth ? "Authentication expired" : "Connection test failed");
+      toast.error(isAuth ? 'Authentication expired' : 'Connection test failed');
     } finally {
       setTestingTargetId(null);
     }
@@ -67,7 +76,7 @@ export function TargetSetup() {
 
   const handleReauthenticate = async (targetId: string) => {
     if (!GOOGLE_CLIENT_ID) {
-      toast.error("Google OAuth not configured");
+      toast.error('Google OAuth not configured');
       return;
     }
 
@@ -77,25 +86,24 @@ export function TargetSetup() {
         clientId: GOOGLE_CLIENT_ID,
         clientSecret: GOOGLE_CLIENT_SECRET,
         scopes: [
-          "openid",
-          "email",
-          "https://www.googleapis.com/auth/drive.readonly",
-          "https://www.googleapis.com/auth/spreadsheets",
+          'openid',
+          'email',
+          'https://www.googleapis.com/auth/drive.readonly',
+          'https://www.googleapis.com/auth/spreadsheets',
         ],
         successHtmlResponse:
-          "<h1>Re-authenticated!</h1><p>You can close this window and return to LocalPush.</p>",
+          '<h1>Re-authenticated!</h1><p>You can close this window and return to LocalPush.</p>',
       });
 
       if (!tokens.accessToken || !tokens.refreshToken) {
-        throw new Error("Missing tokens from Google sign-in");
+        throw new Error('Missing tokens from Google sign-in');
       }
 
-      const userInfoResp = await fetch(
-        "https://www.googleapis.com/oauth2/v3/userinfo",
-        { headers: { Authorization: `Bearer ${tokens.accessToken}` } }
-      );
+      const userInfoResp = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      });
       const userInfo = await userInfoResp.json();
-      const email = userInfo.email || "unknown@gmail.com";
+      const email = userInfo.email || 'unknown@gmail.com';
 
       await reauthMutation.mutateAsync({
         targetId,
@@ -114,8 +122,8 @@ export function TargetSetup() {
         return next;
       });
     } catch (error) {
-      logger.error("Google Sheets re-auth failed", { targetId, error });
-      toast.error("Re-authentication failed");
+      logger.error('Google Sheets re-auth failed', { targetId, error });
+      toast.error('Re-authentication failed');
     } finally {
       setReauthTargetId(null);
     }
@@ -128,100 +136,97 @@ export function TargetSetup() {
         <div className="bg-bg-secondary border border-border rounded-lg p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold">Connected Targets</h2>
-            <span className="text-[10px] font-medium text-accent">
-              {targets.length} Active
-            </span>
+            <span className="text-[10px] font-medium text-accent">{targets.length} Active</span>
           </div>
           <div className="flex flex-col gap-2">
             {targets.map((target) => (
               <React.Fragment key={target.id}>
-              <div
-                className="flex items-center gap-3 p-3 bg-bg-primary rounded-md border-l-2 border-l-accent"
-              >
-                {target.target_type === "n8n" ? (
-                  <Webhook size={16} className="text-accent shrink-0" />
-                ) : target.target_type === "ntfy" ? (
-                  <Bell size={16} className="text-success shrink-0" />
-                ) : target.target_type === "make" ? (
-                  <Cog size={16} className="text-purple-500 shrink-0" />
-                ) : target.target_type === "google-sheets" ? (
-                  <Table size={16} className="text-green-600 shrink-0" />
-                ) : target.target_type === "custom" ? (
-                  <Globe size={16} className="text-blue-500 shrink-0" />
-                ) : (
-                  <Zap size={16} className="text-orange-500 shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium truncate">
-                    {target.name}
-                  </div>
-                  {target.base_url && (
-                    <div className="text-[10px] text-text-secondary truncate mt-0.5">
-                      {target.base_url}
-                    </div>
+                <div className="flex items-center gap-3 p-3 bg-bg-primary rounded-md border-l-2 border-l-accent">
+                  {target.target_type === 'n8n' ? (
+                    <Webhook size={16} className="text-accent shrink-0" />
+                  ) : target.target_type === 'ntfy' ? (
+                    <Bell size={16} className="text-success shrink-0" />
+                  ) : target.target_type === 'make' ? (
+                    <Cog size={16} className="text-purple-500 shrink-0" />
+                  ) : target.target_type === 'google-sheets' ? (
+                    <Table size={16} className="text-green-600 shrink-0" />
+                  ) : target.target_type === 'custom' ? (
+                    <Globe size={16} className="text-blue-500 shrink-0" />
+                  ) : (
+                    <Zap size={16} className="text-orange-500 shrink-0" />
                   )}
-                  <span
-                    className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                      target.target_type === "n8n"
-                        ? "bg-accent-muted text-accent"
-                        : "bg-success-bg text-success"
-                    }`}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium truncate">{target.name}</div>
+                    {target.base_url && (
+                      <div className="text-[10px] text-text-secondary truncate mt-0.5">
+                        {target.base_url}
+                      </div>
+                    )}
+                    <span
+                      className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                        target.target_type === 'n8n'
+                          ? 'bg-accent-muted text-accent'
+                          : 'bg-success-bg text-success'
+                      }`}
                     >
                       {target.target_type}
                     </span>
-                </div>
-                {target.target_type === "n8n" && (
-                  <button
-                    className="text-xs font-medium px-2.5 py-1 rounded bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
-                    onClick={() => {
-                      setEditingTargetId((current) => current === target.id ? null : target.id);
-                      setShowAddForm(false);
-                    }}
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <Pencil size={12} />
-                      {editingTargetId === target.id ? "Close" : "Edit"}
-                    </span>
-                  </button>
-                )}
-                <button
-                  className="text-xs font-medium px-2.5 py-1 rounded bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors disabled:opacity-50"
-                  onClick={() => handleTestConnection(target.id)}
-                  disabled={testingTargetId === target.id}
-                >
-                  {testingTargetId === target.id ? "Testing..." : "Test"}
-                </button>
-              </div>
-              {failedTargets[target.id] && (
-                <div className="mx-3 mb-2 -mt-1 px-3 py-2 bg-error-bg border border-error/20 rounded-md">
-                  <p className="text-[10px] text-error">{failedTargets[target.id]}</p>
-                  {target.target_type === "google-sheets" && failedTargets[target.id].includes("Authentication") && (
+                  </div>
+                  {target.target_type === 'n8n' && (
                     <button
-                      className="mt-1.5 text-[10px] font-medium px-2.5 py-1 rounded bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
-                      onClick={() => handleReauthenticate(target.id)}
-                      disabled={reauthTargetId === target.id}
+                      className="text-xs font-medium px-2.5 py-1 rounded bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
+                      onClick={() => {
+                        setEditingTargetId((current) => (current === target.id ? null : target.id));
+                        setShowAddForm(false);
+                      }}
                     >
-                      {reauthTargetId === target.id ? "Re-authenticating..." : "Re-authenticate with Google"}
+                      <span className="inline-flex items-center gap-1.5">
+                        <Pencil size={12} />
+                        {editingTargetId === target.id ? 'Close' : 'Edit'}
+                      </span>
                     </button>
                   )}
+                  <button
+                    className="text-xs font-medium px-2.5 py-1 rounded bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors disabled:opacity-50"
+                    onClick={() => handleTestConnection(target.id)}
+                    disabled={testingTargetId === target.id}
+                  >
+                    {testingTargetId === target.id ? 'Testing...' : 'Test'}
+                  </button>
                 </div>
-              )}
-              {target.target_type === "n8n" && editingTargetId === target.id && (
-                <div className="mx-3 mb-2 -mt-1 p-3 bg-bg-secondary border border-border rounded-md">
-                  <div className="text-[11px] font-medium text-text-secondary uppercase tracking-wide mb-2">
-                    Edit n8n Connection
+                {failedTargets[target.id] && (
+                  <div className="mx-3 mb-2 -mt-1 px-3 py-2 bg-error-bg border border-error/20 rounded-md">
+                    <p className="text-[10px] text-error">{failedTargets[target.id]}</p>
+                    {target.target_type === 'google-sheets' &&
+                      failedTargets[target.id].includes('Authentication') && (
+                        <button
+                          className="mt-1.5 text-[10px] font-medium px-2.5 py-1 rounded bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
+                          onClick={() => handleReauthenticate(target.id)}
+                          disabled={reauthTargetId === target.id}
+                        >
+                          {reauthTargetId === target.id
+                            ? 'Re-authenticating...'
+                            : 'Re-authenticate with Google'}
+                        </button>
+                      )}
                   </div>
-                  <N8nConnect
-                    targetId={target.id}
-                    initialInstanceUrl={target.base_url || ""}
-                    submitLabel="Save and reconnect"
-                    successLabel="n8n target updated"
-                    onCancel={() => setEditingTargetId(null)}
-                    onConnected={handleTargetConnected}
-                  />
-                </div>
-              )}
-            </React.Fragment>
+                )}
+                {target.target_type === 'n8n' && editingTargetId === target.id && (
+                  <div className="mx-3 mb-2 -mt-1 p-3 bg-bg-secondary border border-border rounded-md">
+                    <div className="text-[11px] font-medium text-text-secondary uppercase tracking-wide mb-2">
+                      Edit n8n Connection
+                    </div>
+                    <N8nConnect
+                      targetId={target.id}
+                      initialInstanceUrl={target.base_url || ''}
+                      submitLabel="Save and reconnect"
+                      successLabel="n8n target updated"
+                      onCancel={() => setEditingTargetId(null)}
+                      onConnected={handleTargetConnected}
+                    />
+                  </div>
+                )}
+              </React.Fragment>
             ))}
           </div>
         </div>

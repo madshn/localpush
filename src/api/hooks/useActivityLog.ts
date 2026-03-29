@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { visibleRefetchInterval } from './polling';
 import {
   DELIVERY_QUEUE_QUERY_KEY,
-  fetchDeliveryQueue,
   type DeliveryQueueItemRaw,
+  fetchDeliveryQueue,
 } from './useDeliveryQueue';
-import { visibleRefetchInterval } from './polling';
 
 export interface DeliveredToInfo {
   endpoint_id: string;
@@ -17,7 +17,7 @@ export interface ActivityEntry {
   id: string;
   source: string;
   sourceId: string;
-  status: "delivered" | "pending" | "in_flight" | "failed" | "dlq" | "target_paused";
+  status: 'delivered' | 'pending' | 'in_flight' | 'failed' | 'dlq' | 'target_paused';
   statusCode?: string;
   error?: string;
   timestamp: Date;
@@ -25,7 +25,7 @@ export interface ActivityEntry {
   retryCount: number;
   payload: unknown;
   payloadSummary: string;
-  triggerType: "file_change" | "manual" | "scheduled";
+  triggerType: 'file_change' | 'manual' | 'scheduled';
   deliveredTo: DeliveredToInfo | null;
 }
 
@@ -46,7 +46,7 @@ const prettifyEventType = (eventType: string): string => {
   // Default: capitalize and replace hyphens/underscores
   return eventType
     .split(/[-_]/)
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 };
 
@@ -56,14 +56,17 @@ const summarizePayload = (payload: unknown): string => {
   const keys = Object.keys(obj);
   if (keys.length === 0) return '';
   // Show first 2-3 meaningful key-value pairs
-  const summary = keys.slice(0, 3).map(k => {
-    const v = obj[k];
-    if (typeof v === 'string') return `${k}: ${v.slice(0, 30)}${v.length > 30 ? '...' : ''}`;
-    if (typeof v === 'number') return `${k}: ${v}`;
-    if (Array.isArray(v)) return `${k}: [${v.length} items]`;
-    if (typeof v === 'object' && v !== null) return `${k}: {...}`;
-    return `${k}: ${String(v)}`;
-  }).join(', ');
+  const summary = keys
+    .slice(0, 3)
+    .map((k) => {
+      const v = obj[k];
+      if (typeof v === 'string') return `${k}: ${v.slice(0, 30)}${v.length > 30 ? '...' : ''}`;
+      if (typeof v === 'number') return `${k}: ${v}`;
+      if (Array.isArray(v)) return `${k}: [${v.length} items]`;
+      if (typeof v === 'object' && v !== null) return `${k}: {...}`;
+      return `${k}: ${String(v)}`;
+    })
+    .join(', ');
   const extra = keys.length > 3 ? ` +${keys.length - 3} more` : '';
   return summary + extra;
 };
@@ -105,8 +108,7 @@ export const useActivityLog = () => {
   return useQuery({
     queryKey: DELIVERY_QUEUE_QUERY_KEY,
     queryFn: fetchDeliveryQueue,
-    select: (queue): ActivityEntry[] =>
-      sortByCreatedAtDesc(queue).map(transformToActivityEntry),
+    select: (queue): ActivityEntry[] => sortByCreatedAtDesc(queue).map(transformToActivityEntry),
     refetchInterval: () => visibleRefetchInterval(30_000),
   });
 };

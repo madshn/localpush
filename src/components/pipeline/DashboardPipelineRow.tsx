@@ -1,12 +1,12 @@
-import { memo } from "react";
-import { Pencil, Zap, AlertTriangle } from "lucide-react";
-import { SourceCard } from "./SourceCard";
-import { TargetCard } from "./TargetCard";
-import { AddTargetCard } from "./AddTargetCard";
-import { PipelineConnector } from "./PipelineConnector";
-import type { SourceData, SourceCategory, TrafficLightStatus } from "./types";
-import type { Binding } from "../../api/hooks/useBindings";
-import type { TimelineGap } from "../../api/hooks/useTimelineGaps";
+import { AlertTriangle, Pencil, Zap } from 'lucide-react';
+import { memo } from 'react';
+import type { Binding } from '../../api/hooks/useBindings';
+import type { TimelineGap } from '../../api/hooks/useTimelineGaps';
+import { AddTargetCard } from './AddTargetCard';
+import { PipelineConnector } from './PipelineConnector';
+import { SourceCard } from './SourceCard';
+import { TargetCard } from './TargetCard';
+import type { SourceCategory, SourceData, TrafficLightStatus } from './types';
 
 interface DashboardPipelineRowProps {
   source: SourceData;
@@ -24,29 +24,27 @@ interface DashboardPipelineRowProps {
 }
 
 const statusStripe: Record<TrafficLightStatus, string> = {
-  green: "bg-success",
-  yellow: "bg-warning",
-  red: "bg-error",
-  orange: "bg-warning",
-  grey: "bg-text-secondary/30",
+  green: 'bg-success',
+  yellow: 'bg-warning',
+  red: 'bg-error',
+  orange: 'bg-warning',
+  grey: 'bg-text-secondary/30',
 };
 
 function deliveryModeBadge(binding: Binding): string | null {
-  if (!binding.delivery_mode || binding.delivery_mode === "on_change")
-    return "Real-time";
-  if (binding.delivery_mode === "interval") {
-    const mins = binding.schedule_time || "15";
+  if (!binding.delivery_mode || binding.delivery_mode === 'on_change') return 'Real-time';
+  if (binding.delivery_mode === 'interval') {
+    const mins = binding.schedule_time || '15';
     return `Every ${mins}m`;
   }
-  if (binding.delivery_mode === "daily") {
-    return `Daily ${binding.schedule_time || "00:01"}`;
+  if (binding.delivery_mode === 'daily') {
+    return `Daily ${binding.schedule_time || '00:01'}`;
   }
-  if (binding.delivery_mode === "weekly") {
+  if (binding.delivery_mode === 'weekly') {
     const day = binding.schedule_day
-      ? binding.schedule_day.charAt(0).toUpperCase() +
-        binding.schedule_day.slice(1, 3)
-      : "Mon";
-    return `Weekly ${day} ${binding.schedule_time || "00:01"}`;
+      ? binding.schedule_day.charAt(0).toUpperCase() + binding.schedule_day.slice(1, 3)
+      : 'Mon';
+    return `Weekly ${day} ${binding.schedule_time || '00:01'}`;
   }
   return null;
 }
@@ -65,22 +63,20 @@ function DashboardPipelineRowComponent({
   onEnableClick,
   onViewActivity,
 }: DashboardPipelineRowProps) {
-  const isActive = category === "active" && bindings.length > 0;
+  const isActive = category === 'active' && bindings.length > 0;
 
   const formatGapDate = (isoDate: string): string => {
     const date = new Date(isoDate);
-    return date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
     });
   };
 
   return (
     <div className="relative bg-bg-secondary border border-border rounded-lg overflow-hidden">
       {/* Left colored stripe */}
-      <div
-        className={`absolute left-0 top-0 bottom-0 w-1 ${statusStripe[trafficLightStatus]}`}
-      />
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${statusStripe[trafficLightStatus]}`} />
 
       <div className="pl-4 pr-3 py-2.5">
         <div className="grid grid-cols-[1fr_auto_1fr] gap-3 items-center">
@@ -105,7 +101,7 @@ function DashboardPipelineRowComponent({
                 <div key={binding.endpoint_id} className="flex items-center gap-1">
                   <div className="flex-1 min-w-0">
                     <TargetCard
-                      targetType={binding.target_id.split("-")[0] || "n8n"}
+                      targetType={binding.target_id.split('-')[0] || 'n8n'}
                       endpointName={binding.endpoint_name}
                       endpointUrl={binding.endpoint_url}
                     />
@@ -132,17 +128,17 @@ function DashboardPipelineRowComponent({
               <AlertTriangle size={12} className="text-warning mt-0.5 shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] font-medium text-warning mb-0.5">
-                  Missing: {gap.delivery_mode} delivery for{" "}
-                  {formatGapDate(gap.expected_at)}
+                  Missing: {gap.delivery_mode} delivery for {formatGapDate(gap.expected_at)}
                 </p>
                 <p className="text-[9px] text-text-secondary">
-                  Expected at {new Date(gap.expected_at).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" })}
+                  Expected at{' '}
+                  {new Date(gap.expected_at).toLocaleTimeString('en-US', {
+                    hour12: false,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
                   {gap.last_delivered_at && (
-                    <>
-                      {" "}
-                      — last delivered{" "}
-                      {formatGapDate(gap.last_delivered_at)}
-                    </>
+                    <> — last delivered {formatGapDate(gap.last_delivered_at)}</>
                   )}
                 </p>
               </div>
@@ -189,7 +185,7 @@ function DashboardPipelineRowComponent({
                 onClick={() => onPushNow(source.id)}
                 disabled={isPushing}
               >
-                {isPushing ? "Pushing..." : "Push Now"}
+                {isPushing ? 'Pushing...' : 'Push Now'}
               </button>
             )}
             {bindings.length > 0 && (
@@ -207,10 +203,7 @@ function DashboardPipelineRowComponent({
   );
 }
 
-function areEqual(
-  prev: DashboardPipelineRowProps,
-  next: DashboardPipelineRowProps
-) {
+function areEqual(prev: DashboardPipelineRowProps, next: DashboardPipelineRowProps) {
   return (
     prev.source === next.source &&
     prev.category === next.category &&

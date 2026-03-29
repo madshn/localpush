@@ -1,4 +1,4 @@
-import { afterEach, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
 // Mock Tauri IPC

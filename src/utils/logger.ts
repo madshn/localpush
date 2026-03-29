@@ -2,7 +2,7 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const LOG_LEVELS: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
-function timestamp(): string {
+function _timestamp(): string {
   return new Date().toISOString();
 }
 
@@ -14,16 +14,24 @@ class Logger {
   }
 
   debug(msg: string, data?: Record<string, unknown>) {
-    if (this.shouldLog('debug')) console.debug(`[LocalPush ${timestamp()}] ${msg}`, data ?? '');
+    if (this.shouldLog('debug'))
+      // biome-ignore lint/suspicious/noConsole: intentional logger utility
+      console.debug(`[${_timestamp()}] DEBUG:`, msg, data ?? '');
   }
   info(msg: string, data?: Record<string, unknown>) {
-    if (this.shouldLog('info')) console.info(`[LocalPush ${timestamp()}] ${msg}`, data ?? '');
+    if (this.shouldLog('info'))
+      // biome-ignore lint/suspicious/noConsole: intentional logger utility
+      console.info(`[${_timestamp()}] INFO:`, msg, data ?? '');
   }
   warn(msg: string, data?: Record<string, unknown>) {
-    if (this.shouldLog('warn')) console.warn(`[LocalPush ${timestamp()}] ${msg}`, data ?? '');
+    if (this.shouldLog('warn'))
+      // biome-ignore lint/suspicious/noConsole: intentional logger utility
+      console.warn(`[${_timestamp()}] WARN:`, msg, data ?? '');
   }
   error(msg: string, data?: Record<string, unknown>) {
-    if (this.shouldLog('error')) console.error(`[LocalPush ${timestamp()}] ${msg}`, data ?? '');
+    if (this.shouldLog('error'))
+      // biome-ignore lint/suspicious/noConsole: intentional logger utility
+      console.error(`[${_timestamp()}] ERROR:`, msg, data ?? '');
   }
 }
 

@@ -1,7 +1,7 @@
-import { Zap, CheckCircle2 } from "lucide-react";
-import { useDeliveryStatus } from "../api/hooks/useDeliveryStatus";
-import { useDeliveryQueueCounts } from "../api/hooks/useDeliveryQueue";
-import { SparklineChart } from "./SparklineChart";
+import { CheckCircle2, Zap } from 'lucide-react';
+import { useDeliveryQueueCounts } from '../api/hooks/useDeliveryQueue';
+import { useDeliveryStatus } from '../api/hooks/useDeliveryStatus';
+import { SparklineChart } from './SparklineChart';
 
 export function SummaryStats() {
   const { data: status } = useDeliveryStatus();
@@ -11,18 +11,14 @@ export function SummaryStats() {
   const pendingCount = status?.pendingCount ?? 0;
 
   const healthLabel =
-    (status?.failedCount ?? 0) > 0
-      ? "Degraded"
-      : pendingCount > 0
-        ? "Pending"
-        : "Operational";
+    (status?.failedCount ?? 0) > 0 ? 'Degraded' : pendingCount > 0 ? 'Pending' : 'Operational';
 
   const healthColor =
     (status?.failedCount ?? 0) > 0
-      ? "text-error"
+      ? 'text-error'
       : pendingCount > 0
-        ? "text-warning"
-        : "text-success";
+        ? 'text-warning'
+        : 'text-success';
 
   // Synthetic sparkline data (delivery counts aren't tracked historically yet)
   const sparkData = [3, 5, 4, 7, 6, 8, deliveredCount || 5];
@@ -51,13 +47,9 @@ export function SummaryStats() {
           </span>
           <CheckCircle2 size={12} className={healthColor} />
         </div>
-        <div className={`text-lg font-semibold ${healthColor}`}>
-          {healthLabel}
-        </div>
+        <div className={`text-lg font-semibold ${healthColor}`}>{healthLabel}</div>
         {pendingCount > 0 && (
-          <div className="text-[11px] text-text-secondary mt-0.5">
-            {pendingCount} pending
-          </div>
+          <div className="text-[11px] text-text-secondary mt-0.5">{pendingCount} pending</div>
         )}
       </div>
     </div>

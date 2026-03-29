@@ -1,32 +1,29 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Settings } from "lucide-react";
-import { useDeliveryStatus } from "../api/hooks/useDeliveryStatus";
-import { useSources } from "../api/hooks/useSources";
+import { useQueryClient } from '@tanstack/react-query';
+import { Plus, Settings } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  type Binding,
   useAllBindings,
   useCreateBinding,
   useRemoveBinding,
-  type Binding,
-} from "../api/hooks/useBindings";
-import { useTimelineGaps } from "../api/hooks/useTimelineGaps";
-import { StatusIndicator } from "./StatusIndicator";
-import { SummaryStats } from "./SummaryStats";
-import { SkeletonCard } from "./Skeleton";
-import { DashboardPipelineRow } from "./pipeline/DashboardPipelineRow";
-import { FlowModal } from "./pipeline/FlowModal";
-import { formatNextPushLabel, getNextPushBySource } from "./pipeline/scheduling";
-import { VelocityChart } from "./pipeline/VelocityChart";
-import { ActivityLogPreview } from "./pipeline/ActivityLogPreview";
-import { usePipelineFlow } from "./pipeline/usePipelineFlow";
-import type {
-  SourceData,
-  SourceWithCategory,
-} from "./pipeline/types";
+} from '../api/hooks/useBindings';
+import { useDeliveryStatus } from '../api/hooks/useDeliveryStatus';
+import { useSources } from '../api/hooks/useSources';
+import { useTimelineGaps } from '../api/hooks/useTimelineGaps';
+import { ActivityLogPreview } from './pipeline/ActivityLogPreview';
+import { DashboardPipelineRow } from './pipeline/DashboardPipelineRow';
+import { FlowModal } from './pipeline/FlowModal';
+import { formatNextPushLabel, getNextPushBySource } from './pipeline/scheduling';
+import type { SourceData, SourceWithCategory } from './pipeline/types';
+import { usePipelineFlow } from './pipeline/usePipelineFlow';
+import { VelocityChart } from './pipeline/VelocityChart';
+import { SkeletonCard } from './Skeleton';
+import { StatusIndicator } from './StatusIndicator';
+import { SummaryStats } from './SummaryStats';
 
 function categorizeAndSortSources(
   sources: SourceData[],
-  allBindings: Binding[] | undefined
+  allBindings: Binding[] | undefined,
 ): {
   active: SourceWithCategory[];
   paused: SourceWithCategory[];
@@ -48,28 +45,25 @@ function categorizeAndSortSources(
   for (const source of sources) {
     const sourceBindings = bindingsBySource.get(source.id) || [];
     if (source.enabled && sourceBindings.length > 0) {
-      active.push({ source, category: "active" });
+      active.push({ source, category: 'active' });
     } else if (source.enabled) {
-      paused.push({ source, category: "paused" });
+      paused.push({ source, category: 'paused' });
     } else {
-      available.push({ source, category: "available" });
+      available.push({ source, category: 'available' });
     }
   }
 
   return { active, paused, available };
 }
 
-function getBindingsForSource(
-  sourceId: string,
-  allBindings: Binding[] | undefined
-): Binding[] {
+function getBindingsForSource(sourceId: string, allBindings: Binding[] | undefined): Binding[] {
   return allBindings?.filter((b) => b.source_id === sourceId) || [];
 }
 
 function getGapForSource(
   sourceId: string,
-  gaps: import("../api/hooks/useTimelineGaps").TimelineGap[] | undefined
-): import("../api/hooks/useTimelineGaps").TimelineGap | null {
+  gaps: import('../api/hooks/useTimelineGaps').TimelineGap[] | undefined,
+): import('../api/hooks/useTimelineGaps').TimelineGap | null {
   return gaps?.find((g) => g.source_id === sourceId) || null;
 }
 
@@ -96,25 +90,17 @@ export function DashboardView() {
     removeBinding,
   });
 
-  const activeFlowSourceId = sources?.find(
-    (s) => flow.getFlowState(s.id).step !== "idle"
-  )?.id;
-  const activeFlowState = activeFlowSourceId
-    ? flow.getFlowState(activeFlowSourceId)
-    : null;
+  const activeFlowSourceId = sources?.find((s) => flow.getFlowState(s.id).step !== 'idle')?.id;
+  const activeFlowState = activeFlowSourceId ? flow.getFlowState(activeFlowSourceId) : null;
 
   const categorized =
-    sources && sources.length > 0
-      ? categorizeAndSortSources(sources, allBindings)
-      : null;
+    sources && sources.length > 0 ? categorizeAndSortSources(sources, allBindings) : null;
 
-  const unboundSources = categorized
-    ? [...categorized.paused, ...categorized.available]
-    : [];
+  const unboundSources = categorized ? [...categorized.paused, ...categorized.available] : [];
 
   const nextPushBySource = useMemo(
     () => getNextPushBySource(allBindings || [], scheduleNowMs),
-    [allBindings, scheduleNowMs]
+    [allBindings, scheduleNowMs],
   );
 
   return (
@@ -123,7 +109,7 @@ export function DashboardView() {
       <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-bg-secondary">
         <div className="flex items-center gap-3">
           <h1 className="text-base font-semibold tracking-tight">LocalPush</h1>
-          <StatusIndicator status={status?.overall ?? "unknown"} />
+          <StatusIndicator status={status?.overall ?? 'unknown'} />
         </div>
         <button
           className="p-2 text-text-secondary hover:text-text-primary transition-colors rounded-md hover:bg-bg-tertiary"
@@ -172,11 +158,11 @@ export function DashboardView() {
                     category={category}
                     bindings={getBindingsForSource(source.id, allBindings)}
                     gap={getGapForSource(source.id, gaps)}
-                    nextPushLabel={formatNextPushLabel(nextPushBySource.get(source.id), scheduleNowMs)}
-                    trafficLightStatus={flow.getTrafficLightStatus(
-                      source.id,
-                      source.enabled
+                    nextPushLabel={formatNextPushLabel(
+                      nextPushBySource.get(source.id),
+                      scheduleNowMs,
                     )}
+                    trafficLightStatus={flow.getTrafficLightStatus(source.id, source.enabled)}
                     isPushing={flow.pushingSource === source.id}
                     onAddTarget={flow.handleAddTarget}
                     onEditBinding={flow.handleEditBinding}
@@ -188,13 +174,8 @@ export function DashboardView() {
             </div>
           ) : !isLoading && (!sources || sources.length === 0) ? (
             <div className="text-center py-12">
-              <Plus
-                size={32}
-                className="mx-auto mb-3 text-text-secondary/40"
-              />
-              <p className="text-sm text-text-secondary mb-1">
-                No sources configured
-              </p>
+              <Plus size={32} className="mx-auto mb-3 text-text-secondary/40" />
+              <p className="text-sm text-text-secondary mb-1">No sources configured</p>
               <p className="text-xs text-text-secondary/60">
                 Enable your first source to start pushing data.
               </p>
@@ -206,16 +187,13 @@ export function DashboardView() {
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                  {categorized!.paused.length > 0 &&
-                  categorized!.available.length > 0
-                    ? "Unbound Sources"
+                  {categorized!.paused.length > 0 && categorized!.available.length > 0
+                    ? 'Unbound Sources'
                     : categorized!.paused.length > 0
-                      ? "Paused"
-                      : "Available Sources"}
+                      ? 'Paused'
+                      : 'Available Sources'}
                 </h2>
-                <span className="text-[10px] text-text-secondary/60">
-                  {unboundSources.length}
-                </span>
+                <span className="text-[10px] text-text-secondary/60">{unboundSources.length}</span>
               </div>
               <div className="flex flex-col gap-2">
                 {unboundSources.map(({ source, category }) => (
@@ -250,9 +228,7 @@ export function DashboardView() {
       {activeFlowState && (
         <FlowModal
           flowState={activeFlowState}
-          previewLoading={
-            flow.previewLoading[activeFlowState.sourceId] || false
-          }
+          previewLoading={flow.previewLoading[activeFlowState.sourceId] || false}
           onPreviewEnable={flow.handlePreviewEnable}
           onPreviewRefresh={flow.handlePreviewRefresh}
           onEndpointSelect={flow.handleEndpointSelect}

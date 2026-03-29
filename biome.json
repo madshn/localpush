@@ -1,0 +1,30 @@
+{
+  "$schema": "https://biomejs.dev/schemas/latest/schema.json",
+  "extends": ["@rightaim/coding-craft/biome/tauri"],
+  "files": {
+    "includes": ["!**/node_modules", "!**/dist", "!**/src-tauri", "!src/styles.css"]
+  },
+  "linter": {
+    "rules": {
+      "a11y": {
+        "noStaticElementInteractions": "warn",
+        "useKeyWithClickEvents": "warn",
+        "useButtonType": "warn",
+        "noLabelWithoutControl": "warn",
+        "useAltText": "warn",
+        "noSvgWithoutTitle": "warn"
+      },
+      "style": {
+        "noNonNullAssertion": "warn"
+      },
+      "suspicious": {
+        "noArrayIndexKey": "warn",
+        "useIterableCallbackReturn": "warn",
+        "noNonNullAssertedOptionalChain": "warn"
+      },
+      "nursery": {
+        "noFloatingPromises": "warn"
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { Shield } from "lucide-react";
-import { useConnectN8n, useUpdateN8n } from "../api/hooks/useTargets";
-import { logger } from "../utils/logger";
+import { Shield } from 'lucide-react';
+import { useState } from 'react';
+import { useConnectN8n, useUpdateN8n } from '../api/hooks/useTargets';
+import { logger } from '../utils/logger';
 
 interface TargetInfo {
   id: string;
@@ -20,21 +20,21 @@ interface N8nConnectProps {
 export function N8nConnect({
   onConnected,
   targetId,
-  initialInstanceUrl = "",
+  initialInstanceUrl = '',
   submitLabel,
   successLabel,
   onCancel,
 }: N8nConnectProps) {
   const [instanceUrl, setInstanceUrl] = useState(initialInstanceUrl);
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState('');
   const connectMutation = useConnectN8n();
   const updateMutation = useUpdateN8n();
   const isEditing = !!targetId;
   const isPending = connectMutation.isPending || updateMutation.isPending;
 
   const handleUrlChange = (value: string) => {
-    if (value && !value.startsWith("http://") && !value.startsWith("https://")) {
-      setInstanceUrl("https://" + value);
+    if (value && !value.startsWith('http://') && !value.startsWith('https://')) {
+      setInstanceUrl(`https://${value}`);
     } else {
       setInstanceUrl(value);
     }
@@ -44,14 +44,14 @@ export function N8nConnect({
     e.preventDefault();
 
     if (!instanceUrl.trim() || !apiKey.trim()) {
-      logger.warn("n8n connection attempt with missing fields");
+      logger.warn('n8n connection attempt with missing fields');
       return;
     }
 
     try {
       if (isEditing) {
         if (!targetId) {
-          throw new Error("Missing target id");
+          throw new Error('Missing target id');
         }
         const result = await updateMutation.mutateAsync({
           targetId,
@@ -69,10 +69,10 @@ export function N8nConnect({
         });
         onConnected(result);
       }
-      setInstanceUrl("");
-      setApiKey("");
+      setInstanceUrl('');
+      setApiKey('');
     } catch (error) {
-      logger.error("n8n connection failed", { error });
+      logger.error('n8n connection failed', { error });
     }
   };
 
@@ -88,7 +88,7 @@ export function N8nConnect({
 
   const apiKeyHelpUrl = getApiKeyHelpUrl();
   const inputClass =
-    "w-full px-3 py-2 text-xs border border-border rounded-md bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent";
+    'w-full px-3 py-2 text-xs border border-border rounded-md bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent';
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -110,7 +110,7 @@ export function N8nConnect({
         />
         {apiKeyHelpUrl && (
           <div className="text-[11px] text-text-secondary mt-1">
-            Get your API key at{" "}
+            Get your API key at{' '}
             <a
               href={apiKeyHelpUrl}
               target="_blank"
@@ -149,8 +149,8 @@ export function N8nConnect({
       <div className="flex gap-2.5 p-3 bg-accent/10 border border-accent/20 rounded-md">
         <Shield size={16} className="text-accent shrink-0 mt-0.5" />
         <p className="text-[11px] text-text-secondary leading-relaxed">
-          Use HTTPS to ensure your local data is encrypted during transit.
-          Avoid exposing plain HTTP endpoints publicly.
+          Use HTTPS to ensure your local data is encrypted during transit. Avoid exposing plain HTTP
+          endpoints publicly.
         </p>
       </div>
 
@@ -168,34 +168,31 @@ export function N8nConnect({
         <button
           type="submit"
           className="text-xs font-medium px-4 py-2 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
-          disabled={
-            isPending ||
-            !instanceUrl.trim() ||
-            !apiKey.trim()
-          }
+          disabled={isPending || !instanceUrl.trim() || !apiKey.trim()}
         >
           {isPending
-            ? "Testing..."
-            : submitLabel || (isEditing ? "Save and reconnect" : "Test Connection")}
+            ? 'Testing...'
+            : submitLabel || (isEditing ? 'Save and reconnect' : 'Test Connection')}
         </button>
       </div>
 
       {connectMutation.isSuccess && !isEditing && (
         <div className="text-xs text-success bg-success-bg border border-success/30 rounded-md p-2.5">
-          {successLabel || "Connected!"} {connectMutation.data.details?.active_workflows || 0}{" "}
+          {successLabel || 'Connected!'} {connectMutation.data.details?.active_workflows || 0}{' '}
           active workflows found
         </div>
       )}
 
       {updateMutation.isSuccess && isEditing && (
         <div className="text-xs text-success bg-success-bg border border-success/30 rounded-md p-2.5">
-          {successLabel || "Updated!"} {updateMutation.data.target_info.details?.active_workflows || 0} active workflows found
+          {successLabel || 'Updated!'}{' '}
+          {updateMutation.data.target_info.details?.active_workflows || 0} active workflows found
         </div>
       )}
 
       {(connectMutation.isError || updateMutation.isError) && (
         <div className="text-xs text-error bg-error-bg border border-error/30 rounded-md p-2.5">
-          {connectMutation.error?.message || updateMutation.error?.message || "Connection failed"}
+          {connectMutation.error?.message || updateMutation.error?.message || 'Connection failed'}
         </div>
       )}
     </form>
