@@ -1,12 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
-import { logger } from "../../utils/logger";
-import { visibleRefetchInterval } from "./polling";
+import { useQuery } from '@tanstack/react-query';
+import { invoke } from '@tauri-apps/api/core';
+import { logger } from '../../utils/logger';
+import { visibleRefetchInterval } from './polling';
 
 export interface DeliveryQueueItemRaw {
   id: string;
   event_type: string;
-  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq" | "target_paused";
+  status: 'pending' | 'in_flight' | 'delivered' | 'failed' | 'dlq' | 'target_paused';
   retry_count: number;
   last_error: string | null;
   created_at: string;
@@ -19,7 +19,7 @@ export interface DeliveryQueueItemRaw {
 export interface DeliveryItem {
   id: string;
   eventType: string;
-  status: "pending" | "in_flight" | "delivered" | "failed" | "dlq" | "target_paused";
+  status: 'pending' | 'in_flight' | 'delivered' | 'failed' | 'dlq' | 'target_paused';
   retryCount: number;
   lastError: string | null;
   createdAt: string;
@@ -36,16 +36,16 @@ export interface DeliveryQueueCounts {
   targetPaused: number;
 }
 
-export const DELIVERY_QUEUE_QUERY_KEY = ["deliveryQueue"] as const;
+export const DELIVERY_QUEUE_QUERY_KEY = ['deliveryQueue'] as const;
 
 export async function fetchDeliveryQueue(): Promise<DeliveryQueueItemRaw[]> {
-  logger.debug("Fetching delivery queue");
+  logger.debug('Fetching delivery queue');
   try {
-    const result = await invoke<DeliveryQueueItemRaw[]>("get_delivery_queue");
-    logger.debug("Delivery queue fetched", { count: result.length });
+    const result = await invoke<DeliveryQueueItemRaw[]>('get_delivery_queue');
+    logger.debug('Delivery queue fetched', { count: result.length });
     return result;
   } catch (error) {
-    logger.error("Failed to fetch delivery queue", { error });
+    logger.error('Failed to fetch delivery queue', { error });
     throw error;
   }
 }
@@ -74,11 +74,11 @@ function countQueue(items: DeliveryQueueItemRaw[]): DeliveryQueueCounts {
   };
 
   for (const item of items) {
-    if (item.status === "in_flight") counts.inFlight += 1;
-    else if (item.status === "delivered") counts.delivered += 1;
-    else if (item.status === "failed") counts.failed += 1;
-    else if (item.status === "dlq") counts.dlq += 1;
-    else if (item.status === "target_paused") counts.targetPaused += 1;
+    if (item.status === 'in_flight') counts.inFlight += 1;
+    else if (item.status === 'delivered') counts.delivered += 1;
+    else if (item.status === 'failed') counts.failed += 1;
+    else if (item.status === 'dlq') counts.dlq += 1;
+    else if (item.status === 'target_paused') counts.targetPaused += 1;
     else counts.pending += 1;
   }
 
@@ -120,9 +120,9 @@ export interface SourceStatusCount {
 
 export function useSourceStatusCounts() {
   return useQuery({
-    queryKey: ["sourceStatusCounts"],
+    queryKey: ['sourceStatusCounts'],
     queryFn: async () => {
-      return await invoke<SourceStatusCount[]>("get_source_status_counts");
+      return await invoke<SourceStatusCount[]>('get_source_status_counts');
     },
     refetchInterval: () => visibleRefetchInterval(30_000),
   });

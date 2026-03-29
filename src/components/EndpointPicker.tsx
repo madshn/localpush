@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { Search, X, ChevronRight, Loader2 } from "lucide-react";
-import { logger } from "../utils/logger";
+import { invoke } from '@tauri-apps/api/core';
+import { ChevronRight, Loader2, Search, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { logger } from '../utils/logger';
 
 interface Target {
   id: string;
@@ -25,32 +25,34 @@ interface EndpointPickerProps {
     endpointUrl: string,
     endpointName: string,
     authenticated: boolean,
-    authType?: string
+    authType?: string,
   ) => void;
   onCancel: () => void;
 }
 
 export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
-  const [step, setStep] = useState<"target" | "endpoint">("target");
+  const [step, setStep] = useState<'target' | 'endpoint'>('target');
   const [targets, setTargets] = useState<Target[]>([]);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<Target | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [endpointFilter, setEndpointFilter] = useState("");
+  const [endpointFilter, setEndpointFilter] = useState('');
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loadTargets is stable, run on mount only
   useEffect(() => {
-    loadTargets();
+    void loadTargets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadTargets = async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<Target[]>("list_targets");
+      const result = await invoke<Target[]>('list_targets');
       setTargets(result);
     } catch (err) {
-      logger.error("Failed to load targets", { error: err });
+      logger.error('Failed to load targets', { error: err });
       setError(`Failed to load targets: ${err}`);
     } finally {
       setLoading(false);
@@ -59,16 +61,16 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
 
   const handleTargetSelect = async (target: Target) => {
     setSelectedTarget(target);
-    setStep("endpoint");
+    setStep('endpoint');
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<Endpoint[]>("list_target_endpoints", {
+      const result = await invoke<Endpoint[]>('list_target_endpoints', {
         targetId: target.id,
       });
       setEndpoints(result);
     } catch (err) {
-      logger.error("Failed to load endpoints", { targetId: target.id, error: err });
+      logger.error('Failed to load endpoints', { targetId: target.id, error: err });
       setError(`Failed to load endpoints: ${err}`);
     } finally {
       setLoading(false);
@@ -83,13 +85,13 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
       endpoint.url,
       endpoint.name,
       endpoint.authenticated,
-      endpoint.auth_type
+      endpoint.auth_type,
     );
   };
 
   const handleBack = () => {
-    if (step === "endpoint") {
-      setStep("target");
+    if (step === 'endpoint') {
+      setStep('target');
       setSelectedTarget(null);
       setEndpoints([]);
     } else {
@@ -130,12 +132,8 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
       <div className="bg-bg-secondary border border-border rounded-lg p-4">
         <h3 className="text-sm font-semibold mb-3">Select Endpoint</h3>
         <div className="py-5 text-center">
-          <p className="text-xs text-text-secondary mb-2">
-            No targets connected yet.
-          </p>
-          <p className="text-[11px] text-text-secondary">
-            Go to Settings to add webhook targets.
-          </p>
+          <p className="text-xs text-text-secondary mb-2">No targets connected yet.</p>
+          <p className="text-[11px] text-text-secondary">Go to Settings to add webhook targets.</p>
         </div>
         <div className="flex justify-end">
           <button
@@ -152,10 +150,10 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
   return (
     <div className="bg-bg-secondary border border-border rounded-lg p-4">
       <h3 className="text-sm font-semibold mb-3">
-        {step === "target" ? "Select Target System" : "Select Endpoint"}
+        {step === 'target' ? 'Select Target System' : 'Select Endpoint'}
       </h3>
 
-      {step === "target" ? (
+      {step === 'target' ? (
         <div className="flex flex-col gap-2">
           {targets.map((target) => (
             <div
@@ -165,9 +163,7 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
             >
               <div>
                 <div className="text-xs font-medium">{target.name}</div>
-                <div className="text-[11px] text-text-secondary">
-                  {target.target_type}
-                </div>
+                <div className="text-[11px] text-text-secondary">{target.target_type}</div>
               </div>
               <ChevronRight size={14} className="text-text-secondary" />
             </div>
@@ -200,7 +196,7 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
                 />
                 {endpointFilter && (
                   <button
-                    onClick={() => setEndpointFilter("")}
+                    onClick={() => setEndpointFilter('')}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
                   >
                     <X size={14} />
@@ -211,10 +207,7 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
                 const filtered = endpoints.filter((ep) => {
                   if (!endpointFilter) return true;
                   const q = endpointFilter.toLowerCase();
-                  return (
-                    ep.name.toLowerCase().includes(q) ||
-                    ep.url.toLowerCase().includes(q)
-                  );
+                  return ep.name.toLowerCase().includes(q) || ep.url.toLowerCase().includes(q);
                 });
                 return (
                   <>
@@ -258,7 +251,7 @@ export function EndpointPicker({ onSelect, onCancel }: EndpointPickerProps) {
           className="text-xs font-medium px-3 py-1.5 rounded-md bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors"
           onClick={handleBack}
         >
-          {step === "target" ? "Cancel" : "Back"}
+          {step === 'target' ? 'Cancel' : 'Back'}
         </button>
       </div>
     </div>

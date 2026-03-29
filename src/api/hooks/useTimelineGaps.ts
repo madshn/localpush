@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
-import { logger } from "../../utils/logger";
-import { visibleRefetchInterval } from "./polling";
+import { useQuery } from '@tanstack/react-query';
+import { invoke } from '@tauri-apps/api/core';
+import { logger } from '../../utils/logger';
+import { visibleRefetchInterval } from './polling';
 
 export interface TimelineGap {
   source_id: string;
@@ -13,13 +13,13 @@ export interface TimelineGap {
 }
 
 async function fetchTimelineGaps(): Promise<TimelineGap[]> {
-  logger.debug("Fetching timeline gaps");
+  logger.debug('Fetching timeline gaps');
   try {
-    const gaps = await invoke<TimelineGap[]>("get_timeline_gaps", {});
-    logger.info("Timeline gaps fetched", { count: gaps.length });
+    const gaps = await invoke<TimelineGap[]>('get_timeline_gaps', {});
+    logger.info('Timeline gaps fetched', { count: gaps.length });
     return gaps;
   } catch (error) {
-    logger.error("Failed to fetch timeline gaps", { error });
+    logger.error('Failed to fetch timeline gaps', { error });
     throw error;
   }
 }
@@ -30,7 +30,7 @@ async function fetchTimelineGaps(): Promise<TimelineGap[]> {
  */
 export function useTimelineGaps() {
   return useQuery({
-    queryKey: ["timelineGaps"],
+    queryKey: ['timelineGaps'],
     queryFn: fetchTimelineGaps,
     refetchInterval: () => visibleRefetchInterval(60 * 1000), // Poll every 60 seconds (visible only)
     staleTime: 30 * 1000, // Consider stale after 30s

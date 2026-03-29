@@ -1,5 +1,5 @@
-import { X, AlertTriangle } from "lucide-react";
-import type { ActivityEntry } from "../api/hooks/useActivityLog";
+import { AlertTriangle, X } from 'lucide-react';
+import type { ActivityEntry } from '../api/hooks/useActivityLog';
 
 interface ReplayConfirmDialogProps {
   entry: ActivityEntry;
@@ -7,16 +7,12 @@ interface ReplayConfirmDialogProps {
   onCancel: () => void;
 }
 
-export function ReplayConfirmDialog({
-  entry,
-  onConfirm,
-  onCancel,
-}: ReplayConfirmDialogProps) {
+export function ReplayConfirmDialog({ entry, onConfirm, onCancel }: ReplayConfirmDialogProps) {
   const summarizePayload = (payload: unknown): string => {
-    if (!payload || typeof payload !== "object") return "No data";
+    if (!payload || typeof payload !== 'object') return 'No data';
     const obj = payload as Record<string, unknown>;
     const keys = Object.keys(obj);
-    if (keys.length === 0) return "Empty payload";
+    if (keys.length === 0) return 'Empty payload';
 
     // Show payload size summary
     const entries = Object.entries(obj);
@@ -34,9 +30,9 @@ export function ReplayConfirmDialog({
     const otherFields = entries.filter(([_, v]) => !Array.isArray(v));
     if (otherFields.length > 0 && summary.length < 3) {
       otherFields.slice(0, 3 - summary.length).forEach(([k, v]) => {
-        if (typeof v === "string") {
-          summary.push(`${k}: "${v.slice(0, 30)}${v.length > 30 ? "..." : ""}"`);
-        } else if (typeof v === "number") {
+        if (typeof v === 'string') {
+          summary.push(`${k}: "${v.slice(0, 30)}${v.length > 30 ? '...' : ''}"`);
+        } else if (typeof v === 'number') {
           summary.push(`${k}: ${v}`);
         } else {
           summary.push(`${k}: ${typeof v}`);
@@ -44,8 +40,9 @@ export function ReplayConfirmDialog({
       });
     }
 
-    const extra = keys.length > summary.length ? ` +${keys.length - summary.length} more fields` : "";
-    return summary.join(", ") + extra;
+    const extra =
+      keys.length > summary.length ? ` +${keys.length - summary.length} more fields` : '';
+    return summary.join(', ') + extra;
   };
 
   return (
@@ -67,29 +64,27 @@ export function ReplayConfirmDialog({
         {/* Body */}
         <div className="p-4 space-y-3">
           <p className="text-xs text-text-secondary leading-relaxed">
-            This will re-send the original payload that failed. A new delivery
-            will be queued and sent within 5 seconds.
+            This will re-send the original payload that failed. A new delivery will be queued and
+            sent within 5 seconds.
           </p>
 
           <div className="bg-bg-tertiary border border-border rounded p-3 space-y-2">
             <div className="text-[11px]">
-              <span className="text-text-secondary">Payload:</span>{" "}
-              <span className="text-text-primary font-mono">
-                {summarizePayload(entry.payload)}
-              </span>
+              <span className="text-text-secondary">Payload:</span>{' '}
+              <span className="text-text-primary font-mono">{summarizePayload(entry.payload)}</span>
             </div>
             <div className="text-[11px]">
-              <span className="text-text-secondary">Source:</span>{" "}
+              <span className="text-text-secondary">Source:</span>{' '}
               <span className="text-text-primary">{entry.source}</span>
             </div>
             <div className="text-[11px]">
-              <span className="text-text-secondary">Original attempt:</span>{" "}
+              <span className="text-text-secondary">Original attempt:</span>{' '}
               <span className="text-text-primary">
-                {entry.timestamp.toLocaleString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
+                {entry.timestamp.toLocaleString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
                   hour12: false,
                 })}
               </span>
@@ -100,8 +95,8 @@ export function ReplayConfirmDialog({
           <div className="flex items-start gap-2 p-3 bg-warning-bg border border-warning/20 rounded">
             <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
             <p className="text-[11px] text-text-secondary leading-relaxed">
-              Make sure authentication is fixed before replaying, or it will
-              fail again. Check your API keys in Settings → Targets.
+              Make sure authentication is fixed before replaying, or it will fail again. Check your
+              API keys in Settings → Targets.
             </p>
           </div>
         </div>

@@ -1,21 +1,21 @@
-import { useState } from "react";
+import { useQueryClient } from '@tanstack/react-query';
+import { invoke } from '@tauri-apps/api/core';
 import {
+  Check,
   CheckCircle2,
-  Clock,
   ChevronDown,
   ChevronRight,
-  RotateCcw,
+  Clock,
   Copy,
-  Check,
   ExternalLink,
-} from "lucide-react";
-import { toast } from "sonner";
-import { invoke } from "@tauri-apps/api/core";
-import { useQueryClient } from "@tanstack/react-query";
-import type { ActivityEntry } from "../api/hooks/useActivityLog";
-import { logger } from "../utils/logger";
-import { openUrl } from "../utils/openUrl";
-import { FailedDeliveryCard } from "./FailedDeliveryCard";
+  RotateCcw,
+} from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import type { ActivityEntry } from '../api/hooks/useActivityLog';
+import { logger } from '../utils/logger';
+import { openUrl } from '../utils/openUrl';
+import { FailedDeliveryCard } from './FailedDeliveryCard';
 
 interface ActivityCardProps {
   entry: ActivityEntry;
@@ -24,28 +24,28 @@ interface ActivityCardProps {
 const statusConfig = {
   delivered: {
     icon: CheckCircle2,
-    color: "text-success",
-    borderColor: "",
+    color: 'text-success',
+    borderColor: '',
   },
   pending: {
     icon: Clock,
-    color: "text-warning",
-    borderColor: "",
+    color: 'text-warning',
+    borderColor: '',
   },
   in_flight: {
     icon: Clock,
-    color: "text-warning",
-    borderColor: "",
+    color: 'text-warning',
+    borderColor: '',
   },
 } as const;
 
 const statusLabels: Record<string, string> = {
-  delivered: "Delivered",
-  pending: "Waiting to send",
-  in_flight: "Sending...",
-  failed: "Failed",
-  dlq: "Gave up after 5 retries",
-  target_paused: "Paused (target degraded)",
+  delivered: 'Delivered',
+  pending: 'Waiting to send',
+  in_flight: 'Sending...',
+  failed: 'Failed',
+  dlq: 'Gave up after 5 retries',
+  target_paused: 'Paused (target degraded)',
 };
 
 export function ActivityCard({ entry }: ActivityCardProps) {
@@ -55,7 +55,7 @@ export function ActivityCard({ entry }: ActivityCardProps) {
   const queryClient = useQueryClient();
 
   // Route non-delivered problem states to the enhanced FailedDeliveryCard
-  if (entry.status === "failed" || entry.status === "dlq" || entry.status === "target_paused") {
+  if (entry.status === 'failed' || entry.status === 'dlq' || entry.status === 'target_paused') {
     return <FailedDeliveryCard entry={entry} />;
   }
 
@@ -63,48 +63,48 @@ export function ActivityCard({ entry }: ActivityCardProps) {
   const Icon = config.icon;
 
   const formatTime = (date: Date): string =>
-    date.toLocaleTimeString("en-US", {
+    date.toLocaleTimeString('en-US', {
       hour12: false,
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
     });
 
   const formatFullTimestamp = (date: Date): string =>
-    date.toLocaleString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
+    date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
       hour12: false,
     });
 
   const handleReplay = async () => {
     try {
-      await invoke("replay_delivery", {
+      await invoke('replay_delivery', {
         eventType: entry.sourceId,
         payload: entry.payload,
       });
-      await queryClient.invalidateQueries({ queryKey: ["deliveryQueue"] });
-      toast.success("Replay enqueued — will deliver within 5s");
-      logger.info("Delivery replayed", { id: entry.id, source: entry.sourceId });
+      await queryClient.invalidateQueries({ queryKey: ['deliveryQueue'] });
+      toast.success('Replay enqueued — will deliver within 5s');
+      logger.info('Delivery replayed', { id: entry.id, source: entry.sourceId });
     } catch (error) {
       toast.error(`Replay failed: ${error}`);
-      logger.error("Replay failed", { id: entry.id, error });
+      logger.error('Replay failed', { id: entry.id, error });
     }
   };
 
   const copyPayload = () => {
     const json = JSON.stringify(entry.payload, null, 2);
-    const textarea = document.createElement("textarea");
+    const textarea = document.createElement('textarea');
     textarea.value = json;
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
     document.body.appendChild(textarea);
     textarea.select();
-    const ok = document.execCommand("copy");
+    const ok = document.execCommand('copy');
     document.body.removeChild(textarea);
     if (ok) {
       setCopied(true);
@@ -114,19 +114,17 @@ export function ActivityCard({ entry }: ActivityCardProps) {
 
   const targetLabel = (targetType: string): string => {
     const labels: Record<string, string> = {
-      "google-sheets": "Google Sheets",
-      n8n: "n8n",
-      ntfy: "ntfy",
-      make: "Make",
-      zapier: "Zapier",
-      webhook: "Webhook",
+      'google-sheets': 'Google Sheets',
+      n8n: 'n8n',
+      ntfy: 'ntfy',
+      make: 'Make',
+      zapier: 'Zapier',
+      webhook: 'Webhook',
     };
     return labels[targetType] || targetType;
   };
 
-  const payloadJson = payloadExpanded
-    ? JSON.stringify(entry.payload, null, 2)
-    : "";
+  const payloadJson = payloadExpanded ? JSON.stringify(entry.payload, null, 2) : '';
 
   return (
     <div className={`${config.borderColor}`}>
@@ -138,12 +136,10 @@ export function ActivityCard({ entry }: ActivityCardProps) {
         <Icon size={14} className={`${config.color} shrink-0`} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium truncate">
-              {entry.source}
-            </span>
+            <span className="text-xs font-medium truncate">{entry.source}</span>
             {entry.deliveredTo && (
               <span
-                className={`text-[10px] truncate ${entry.deliveredTo.target_url ? "text-accent hover:underline cursor-pointer" : "text-text-secondary"}`}
+                className={`text-[10px] truncate ${entry.deliveredTo.target_url ? 'text-accent hover:underline cursor-pointer' : 'text-text-secondary'}`}
                 onClick={(e) => {
                   if (entry.deliveredTo?.target_url) {
                     e.stopPropagation();
@@ -157,14 +153,12 @@ export function ActivityCard({ entry }: ActivityCardProps) {
                 )}
               </span>
             )}
-            {entry.triggerType === "manual" && (
+            {entry.triggerType === 'manual' && (
               <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-accent/10 text-accent shrink-0">
                 Manual
               </span>
             )}
-            <span className={`text-[10px] ${config.color}`}>
-              {statusLabels[entry.status]}
-            </span>
+            <span className={`text-[10px] ${config.color}`}>{statusLabels[entry.status]}</span>
           </div>
           {entry.payloadSummary && (
             <div className="text-[10px] text-text-secondary truncate mt-0.5">
@@ -187,31 +181,33 @@ export function ActivityCard({ entry }: ActivityCardProps) {
         <div className="mx-3 mt-1 mb-2 p-3 bg-bg-primary rounded-md text-xs leading-relaxed">
           <div className="flex flex-col gap-1 text-text-secondary font-mono mb-3">
             <div>
-              <strong className="text-text-primary">Created:</strong>{" "}
+              <strong className="text-text-primary">Created:</strong>{' '}
               {formatFullTimestamp(entry.timestamp)}
             </div>
             {entry.deliveredAt && (
               <div>
-                <strong className="text-text-primary">Delivered:</strong>{" "}
+                <strong className="text-text-primary">Delivered:</strong>{' '}
                 {formatFullTimestamp(entry.deliveredAt)}
               </div>
             )}
             {entry.deliveredTo && (
               <div>
-                <strong className="text-text-primary">Target:</strong>{" "}
+                <strong className="text-text-primary">Target:</strong>{' '}
                 {entry.deliveredTo.target_url ? (
                   <span
                     className="text-accent hover:underline cursor-pointer"
                     onClick={(e) => {
                       e.stopPropagation();
-                      openUrl(entry.deliveredTo!.target_url!);
+                      openUrl(entry.deliveredTo?.target_url!);
                     }}
                   >
                     {entry.deliveredTo.endpoint_name} ({entry.deliveredTo.target_type})
                     <ExternalLink size={10} className="inline ml-1 -mt-0.5" />
                   </span>
                 ) : (
-                  <>{entry.deliveredTo.endpoint_name} ({entry.deliveredTo.target_type})</>
+                  <>
+                    {entry.deliveredTo.endpoint_name} ({entry.deliveredTo.target_type})
+                  </>
                 )}
               </div>
             )}
@@ -222,8 +218,7 @@ export function ActivityCard({ entry }: ActivityCardProps) {
             )}
             {entry.retryCount > 0 && (
               <div>
-                <strong className="text-text-primary">Retries:</strong>{" "}
-                {entry.retryCount}
+                <strong className="text-text-primary">Retries:</strong> {entry.retryCount}
               </div>
             )}
           </div>
@@ -239,7 +234,7 @@ export function ActivityCard({ entry }: ActivityCardProps) {
                   }}
                   className="text-[11px] font-medium text-accent hover:underline"
                 >
-                  {payloadExpanded ? "Hide Payload" : "View Payload"}
+                  {payloadExpanded ? 'Hide Payload' : 'View Payload'}
                 </button>
                 <button
                   onClick={(e) => {

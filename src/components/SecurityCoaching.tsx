@@ -1,4 +1,4 @@
-import { Shield, Lock, Unlock, AlertTriangle } from "lucide-react";
+import { AlertTriangle, Lock, Shield, Unlock } from 'lucide-react';
 
 interface SecurityCoachingProps {
   endpointUrl: string;
@@ -17,7 +17,7 @@ export function SecurityCoaching({
   onConfirm,
   onBack,
 }: SecurityCoachingProps) {
-  const isHttps = endpointUrl.toLowerCase().startsWith("https://");
+  const isHttps = endpointUrl.toLowerCase().startsWith('https://');
   const transportSecure = isHttps;
   const authSecure = authenticated;
 
@@ -41,8 +41,8 @@ export function SecurityCoaching({
               <>HTTPS encryption detected. Data will be encrypted in transit.</>
             ) : (
               <>
-                <span className="text-error">Warning:</span> HTTP connection
-                detected. Data will be sent unencrypted.
+                <span className="text-error">Warning:</span> HTTP connection detected. Data will be
+                sent unencrypted.
               </>
             )}
           </p>
@@ -61,13 +61,13 @@ export function SecurityCoaching({
           <p className="text-xs text-text-secondary ml-[22px]">
             {authSecure ? (
               <>
-                Authenticated endpoint ({authType || "unknown method"}). Only
-                authorized recipients can access data.
+                Authenticated endpoint ({authType || 'unknown method'}). Only authorized recipients
+                can access data.
               </>
             ) : (
               <>
-                <span className="text-warning">Advisory:</span> No
-                authentication configured. Anyone with the URL can receive data.
+                <span className="text-warning">Advisory:</span> No authentication configured. Anyone
+                with the URL can receive data.
               </>
             )}
           </p>
@@ -81,14 +81,14 @@ export function SecurityCoaching({
               <>This endpoint uses industry-standard security practices.</>
             ) : !transportSecure ? (
               <>
-                <strong className="text-error">Not recommended:</strong> Sending
-                sensitive data over HTTP exposes it to interception. Use HTTPS to
-                ensure your local data is encrypted during transit.
+                <strong className="text-error">Not recommended:</strong> Sending sensitive data over
+                HTTP exposes it to interception. Use HTTPS to ensure your local data is encrypted
+                during transit.
               </>
             ) : (
               <>
-                <strong className="text-warning">Caution:</strong> Ensure this
-                endpoint URL is kept private if it handles sensitive data.
+                <strong className="text-warning">Caution:</strong> Ensure this endpoint URL is kept
+                private if it handles sensitive data.
               </>
             )}
           </p>
@@ -106,7 +106,7 @@ export function SecurityCoaching({
           className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors"
           onClick={onConfirm}
         >
-          {isEditing ? "Save Changes" : "Confirm & Enable"}
+          {isEditing ? 'Save Changes' : 'Confirm & Enable'}
         </button>
       </div>
     </div>

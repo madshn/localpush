@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { Shield, Info } from "lucide-react";
-import { toast } from "sonner";
-import { useConnectCustom } from "../api/hooks/useTargets";
-import { logger } from "../utils/logger";
+import { Info, Shield } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { useConnectCustom } from '../api/hooks/useTargets';
+import { logger } from '../utils/logger';
 
 interface TargetInfo {
   id: string;
@@ -14,14 +14,14 @@ interface CustomConnectProps {
 }
 
 export function CustomConnect({ onConnected }: CustomConnectProps) {
-  const [name, setName] = useState("");
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [authType, setAuthType] = useState<string>("none");
-  const [authToken, setAuthToken] = useState("");
-  const [authHeaderName, setAuthHeaderName] = useState("");
-  const [authHeaderValue, setAuthHeaderValue] = useState("");
-  const [authUsername, setAuthUsername] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
+  const [name, setName] = useState('');
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [authType, setAuthType] = useState<string>('none');
+  const [authToken, setAuthToken] = useState('');
+  const [authHeaderName, setAuthHeaderName] = useState('');
+  const [authHeaderValue, setAuthHeaderValue] = useState('');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
 
   const connectMutation = useConnectCustom();
 
@@ -29,30 +29,32 @@ export function CustomConnect({ onConnected }: CustomConnectProps) {
     e.preventDefault();
 
     if (!name.trim() || !webhookUrl.trim()) {
-      logger.warn("Custom webhook connection attempt with missing fields");
-      toast.error("Name and webhook URL are required");
+      logger.warn('Custom webhook connection attempt with missing fields');
+      toast.error('Name and webhook URL are required');
       return;
     }
 
     // Validate URL format
-    if (!webhookUrl.startsWith("https://") &&
-        !webhookUrl.startsWith("http://localhost") &&
-        !webhookUrl.startsWith("http://127.0.0.1")) {
-      toast.error("Webhook URL must use HTTPS (HTTP allowed only for localhost)");
+    if (
+      !webhookUrl.startsWith('https://') &&
+      !webhookUrl.startsWith('http://localhost') &&
+      !webhookUrl.startsWith('http://127.0.0.1')
+    ) {
+      toast.error('Webhook URL must use HTTPS (HTTP allowed only for localhost)');
       return;
     }
 
     // Validate auth-specific fields
-    if (authType === "bearer" && !authToken.trim()) {
-      toast.error("Bearer token is required");
+    if (authType === 'bearer' && !authToken.trim()) {
+      toast.error('Bearer token is required');
       return;
     }
-    if (authType === "header" && (!authHeaderName.trim() || !authHeaderValue.trim())) {
-      toast.error("Header name and value are required");
+    if (authType === 'header' && (!authHeaderName.trim() || !authHeaderValue.trim())) {
+      toast.error('Header name and value are required');
       return;
     }
-    if (authType === "basic" && (!authUsername.trim() || !authPassword.trim())) {
-      toast.error("Username and password are required");
+    if (authType === 'basic' && (!authUsername.trim() || !authPassword.trim())) {
+      toast.error('Username and password are required');
       return;
     }
 
@@ -67,27 +69,27 @@ export function CustomConnect({ onConnected }: CustomConnectProps) {
         authUsername: authUsername || undefined,
         authPassword: authPassword || undefined,
       });
-      toast.success("Custom webhook connected successfully");
+      toast.success('Custom webhook connected successfully');
       onConnected(result);
 
       // Reset form
-      setName("");
-      setWebhookUrl("");
-      setAuthType("none");
-      setAuthToken("");
-      setAuthHeaderName("");
-      setAuthHeaderValue("");
-      setAuthUsername("");
-      setAuthPassword("");
+      setName('');
+      setWebhookUrl('');
+      setAuthType('none');
+      setAuthToken('');
+      setAuthHeaderName('');
+      setAuthHeaderValue('');
+      setAuthUsername('');
+      setAuthPassword('');
     } catch (error) {
-      logger.error("Custom webhook connection failed", { error });
-      const errorMessage = error instanceof Error ? error.message : "Connection failed";
+      logger.error('Custom webhook connection failed', { error });
+      const errorMessage = error instanceof Error ? error.message : 'Connection failed';
       toast.error(`Connection failed: ${errorMessage}`);
     }
   };
 
   const inputClass =
-    "w-full px-3 py-2 text-xs border border-border rounded-md bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent";
+    'w-full px-3 py-2 text-xs border border-border rounded-md bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent';
   const selectClass = inputClass;
 
   return (
@@ -155,7 +157,7 @@ export function CustomConnect({ onConnected }: CustomConnectProps) {
         </select>
       </div>
 
-      {authType === "bearer" && (
+      {authType === 'bearer' && (
         <div>
           <label
             htmlFor="custom-auth-token"
@@ -178,7 +180,7 @@ export function CustomConnect({ onConnected }: CustomConnectProps) {
         </div>
       )}
 
-      {authType === "header" && (
+      {authType === 'header' && (
         <>
           <div>
             <label
@@ -220,7 +222,7 @@ export function CustomConnect({ onConnected }: CustomConnectProps) {
         </>
       )}
 
-      {authType === "basic" && (
+      {authType === 'basic' && (
         <>
           <div>
             <label
@@ -265,15 +267,17 @@ export function CustomConnect({ onConnected }: CustomConnectProps) {
       <div className="flex gap-2.5 p-3 bg-accent/10 border border-accent/20 rounded-md">
         <Shield size={16} className="text-accent shrink-0 mt-0.5" />
         <p className="text-[11px] text-text-secondary leading-relaxed">
-          Connect any REST endpoint. LocalPush will POST JSON payloads with your configured authentication.
+          Connect any REST endpoint. LocalPush will POST JSON payloads with your configured
+          authentication.
         </p>
       </div>
 
-      {authType !== "none" && (
+      {authType !== 'none' && (
         <div className="flex gap-2.5 p-3 bg-warning-bg border border-warning/20 rounded-md">
           <Info size={16} className="text-warning shrink-0 mt-0.5" />
           <p className="text-[11px] text-text-secondary leading-relaxed">
-            Credentials are stored securely in your system keychain (macOS Keychain in production, file-based in dev).
+            Credentials are stored securely in your system keychain (macOS Keychain in production,
+            file-based in dev).
           </p>
         </div>
       )}
@@ -282,11 +286,9 @@ export function CustomConnect({ onConnected }: CustomConnectProps) {
         <button
           type="submit"
           className="text-xs font-medium px-4 py-2 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
-          disabled={
-            connectMutation.isPending || !name.trim() || !webhookUrl.trim()
-          }
+          disabled={connectMutation.isPending || !name.trim() || !webhookUrl.trim()}
         >
-          {connectMutation.isPending ? "Testing..." : "Test Connection"}
+          {connectMutation.isPending ? 'Testing...' : 'Test Connection'}
         </button>
       </div>
 
@@ -298,7 +300,7 @@ export function CustomConnect({ onConnected }: CustomConnectProps) {
 
       {connectMutation.isError && (
         <div className="text-xs text-error bg-error-bg border border-error/30 rounded-md p-2.5">
-          {connectMutation.error?.message || "Connection failed"}
+          {connectMutation.error?.message || 'Connection failed'}
         </div>
       )}
     </form>

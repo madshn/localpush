@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { Plus, X, Copy, Check } from "lucide-react";
-import { logger } from "../utils/logger";
+import { invoke } from '@tauri-apps/api/core';
+import { Check, Copy, Plus, X } from 'lucide-react';
+import { useState } from 'react';
+import { logger } from '../utils/logger';
 
-type DeliveryMode = "on_change" | "interval" | "daily" | "weekly";
+type DeliveryMode = 'on_change' | 'interval' | 'daily' | 'weekly';
 
 interface DeliveryConfigProps {
   sourceId: string;
@@ -24,7 +24,7 @@ interface DeliveryConfigProps {
     authHeaderValue: string,
     deliveryMode: DeliveryMode,
     scheduleTime: string | undefined,
-    scheduleDay: string | undefined
+    scheduleDay: string | undefined,
   ) => void;
   onBack: () => void;
   onUnbind?: () => void;
@@ -47,27 +47,27 @@ export function DeliveryConfig({
   onBack,
   onUnbind,
 }: DeliveryConfigProps) {
-  const [authName, setAuthName] = useState(initialAuthName || "Authorization");
-  const [authValue, setAuthValue] = useState(initialAuthValue || "");
-  const [headers, setHeaders] = useState<[string, string][]>(
-    initialHeaders || []
-  );
+  const [authName, setAuthName] = useState(initialAuthName || 'Authorization');
+  const [authValue, setAuthValue] = useState(initialAuthValue || '');
+  const [headers, setHeaders] = useState<[string, string][]>(initialHeaders || []);
   const [showHeaders, setShowHeaders] = useState(
-    (initialHeaders && initialHeaders.length > 0) || false
+    (initialHeaders && initialHeaders.length > 0) || false,
   );
   const [payloadCopied, setPayloadCopied] = useState(false);
   const [payloadLoading, setPayloadLoading] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>(initialDeliveryMode || "on_change");
-  const [scheduleTime, setScheduleTime] = useState(initialScheduleTime || "00:01");
-  const [scheduleDay, setScheduleDay] = useState(initialScheduleDay || "monday");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>(
+    initialDeliveryMode || 'on_change',
+  );
+  const [scheduleTime, setScheduleTime] = useState(initialScheduleTime || '00:01');
+  const [scheduleDay, setScheduleDay] = useState(initialScheduleDay || 'monday');
   const [intervalMinutes, setIntervalMinutes] = useState(
-    initialDeliveryMode === "interval" && initialScheduleTime
+    initialDeliveryMode === 'interval' && initialScheduleTime
       ? parseInt(initialScheduleTime, 10) || 15
-      : 15
+      : 15,
   );
 
   const addHeader = () => {
-    setHeaders([...headers, ["", ""]]);
+    setHeaders([...headers, ['', '']]);
   };
 
   const updateHeader = (index: number, field: 0 | 1, value: string) => {
@@ -82,39 +82,43 @@ export function DeliveryConfig({
   };
 
   const resolveScheduleTime = (): string | undefined => {
-    if (deliveryMode === "on_change") return undefined;
-    if (deliveryMode === "interval") return String(intervalMinutes);
+    if (deliveryMode === 'on_change') return undefined;
+    if (deliveryMode === 'interval') return String(intervalMinutes);
     return scheduleTime;
   };
 
   const handleConfirm = () => {
-    const nonEmptyHeaders = headers.filter(([k]) => k.trim() !== "");
+    const nonEmptyHeaders = headers.filter(([k]) => k.trim() !== '');
     onConfirm(
       nonEmptyHeaders,
       authName,
       authValue,
       deliveryMode,
       resolveScheduleTime(),
-      deliveryMode === "weekly" ? scheduleDay : undefined
+      deliveryMode === 'weekly' ? scheduleDay : undefined,
     );
   };
 
   const handleSkip = () => {
-    onConfirm([], "", "", deliveryMode,
+    onConfirm(
+      [],
+      '',
+      '',
+      deliveryMode,
       resolveScheduleTime(),
-      deliveryMode === "weekly" ? scheduleDay : undefined
+      deliveryMode === 'weekly' ? scheduleDay : undefined,
     );
   };
 
   const copyToClipboard = (text: string): boolean => {
     // Tauri webviews don't support navigator.clipboard — use execCommand fallback
-    const textarea = document.createElement("textarea");
+    const textarea = document.createElement('textarea');
     textarea.value = text;
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
     document.body.appendChild(textarea);
     textarea.select();
-    const ok = document.execCommand("copy");
+    const ok = document.execCommand('copy');
     document.body.removeChild(textarea);
     return ok;
   };
@@ -122,7 +126,7 @@ export function DeliveryConfig({
   const handleCopyPayload = async () => {
     setPayloadLoading(true);
     try {
-      const payload = await invoke<unknown>("get_source_sample_payload", {
+      const payload = await invoke<unknown>('get_source_sample_payload', {
         sourceId,
       });
       const json = JSON.stringify(payload, null, 2);
@@ -130,26 +134,26 @@ export function DeliveryConfig({
       if (ok) {
         setPayloadCopied(true);
         setTimeout(() => setPayloadCopied(false), 2000);
-        logger.info("Sample payload copied to clipboard", {
+        logger.info('Sample payload copied to clipboard', {
           sourceId,
           length: json.length,
         });
       } else {
-        logger.warn("execCommand copy returned false", { sourceId });
+        logger.warn('execCommand copy returned false', { sourceId });
       }
     } catch (error) {
-      logger.error("Failed to copy sample payload", { sourceId, error });
+      logger.error('Failed to copy sample payload', { sourceId, error });
     } finally {
       setPayloadLoading(false);
     }
   };
 
-  const oauthManaged = authType === "oauth2";
+  const oauthManaged = authType === 'oauth2';
   const authRequired = authenticated && !oauthManaged;
-  const canContinue = !authRequired || authValue.trim() !== "" || existingAuthConfigured;
+  const canContinue = !authRequired || authValue.trim() !== '' || existingAuthConfigured;
 
   const inputClass =
-    "w-full px-2 py-1.5 text-xs border border-border rounded bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent";
+    'w-full px-2 py-1.5 text-xs border border-border rounded bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent';
 
   return (
     <div className="bg-bg-secondary border border-border rounded-lg p-4">
@@ -158,9 +162,7 @@ export function DeliveryConfig({
       {/* Endpoint info */}
       <div className="px-3 py-2 bg-bg-primary rounded-md mb-3">
         <div className="text-xs font-medium">{endpointName}</div>
-        <div className="text-[10px] text-text-secondary font-mono">
-          {endpointUrl}
-        </div>
+        <div className="text-[10px] text-text-secondary font-mono">{endpointUrl}</div>
       </div>
 
       {/* Auth section */}
@@ -183,7 +185,7 @@ export function DeliveryConfig({
       {!oauthManaged && (
         <div className="mb-3">
           <label className="block text-xs font-medium mb-1.5">
-            {authRequired ? "Auth Header (required)" : "Auth Header (optional)"}
+            {authRequired ? 'Auth Header (required)' : 'Auth Header (optional)'}
           </label>
           <div className="flex gap-1.5 mb-1.5">
             <input
@@ -197,7 +199,11 @@ export function DeliveryConfig({
               type="password"
               value={authValue}
               onChange={(e) => setAuthValue(e.target.value)}
-              placeholder={existingAuthConfigured ? "Leave blank to keep existing token" : "Secret value (e.g. Bearer token...)"}
+              placeholder={
+                existingAuthConfigured
+                  ? 'Leave blank to keep existing token'
+                  : 'Secret value (e.g. Bearer token...)'
+              }
               className={inputClass}
             />
           </div>
@@ -213,7 +219,7 @@ export function DeliveryConfig({
           }}
           className="text-xs text-accent hover:underline"
         >
-          {showHeaders ? "Hide custom headers" : "Add custom headers"}
+          {showHeaders ? 'Hide custom headers' : 'Add custom headers'}
         </button>
 
         {showHeaders && (
@@ -254,17 +260,15 @@ export function DeliveryConfig({
 
       {/* Delivery mode */}
       <div className="mb-3">
-        <label className="block text-xs font-medium mb-1.5">
-          Delivery Mode
-        </label>
+        <label className="block text-xs font-medium mb-1.5">Delivery Mode</label>
         <div className="flex flex-col gap-1.5">
           <label className="flex items-start gap-2 cursor-pointer">
             <input
               type="radio"
               name="deliveryMode"
               value="on_change"
-              checked={deliveryMode === "on_change"}
-              onChange={() => setDeliveryMode("on_change")}
+              checked={deliveryMode === 'on_change'}
+              onChange={() => setDeliveryMode('on_change')}
               className="mt-0.5 accent-accent"
             />
             <div>
@@ -279,16 +283,14 @@ export function DeliveryConfig({
               type="radio"
               name="deliveryMode"
               value="interval"
-              checked={deliveryMode === "interval"}
-              onChange={() => setDeliveryMode("interval")}
+              checked={deliveryMode === 'interval'}
+              onChange={() => setDeliveryMode('interval')}
               className="mt-0.5 accent-accent"
             />
             <div className="flex-1">
               <div className="text-xs font-medium">Every x minutes</div>
-              <div className="text-[10px] text-text-secondary">
-                Push at a regular interval
-              </div>
-              {deliveryMode === "interval" && (
+              <div className="text-[10px] text-text-secondary">Push at a regular interval</div>
+              {deliveryMode === 'interval' && (
                 <div className="flex items-center gap-1.5 mt-1">
                   <span className="text-[10px] text-text-secondary">Every</span>
                   <select
@@ -312,8 +314,8 @@ export function DeliveryConfig({
               type="radio"
               name="deliveryMode"
               value="daily"
-              checked={deliveryMode === "daily"}
-              onChange={() => setDeliveryMode("daily")}
+              checked={deliveryMode === 'daily'}
+              onChange={() => setDeliveryMode('daily')}
               className="mt-0.5 accent-accent"
             />
             <div className="flex-1">
@@ -321,7 +323,7 @@ export function DeliveryConfig({
               <div className="text-[10px] text-text-secondary">
                 Push once per day at a scheduled time
               </div>
-              {deliveryMode === "daily" && (
+              {deliveryMode === 'daily' && (
                 <input
                   type="time"
                   value={scheduleTime}
@@ -336,8 +338,8 @@ export function DeliveryConfig({
               type="radio"
               name="deliveryMode"
               value="weekly"
-              checked={deliveryMode === "weekly"}
-              onChange={() => setDeliveryMode("weekly")}
+              checked={deliveryMode === 'weekly'}
+              onChange={() => setDeliveryMode('weekly')}
               className="mt-0.5 accent-accent"
             />
             <div className="flex-1">
@@ -345,7 +347,7 @@ export function DeliveryConfig({
               <div className="text-[10px] text-text-secondary">
                 Push once per week on a scheduled day and time
               </div>
-              {deliveryMode === "weekly" && (
+              {deliveryMode === 'weekly' && (
                 <div className="flex gap-1.5 mt-1">
                   <select
                     value={scheduleDay}
@@ -392,7 +394,7 @@ export function DeliveryConfig({
             ) : (
               <>
                 <Copy size={12} />
-                {payloadLoading ? "Loading..." : "Copy Sample Payload"}
+                {payloadLoading ? 'Loading...' : 'Copy Sample Payload'}
               </>
             )}
           </button>

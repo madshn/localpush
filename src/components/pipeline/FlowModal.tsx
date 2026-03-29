@@ -1,8 +1,8 @@
-import { TransparencyPreview } from "../TransparencyPreview";
-import { EndpointPicker } from "../EndpointPicker";
-import { DeliveryConfig } from "../DeliveryConfig";
-import { SecurityCoaching } from "../SecurityCoaching";
-import type { FlowState, DeliveryMode } from "./types";
+import { DeliveryConfig } from '../DeliveryConfig';
+import { EndpointPicker } from '../EndpointPicker';
+import { SecurityCoaching } from '../SecurityCoaching';
+import { TransparencyPreview } from '../TransparencyPreview';
+import type { DeliveryMode, FlowState } from './types';
 
 interface FlowModalProps {
   flowState: FlowState;
@@ -16,7 +16,7 @@ interface FlowModalProps {
     endpointUrl: string,
     endpointName: string,
     authenticated: boolean,
-    authType?: string
+    authType?: string,
   ) => void;
   onDeliveryConfigConfirm: (
     sourceId: string,
@@ -25,7 +25,7 @@ interface FlowModalProps {
     authHeaderValue: string,
     deliveryMode: DeliveryMode,
     scheduleTime: string | undefined,
-    scheduleDay: string | undefined
+    scheduleDay: string | undefined,
   ) => void;
   onSecurityConfirm: (sourceId: string) => void;
   onCancelFlow: (sourceId: string) => void;
@@ -47,7 +47,7 @@ export function FlowModal({
   onBackToDeliveryConfig,
   onUnbind,
 }: FlowModalProps) {
-  if (flowState.step === "idle") return null;
+  if (flowState.step === 'idle') return null;
 
   const sourceId = flowState.sourceId;
 
@@ -63,7 +63,7 @@ export function FlowModal({
 
       {/* Content */}
       <div className="relative w-full max-w-md max-h-[80vh] overflow-y-auto rounded-xl bg-bg-primary border border-border shadow-2xl p-4">
-        {flowState.step === "preview" && flowState.preview && (
+        {flowState.step === 'preview' && flowState.preview && (
           <TransparencyPreview
             sourceId={sourceId}
             preview={flowState.preview}
@@ -73,16 +73,9 @@ export function FlowModal({
           />
         )}
 
-        {flowState.step === "pick_endpoint" && (
+        {flowState.step === 'pick_endpoint' && (
           <EndpointPicker
-            onSelect={(
-              targetId,
-              endpointId,
-              endpointUrl,
-              endpointName,
-              authenticated,
-              authType
-            ) =>
+            onSelect={(targetId, endpointId, endpointUrl, endpointName, authenticated, authType) =>
               onEndpointSelect(
                 sourceId,
                 targetId,
@@ -90,14 +83,14 @@ export function FlowModal({
                 endpointUrl,
                 endpointName,
                 authenticated,
-                authType
+                authType,
               )
             }
             onCancel={() => onCancelFlow(sourceId)}
           />
         )}
 
-        {flowState.step === "configure_delivery" &&
+        {flowState.step === 'configure_delivery' &&
           flowState.selectedEndpointUrl &&
           flowState.selectedEndpointName && (
             <DeliveryConfig
@@ -108,9 +101,7 @@ export function FlowModal({
               authType={flowState.selectedAuthType || undefined}
               existingAuthConfigured={!!flowState.existingAuthCredentialKey}
               initialHeaders={
-                flowState.customHeaders.length > 0
-                  ? flowState.customHeaders
-                  : undefined
+                flowState.customHeaders.length > 0 ? flowState.customHeaders : undefined
               }
               initialAuthName={flowState.authHeaderName || undefined}
               initialAuthValue={flowState.authHeaderValue || undefined}
@@ -123,7 +114,7 @@ export function FlowModal({
                 authHeaderValue,
                 deliveryMode,
                 scheduleTime,
-                scheduleDay
+                scheduleDay,
               ) =>
                 onDeliveryConfigConfirm(
                   sourceId,
@@ -132,13 +123,11 @@ export function FlowModal({
                   authHeaderValue,
                   deliveryMode,
                   scheduleTime,
-                  scheduleDay
+                  scheduleDay,
                 )
               }
               onBack={() =>
-                flowState.isEditing
-                  ? onCancelFlow(sourceId)
-                  : onBackToEndpointPicker(sourceId)
+                flowState.isEditing ? onCancelFlow(sourceId) : onBackToEndpointPicker(sourceId)
               }
               onUnbind={
                 flowState.isEditing && flowState.selectedEndpoint
@@ -148,7 +137,7 @@ export function FlowModal({
             />
           )}
 
-        {flowState.step === "security_check" &&
+        {flowState.step === 'security_check' &&
           flowState.selectedEndpointUrl &&
           flowState.selectedEndpointName && (
             <SecurityCoaching

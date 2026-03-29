@@ -1,26 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Loader2 } from "lucide-react";
-import { useSources } from "../api/hooks/useSources";
+import { useQueryClient } from '@tanstack/react-query';
+import { Loader2, Plus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  type Binding,
   useAllBindings,
   useCreateBinding,
   useRemoveBinding,
-  type Binding,
-} from "../api/hooks/useBindings";
-import { useTargetHealth } from "../api/hooks/useTargets";
-import { SummaryStats } from "./SummaryStats";
-import { PipelineCard } from "./PipelineCard";
-import { formatNextPushLabel, getNextPushBySource } from "./pipeline/scheduling";
-import { usePipelineFlow } from "./pipeline/usePipelineFlow";
-import type {
-  SourceData,
-  SourceWithCategory,
-} from "./pipeline/types";
+} from '../api/hooks/useBindings';
+import { useSources } from '../api/hooks/useSources';
+import { useTargetHealth } from '../api/hooks/useTargets';
+import { PipelineCard } from './PipelineCard';
+import { formatNextPushLabel, getNextPushBySource } from './pipeline/scheduling';
+import type { SourceData, SourceWithCategory } from './pipeline/types';
+import { usePipelineFlow } from './pipeline/usePipelineFlow';
+import { SummaryStats } from './SummaryStats';
 
 function categorizeAndSortSources(
   sources: SourceData[],
-  allBindings: Binding[] | undefined
+  allBindings: Binding[] | undefined,
 ): {
   active: SourceWithCategory[];
   paused: SourceWithCategory[];
@@ -42,11 +39,11 @@ function categorizeAndSortSources(
   for (const source of sources) {
     const sourceBindings = bindingsBySource.get(source.id) || [];
     if (source.enabled && sourceBindings.length > 0) {
-      active.push({ source, category: "active" });
+      active.push({ source, category: 'active' });
     } else if (source.enabled) {
-      paused.push({ source, category: "paused" });
+      paused.push({ source, category: 'paused' });
     } else {
-      available.push({ source, category: "available" });
+      available.push({ source, category: 'available' });
     }
   }
 
@@ -93,25 +90,28 @@ export function PipelineView() {
 
   const nextPushBySource = useMemo(
     () => getNextPushBySource(allBindings || [], scheduleNowMs),
-    [allBindings, scheduleNowMs]
+    [allBindings, scheduleNowMs],
   );
 
   if (isLoading) {
     const step = sourcesLoading ? 0 : 1;
-    const steps = ["Loading pipelines", "Checking queues", "Validating connections"];
+    const steps = ['Loading pipelines', 'Checking queues', 'Validating connections'];
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
         <Loader2 size={24} className="text-accent animate-spin" />
         <div className="flex flex-col items-center gap-2">
           {steps.map((label, i) => (
             <div key={label} className="flex items-center gap-2">
-              <div className={`w-1.5 h-1.5 rounded-full ${
-                i < step ? "bg-success" : i === step ? "bg-accent animate-pulse" : "bg-border"
-              }`} />
-              <span className={`text-xs ${
-                i <= step ? "text-text-primary" : "text-text-secondary/50"
-              }`}>
-                {label}{i === step ? "..." : ""}
+              <div
+                className={`w-1.5 h-1.5 rounded-full ${
+                  i < step ? 'bg-success' : i === step ? 'bg-accent animate-pulse' : 'bg-border'
+                }`}
+              />
+              <span
+                className={`text-xs ${i <= step ? 'text-text-primary' : 'text-text-secondary/50'}`}
+              >
+                {label}
+                {i === step ? '...' : ''}
               </span>
             </div>
           ))}
@@ -133,9 +133,7 @@ export function PipelineView() {
         <SummaryStats />
         <div className="text-center py-12">
           <Plus size={32} className="mx-auto mb-3 text-text-secondary/40" />
-          <p className="text-sm text-text-secondary mb-1">
-            No sources configured
-          </p>
+          <p className="text-sm text-text-secondary mb-1">No sources configured</p>
           <p className="text-xs text-text-secondary/60">
             Enable your first source to start pushing data.
           </p>
@@ -144,10 +142,7 @@ export function PipelineView() {
     );
   }
 
-  const { active, paused, available } = categorizeAndSortSources(
-    sources,
-    allBindings
-  );
+  const { active, paused, available } = categorizeAndSortSources(sources, allBindings);
 
   const renderCard = ({ source, category }: SourceWithCategory) => (
     <PipelineCard
@@ -159,10 +154,7 @@ export function PipelineView() {
       flowState={flow.getFlowState(source.id)}
       nextPushLabel={formatNextPushLabel(nextPushBySource.get(source.id), scheduleNowMs)}
       previewLoading={flow.previewLoading[source.id] || false}
-      trafficLightStatus={flow.getTrafficLightStatus(
-        source.id,
-        source.enabled
-      )}
+      trafficLightStatus={flow.getTrafficLightStatus(source.id, source.enabled)}
       onEnableClick={flow.handleEnableClick}
       onPreviewEnable={flow.handlePreviewEnable}
       onPreviewRefresh={flow.handlePreviewRefresh}
@@ -196,9 +188,7 @@ export function PipelineView() {
             <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
               Active Pipelines
             </h2>
-            <span className="text-[10px] text-text-secondary/60">
-              {active.length}
-            </span>
+            <span className="text-[10px] text-text-secondary/60">{active.length}</span>
           </div>
           <div className="flex flex-col gap-3">{active.map(renderCard)}</div>
         </div>
@@ -211,9 +201,7 @@ export function PipelineView() {
             <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
               Paused
             </h2>
-            <span className="text-[10px] text-text-secondary/60">
-              {paused.length}
-            </span>
+            <span className="text-[10px] text-text-secondary/60">{paused.length}</span>
           </div>
           <div className="flex flex-col gap-3">{paused.map(renderCard)}</div>
         </div>
@@ -225,22 +213,16 @@ export function PipelineView() {
             <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
               Available Sources
             </h2>
-            <span className="text-[10px] text-text-secondary/60">
-              {available.length}
-            </span>
+            <span className="text-[10px] text-text-secondary/60">{available.length}</span>
           </div>
-          <div className="flex flex-col gap-3">
-            {available.map(renderCard)}
-          </div>
+          <div className="flex flex-col gap-3">{available.map(renderCard)}</div>
         </div>
       )}
 
       {active.length === 0 && paused.length === 0 && available.length === 0 && (
         <div className="text-center py-12">
           <Plus size={32} className="mx-auto mb-3 text-text-secondary/40" />
-          <p className="text-sm text-text-secondary mb-1">
-            No sources configured
-          </p>
+          <p className="text-sm text-text-secondary mb-1">No sources configured</p>
           <p className="text-xs text-text-secondary/60">
             Enable your first source to start pushing data.
           </p>

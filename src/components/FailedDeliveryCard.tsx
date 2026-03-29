@@ -1,21 +1,18 @@
-import { useState } from "react";
 import {
   AlertTriangle,
-  Skull,
   ChevronDown,
   ChevronRight,
-  RotateCcw,
-  Trash2,
   ExternalLink,
-} from "lucide-react";
-import type { ActivityEntry } from "../api/hooks/useActivityLog";
-import {
-  useErrorDiagnosis,
-  useRetryHistory,
-} from "../api/hooks/useErrorDiagnosis";
-import { useDismissDlq, useReplayDelivery } from "../api/hooks/useDlqActions";
-import { ReplayConfirmDialog } from "./ReplayConfirmDialog";
-import { openUrl } from "../utils/openUrl";
+  RotateCcw,
+  Skull,
+  Trash2,
+} from 'lucide-react';
+import { useState } from 'react';
+import type { ActivityEntry } from '../api/hooks/useActivityLog';
+import { useDismissDlq, useReplayDelivery } from '../api/hooks/useDlqActions';
+import { useErrorDiagnosis, useRetryHistory } from '../api/hooks/useErrorDiagnosis';
+import { openUrl } from '../utils/openUrl';
+import { ReplayConfirmDialog } from './ReplayConfirmDialog';
 
 interface FailedDeliveryCardProps {
   entry: ActivityEntry;
@@ -24,21 +21,21 @@ interface FailedDeliveryCardProps {
 const statusConfig = {
   failed: {
     icon: AlertTriangle,
-    color: "text-error",
-    borderColor: "border-l-2 border-l-error",
-    label: "Failed",
+    color: 'text-error',
+    borderColor: 'border-l-2 border-l-error',
+    label: 'Failed',
   },
   dlq: {
     icon: Skull,
-    color: "text-error",
-    borderColor: "border-l-2 border-l-error",
-    label: "Gave up after 5 retries",
+    color: 'text-error',
+    borderColor: 'border-l-2 border-l-error',
+    label: 'Gave up after 5 retries',
   },
   target_paused: {
     icon: AlertTriangle,
-    color: "text-warning",
-    borderColor: "border-l-2 border-l-warning",
-    label: "Paused (target degraded)",
+    color: 'text-warning',
+    borderColor: 'border-l-2 border-l-warning',
+    label: 'Paused (target degraded)',
   },
 } as const;
 
@@ -46,47 +43,43 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showReplayDialog, setShowReplayDialog] = useState(false);
 
-  const { data: diagnosis } = useErrorDiagnosis(
-    expanded ? entry.id : null
-  );
-  const { data: retryHistory } = useRetryHistory(
-    expanded ? entry.id : null
-  );
+  const { data: diagnosis } = useErrorDiagnosis(expanded ? entry.id : null);
+  const { data: retryHistory } = useRetryHistory(expanded ? entry.id : null);
 
   const dismissMutation = useDismissDlq();
   const replayMutation = useReplayDelivery();
 
-  const config = statusConfig[entry.status as "failed" | "dlq" | "target_paused"];
+  const config = statusConfig[entry.status as 'failed' | 'dlq' | 'target_paused'];
   const Icon = config.icon;
 
   const targetLabel = (targetType: string): string => {
     const labels: Record<string, string> = {
-      "google-sheets": "Google Sheets",
-      n8n: "n8n",
-      ntfy: "ntfy",
-      make: "Make",
-      zapier: "Zapier",
-      webhook: "Webhook",
+      'google-sheets': 'Google Sheets',
+      n8n: 'n8n',
+      ntfy: 'ntfy',
+      make: 'Make',
+      zapier: 'Zapier',
+      webhook: 'Webhook',
     };
     return labels[targetType] || targetType;
   };
 
   const formatTime = (date: Date): string =>
-    date.toLocaleTimeString("en-US", {
+    date.toLocaleTimeString('en-US', {
       hour12: false,
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
     });
 
   const formatFullTimestamp = (date: Date): string =>
-    date.toLocaleString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
+    date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
       hour12: false,
     });
 
@@ -119,12 +112,10 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
           <Icon size={14} className={`${config.color} shrink-0`} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium truncate">
-                {entry.source}
-              </span>
+              <span className="text-xs font-medium truncate">{entry.source}</span>
               {entry.deliveredTo && (
                 <span
-                  className={`text-[10px] truncate ${entry.deliveredTo.target_url ? "text-accent hover:underline cursor-pointer" : "text-text-secondary"}`}
+                  className={`text-[10px] truncate ${entry.deliveredTo.target_url ? 'text-accent hover:underline cursor-pointer' : 'text-text-secondary'}`}
                   onClick={(e) => {
                     if (entry.deliveredTo?.target_url) {
                       e.stopPropagation();
@@ -138,14 +129,12 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
                   )}
                 </span>
               )}
-              {entry.triggerType === "manual" && (
+              {entry.triggerType === 'manual' && (
                 <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-accent/10 text-accent shrink-0">
                   Manual
                 </span>
               )}
-              <span className={`text-[10px] ${config.color}`}>
-                {config.label}
-              </span>
+              <span className={`text-[10px] ${config.color}`}>{config.label}</span>
             </div>
             {entry.payloadSummary && (
               <div className="text-[10px] text-text-secondary truncate mt-0.5">
@@ -173,27 +162,19 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
                   <h4 className="text-[11px] font-semibold text-text-primary mb-1.5">
                     What happened
                   </h4>
-                  <p className="text-text-secondary leading-relaxed">
-                    {diagnosis.user_message}
-                  </p>
+                  <p className="text-text-secondary leading-relaxed">{diagnosis.user_message}</p>
                 </div>
 
                 {/* What to do */}
                 <div className="mb-3">
-                  <h4 className="text-[11px] font-semibold text-text-primary mb-1.5">
-                    What to do
-                  </h4>
-                  <p className="text-text-secondary leading-relaxed">
-                    {diagnosis.guidance}
-                  </p>
+                  <h4 className="text-[11px] font-semibold text-text-primary mb-1.5">What to do</h4>
+                  <p className="text-text-secondary leading-relaxed">{diagnosis.guidance}</p>
                 </div>
 
                 {/* What's at risk (if present) */}
                 {diagnosis.risk_summary && (
                   <div className="mb-3 p-2 bg-warning-bg border border-warning/20 rounded">
-                    <h4 className="text-[11px] font-semibold text-warning mb-1">
-                      What's at risk
-                    </h4>
+                    <h4 className="text-[11px] font-semibold text-warning mb-1">What's at risk</h4>
                     <p className="text-[11px] text-text-secondary leading-relaxed">
                       {diagnosis.risk_summary}
                     </p>
@@ -203,9 +184,7 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
                 {/* Timeline (if retry history available) */}
                 {retryHistory && retryHistory.length > 0 && (
                   <div className="mb-3 border-t border-border pt-3">
-                    <h4 className="text-[11px] font-semibold text-text-primary mb-2">
-                      Timeline
-                    </h4>
+                    <h4 className="text-[11px] font-semibold text-text-primary mb-2">Timeline</h4>
                     <div className="space-y-1.5">
                       {retryHistory.map((attempt) => (
                         <div
@@ -216,21 +195,17 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
                             {formatTimestampFromUnix(attempt.at)}
                           </span>
                           <span className="text-text-secondary">
-                            {attempt.attempt === 0
-                              ? "First attempt"
-                              : `Retry ${attempt.attempt}/5`}{" "}
+                            {attempt.attempt === 0 ? 'First attempt' : `Retry ${attempt.attempt}/5`}{' '}
                             — {attempt.error}
                           </span>
                         </div>
                       ))}
-                      {entry.status === "dlq" && (
+                      {entry.status === 'dlq' && (
                         <div className="flex items-start gap-2 text-[10px] font-mono">
                           <span className="text-text-secondary min-w-[140px]">
                             {formatFullTimestamp(entry.timestamp)}
                           </span>
-                          <span className="text-error font-medium">
-                            Moved to dead letter queue
-                          </span>
+                          <span className="text-error font-medium">Moved to dead letter queue</span>
                         </div>
                       )}
                     </div>
@@ -240,7 +215,7 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
             ) : (
               // Fallback to raw error if diagnosis not available
               <div className="text-error text-xs">
-                <strong>Error:</strong> {entry.error || "Unknown error"}
+                <strong>Error:</strong> {entry.error || 'Unknown error'}
               </div>
             )}
 
@@ -255,7 +230,7 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
                 className="flex items-center gap-1.5 text-[11px] font-medium text-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RotateCcw size={12} />
-                {replayMutation.isPending ? "Replaying..." : "Replay"}
+                {replayMutation.isPending ? 'Replaying...' : 'Replay'}
               </button>
               <button
                 onClick={(e) => {
@@ -266,7 +241,7 @@ export function FailedDeliveryCard({ entry }: FailedDeliveryCardProps) {
                 className="flex items-center gap-1.5 text-[11px] font-medium text-text-secondary hover:text-text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Trash2 size={12} />
-                {dismissMutation.isPending ? "Dismissing..." : "Dismiss"}
+                {dismissMutation.isPending ? 'Dismissing...' : 'Dismiss'}
               </button>
             </div>
           </div>

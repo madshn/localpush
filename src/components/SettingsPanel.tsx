@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { Info } from "lucide-react";
-import { TargetSetup } from "./TargetSetup";
+import { invoke } from '@tauri-apps/api/core';
+import { Info } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { TargetSetup } from './TargetSetup';
 
 interface AppInfo {
   version: string;
@@ -16,21 +16,17 @@ export function SettingsPanel() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const autoUpdateSetting = await invoke<string | null>("get_setting", {
-          key: "auto_update",
+        const autoUpdateSetting = await invoke<string | null>('get_setting', {
+          key: 'auto_update',
         });
-        setAutoUpdate(autoUpdateSetting !== "false");
-      } catch (error) {
-        console.error("Failed to load auto-update setting:", error);
-      }
+        setAutoUpdate(autoUpdateSetting !== 'false');
+      } catch (_error) {}
     };
     const loadAppInfo = async () => {
       try {
-        const info = await invoke<AppInfo>("get_app_info");
+        const info = await invoke<AppInfo>('get_app_info');
         setAppInfo(info);
-      } catch (error) {
-        console.error("Failed to load app info:", error);
-      }
+      } catch (_error) {}
     };
     loadSettings();
     loadAppInfo();
@@ -39,13 +35,11 @@ export function SettingsPanel() {
   const handleAutoUpdateChange = async (checked: boolean) => {
     setAutoUpdate(checked);
     try {
-      await invoke("set_setting", {
-        key: "auto_update",
-        value: checked ? "true" : "false",
+      await invoke('set_setting', {
+        key: 'auto_update',
+        value: checked ? 'true' : 'false',
       });
-    } catch (error) {
-      console.error("Failed to save auto-update setting:", error);
-    }
+    } catch (_error) {}
   };
 
   return (
@@ -74,30 +68,22 @@ export function SettingsPanel() {
         <div className="text-xs text-text-secondary space-y-1">
           <div className="flex justify-between">
             <span>Version</span>
-            <span className="font-mono text-text-primary">
-              {appInfo?.version ?? "..."}
-            </span>
+            <span className="font-mono text-text-primary">{appInfo?.version ?? '...'}</span>
           </div>
           <div className="flex justify-between">
             <span>Build</span>
-            <span className="font-mono text-text-primary">
-              {appInfo?.build_number ?? "..."}
-            </span>
+            <span className="font-mono text-text-primary">{appInfo?.build_number ?? '...'}</span>
           </div>
           <div className="flex justify-between">
             <span>Channel</span>
-            <span className="font-mono text-text-primary">
-              {appInfo?.build_profile ?? "..."}
-            </span>
+            <span className="font-mono text-text-primary">{appInfo?.build_profile ?? '...'}</span>
           </div>
           <div className="pt-2 mt-2 border-t border-border">
             <button
               onClick={async () => {
                 try {
-                  await invoke("open_feedback");
-                } catch (error) {
-                  console.error("Failed to open feedback page:", error);
-                }
+                  await invoke('open_feedback');
+                } catch (_error) {}
               }}
               className="text-accent hover:underline cursor-pointer text-left bg-transparent border-0 p-0 font-inherit"
             >

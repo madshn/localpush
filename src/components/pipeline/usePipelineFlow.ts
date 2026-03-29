@@ -1,19 +1,18 @@
-import { useState, useRef, useCallback, startTransition } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { toast } from "sonner";
-import type { QueryClient } from "@tanstack/react-query";
-import type { UseMutationResult } from "@tanstack/react-query";
-import { useSourceStatusCounts } from "../../api/hooks/useDeliveryQueue";
-import { logger } from "../../utils/logger";
+import type { QueryClient, UseMutationResult } from '@tanstack/react-query';
+import { invoke } from '@tauri-apps/api/core';
+import { startTransition, useCallback, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import type { Binding } from '../../api/hooks/useBindings';
+import { useSourceStatusCounts } from '../../api/hooks/useDeliveryQueue';
+import { logger } from '../../utils/logger';
 import type {
-  FlowState,
   DeliveryMode,
-  SourcePreview,
+  FlowState,
   SourceData,
+  SourcePreview,
   TrafficLightStatus,
-} from "./types";
-import { defaultFlowState } from "./types";
-import type { Binding } from "../../api/hooks/useBindings";
+} from './types';
+import { defaultFlowState } from './types';
 
 interface CreateBindingParams {
   sourceId: string;
@@ -51,9 +50,7 @@ export function usePipelineFlow({
   removeBinding,
 }: UsePipelineFlowProps) {
   const [flowStates, setFlowStates] = useState<Record<string, FlowState>>({});
-  const [previewLoading, setPreviewLoading] = useState<
-    Record<string, boolean>
-  >({});
+  const [previewLoading, setPreviewLoading] = useState<Record<string, boolean>>({});
   const [pushingSource, setPushingSource] = useState<string | null>(null);
   const [isConfirming, setIsConfirming] = useState<string | null>(null);
   const [isEnabling, setIsEnabling] = useState<string | null>(null);
@@ -70,7 +67,7 @@ export function usePipelineFlow({
       idleFlowStatesRef.current[sourceId] = created;
       return created;
     },
-    [flowStates]
+    [flowStates],
   );
 
   const updateFlowState = (sourceId: string, updates: Partial<FlowState>) => {
@@ -92,15 +89,15 @@ export function usePipelineFlow({
   };
 
   const handleDisable = async (sourceId: string) => {
-    logger.debug("Disabling source", { sourceId });
+    logger.debug('Disabling source', { sourceId });
     setIsDisabling(sourceId);
     try {
-      await invoke("disable_source", { sourceId });
-      await queryClient.invalidateQueries({ queryKey: ["sources"] });
+      await invoke('disable_source', { sourceId });
+      await queryClient.invalidateQueries({ queryKey: ['sources'] });
       resetFlowState(sourceId);
-      logger.info("Source disabled", { sourceId });
+      logger.info('Source disabled', { sourceId });
     } catch (error) {
-      logger.error("Failed to disable source", { sourceId, error });
+      logger.error('Failed to disable source', { sourceId, error });
       toast.error(`Failed to disable source: ${error}`);
     } finally {
       setIsDisabling(null);
@@ -108,30 +105,29 @@ export function usePipelineFlow({
   };
 
   const handleEnableClick = async (sourceId: string, isEnabled: boolean) => {
-    logger.debug("Enable click", { sourceId, isEnabled });
+    logger.debug('Enable click', { sourceId, isEnabled });
     if (isEnabled) {
-      handleDisable(sourceId);
+      await handleDisable(sourceId);
     } else {
-      const existingBindings =
-        allBindings?.filter((b) => b.source_id === sourceId) || [];
+      const existingBindings = allBindings?.filter((b) => b.source_id === sourceId) || [];
       if (existingBindings.length > 0) {
         setIsEnabling(sourceId);
         try {
-          await invoke("enable_source", { sourceId });
-          await queryClient.invalidateQueries({ queryKey: ["sources"] });
-          toast.success("Source re-enabled");
-          logger.info("Source re-enabled with existing bindings", {
+          await invoke('enable_source', { sourceId });
+          await queryClient.invalidateQueries({ queryKey: ['sources'] });
+          toast.success('Source re-enabled');
+          logger.info('Source re-enabled with existing bindings', {
             sourceId,
             bindingCount: existingBindings.length,
           });
         } catch (error) {
-          logger.error("Failed to re-enable source", { sourceId, error });
+          logger.error('Failed to re-enable source', { sourceId, error });
           toast.error(`Failed to enable source: ${error}`);
         } finally {
           setIsEnabling(null);
         }
       } else {
-        updateFlowState(sourceId, { step: "preview" });
+        updateFlowState(sourceId, { step: 'preview' });
         await loadPreview(sourceId);
       }
     }
@@ -140,12 +136,12 @@ export function usePipelineFlow({
   const loadPreview = async (sourceId: string) => {
     setPreviewLoading((prev) => ({ ...prev, [sourceId]: true }));
     try {
-      const data = await invoke<SourcePreview>("get_source_preview", {
+      const data = await invoke<SourcePreview>('get_source_preview', {
         sourceId,
       });
       updateFlowState(sourceId, { preview: data });
     } catch (error) {
-      logger.error("Failed to load preview", { sourceId, error });
+      logger.error('Failed to load preview', { sourceId, error });
       toast.error(`Failed to load preview: ${error}`);
       resetFlowState(sourceId);
     } finally {
@@ -154,7 +150,7 @@ export function usePipelineFlow({
   };
 
   const handlePreviewEnable = (sourceId: string) => {
-    updateFlowState(sourceId, { step: "pick_endpoint" });
+    updateFlowState(sourceId, { step: 'pick_endpoint' });
   };
 
   const handlePreviewRefresh = async (sourceId: string) => {
@@ -168,10 +164,10 @@ export function usePipelineFlow({
     endpointUrl: string,
     endpointName: string,
     authenticated: boolean,
-    authType?: string
+    authType?: string,
   ) => {
     updateFlowState(sourceId, {
-      step: "configure_delivery",
+      step: 'configure_delivery',
       selectedTarget: targetId,
       selectedEndpoint: endpointId,
       selectedEndpointUrl: endpointUrl,
@@ -188,10 +184,10 @@ export function usePipelineFlow({
     authHeaderValue: string,
     deliveryMode: DeliveryMode,
     scheduleTime: string | undefined,
-    scheduleDay: string | undefined
+    scheduleDay: string | undefined,
   ) => {
     updateFlowState(sourceId, {
-      step: "security_check",
+      step: 'security_check',
       customHeaders,
       authHeaderName,
       authHeaderValue,
@@ -202,39 +198,39 @@ export function usePipelineFlow({
   };
 
   const handleBackToDeliveryConfig = (sourceId: string) => {
-    updateFlowState(sourceId, { step: "configure_delivery" });
+    updateFlowState(sourceId, { step: 'configure_delivery' });
   };
 
   const handleAddTarget = (sourceId: string) => {
-    logger.info("Add Target flow started", { sourceId });
+    logger.info('Add Target flow started', { sourceId });
     // Reset to clean state to avoid stale fields from prior flows
     resetFlowState(sourceId);
-    updateFlowState(sourceId, { step: "pick_endpoint" });
+    updateFlowState(sourceId, { step: 'pick_endpoint' });
   };
 
   const handleEditBinding = (sourceId: string, endpointId: string) => {
-    logger.info("Edit binding started", { sourceId, endpointId });
+    logger.info('Edit binding started', { sourceId, endpointId });
     const binding = allBindings?.find(
-      (b) => b.source_id === sourceId && b.endpoint_id === endpointId
+      (b) => b.source_id === sourceId && b.endpoint_id === endpointId,
     );
     if (!binding) {
-      logger.error("Binding not found for editing", { sourceId, endpointId });
+      logger.error('Binding not found for editing', { sourceId, endpointId });
       return;
     }
 
     let existingHeaders: [string, string][] = [];
-    let existingAuthName = "";
-    const existingAuthValue = "";
+    let existingAuthName = '';
+    const existingAuthValue = '';
     if (binding.headers_json) {
       try {
         const parsed: [string, string][] = JSON.parse(binding.headers_json);
-        const authHeader = parsed.find(([, v]) => v === "");
+        const authHeader = parsed.find(([, v]) => v === '');
         if (authHeader) {
           existingAuthName = authHeader[0];
         }
-        existingHeaders = parsed.filter(([, v]) => v !== "");
+        existingHeaders = parsed.filter(([, v]) => v !== '');
       } catch {
-        logger.warn("Failed to parse binding headers_json", {
+        logger.warn('Failed to parse binding headers_json', {
           sourceId,
           endpointId,
         });
@@ -242,19 +238,19 @@ export function usePipelineFlow({
     }
 
     updateFlowState(sourceId, {
-      step: "configure_delivery",
+      step: 'configure_delivery',
       selectedTarget: binding.target_id,
       selectedEndpoint: binding.endpoint_id,
       selectedEndpointUrl: binding.endpoint_url,
       selectedEndpointName: binding.endpoint_name,
       selectedAuthenticated: !!binding.auth_credential_key,
-      selectedAuthType: binding.auth_credential_key ? "custom" : null,
+      selectedAuthType: binding.auth_credential_key ? 'custom' : null,
       customHeaders: existingHeaders,
       authHeaderName: existingAuthName,
       authHeaderValue: existingAuthValue,
       isEditing: true,
       existingAuthCredentialKey: binding.auth_credential_key || null,
-      deliveryMode: (binding.delivery_mode || "on_change") as DeliveryMode,
+      deliveryMode: (binding.delivery_mode || 'on_change') as DeliveryMode,
       scheduleTime: binding.schedule_time || undefined,
       scheduleDay: binding.schedule_day || undefined,
     });
@@ -268,7 +264,7 @@ export function usePipelineFlow({
       !state.selectedEndpointUrl ||
       !state.selectedEndpointName
     ) {
-      logger.error("Security confirm aborted — missing flow state", {
+      logger.error('Security confirm aborted — missing flow state', {
         sourceId,
         hasTarget: !!state.selectedTarget,
         hasEndpoint: !!state.selectedEndpoint,
@@ -276,7 +272,7 @@ export function usePipelineFlow({
         hasName: !!state.selectedEndpointName,
         step: state.step,
       });
-      toast.error("Something went wrong. Please try again.");
+      toast.error('Something went wrong. Please try again.');
       resetFlowState(sourceId);
       return;
     }
@@ -298,40 +294,38 @@ export function usePipelineFlow({
         endpointId: state.selectedEndpoint,
         endpointUrl: state.selectedEndpointUrl,
         endpointName: state.selectedEndpointName,
-        customHeaders:
-          state.customHeaders.length > 0 ? state.customHeaders : undefined,
+        customHeaders: state.customHeaders.length > 0 ? state.customHeaders : undefined,
         authHeaderName: state.authHeaderName || undefined,
         authHeaderValue: state.authHeaderValue || undefined,
         preserveAuthCredentialKey: preserveKey,
-        deliveryMode:
-          state.deliveryMode !== "on_change" ? state.deliveryMode : undefined,
+        deliveryMode: state.deliveryMode !== 'on_change' ? state.deliveryMode : undefined,
         scheduleTime: state.scheduleTime,
         scheduleDay: state.scheduleDay,
       });
       if (!alreadyEnabled) {
-        await invoke("enable_source", { sourceId });
+        await invoke('enable_source', { sourceId });
       }
-      await queryClient.invalidateQueries({ queryKey: ["sources"] });
+      await queryClient.invalidateQueries({ queryKey: ['sources'] });
       await queryClient.invalidateQueries({
-        queryKey: ["bindings", sourceId],
+        queryKey: ['bindings', sourceId],
       });
-      await queryClient.invalidateQueries({ queryKey: ["bindings"] });
+      await queryClient.invalidateQueries({ queryKey: ['bindings'] });
       resetFlowState(sourceId);
       toast.success(
         isEditing
-          ? "Binding updated"
+          ? 'Binding updated'
           : alreadyEnabled
-            ? "Additional target connected"
-            : "Source enabled and connected"
+            ? 'Additional target connected'
+            : 'Source enabled and connected',
       );
-      logger.info("Binding saved", {
+      logger.info('Binding saved', {
         sourceId,
         isEditing,
         alreadyEnabled,
         endpointId: state.selectedEndpoint,
       });
     } catch (error) {
-      logger.error("Failed to save binding", { sourceId, error });
+      logger.error('Failed to save binding', { sourceId, error });
       toast.error(`Failed to connect target: ${error}`);
     } finally {
       setIsConfirming(null);
@@ -343,14 +337,14 @@ export function usePipelineFlow({
   };
 
   const handleBackToEndpointPicker = (sourceId: string) => {
-    updateFlowState(sourceId, { step: "pick_endpoint" });
+    updateFlowState(sourceId, { step: 'pick_endpoint' });
   };
 
   const handleUnbind = async (sourceId: string, endpointId: string) => {
     try {
       await removeBinding.mutateAsync({ sourceId, endpointId });
     } catch (error) {
-      logger.error("Failed to remove binding", {
+      logger.error('Failed to remove binding', {
         sourceId,
         endpointId,
         error,
@@ -360,56 +354,56 @@ export function usePipelineFlow({
   };
 
   const handlePushNow = (sourceId: string) => {
-    logger.info("Push Now triggered", { sourceId });
+    logger.info('Push Now triggered', { sourceId });
     setPushingSource(sourceId);
-    const toastId = toast("Checking for new data...");
+    const toastId = toast('Checking for new data...');
     const pushedAt = Date.now();
     const scheduleAfterPaint =
-      typeof requestAnimationFrame === "function"
+      typeof requestAnimationFrame === 'function'
         ? requestAnimationFrame
         : (cb: FrameRequestCallback) => window.setTimeout(() => cb(0), 0);
 
     scheduleAfterPaint(() => {
-      invoke<string>("trigger_source_push", { sourceId })
+      invoke<string>('trigger_source_push', { sourceId })
         .then((result) => {
           const elapsed = Date.now() - pushedAt;
           const remaining = Math.max(0, 800 - elapsed);
 
           if (
-            result === "skipped:no_data" ||
-            result === "skipped:unchanged" ||
-            result === "skipped:no_bindings"
+            result === 'skipped:no_data' ||
+            result === 'skipped:unchanged' ||
+            result === 'skipped:no_bindings'
           ) {
-            logger.debug("Push skipped", { sourceId, result });
+            logger.debug('Push skipped', { sourceId, result });
             setTimeout(() => {
               toast.success(
-                result === "skipped:no_data"
-                  ? "Nothing new to push"
-                  : result === "skipped:unchanged"
-                    ? "No changes since last push"
-                    : "No active bindings for this source",
-                { id: toastId }
+                result === 'skipped:no_data'
+                  ? 'Nothing new to push'
+                  : result === 'skipped:unchanged'
+                    ? 'No changes since last push'
+                    : 'No active bindings for this source',
+                { id: toastId },
               );
               setPushingSource(null);
             }, remaining);
             return;
           }
 
-          logger.debug("Push enqueued", { sourceId, result });
+          logger.debug('Push enqueued', { sourceId, result });
           startTransition(() => {
-            void queryClient.invalidateQueries({ queryKey: ["deliveryQueue"] });
-            void queryClient.invalidateQueries({ queryKey: ["deliveryStatus"] });
+            void queryClient.invalidateQueries({ queryKey: ['deliveryQueue'] });
+            void queryClient.invalidateQueries({ queryKey: ['deliveryStatus'] });
           });
           // Keep "Pushing..." visible for at least 800ms so the state change is perceptible
           setTimeout(() => {
-            toast.success("Push enqueued — delivering shortly", {
+            toast.success('Push enqueued — delivering shortly', {
               id: toastId,
             });
             setPushingSource(null);
           }, remaining);
         })
         .catch((error) => {
-          logger.error("Manual push failed", { sourceId, error });
+          logger.error('Manual push failed', { sourceId, error });
           toast.error(`Push failed: ${error}`, { id: toastId });
           setPushingSource(null);
         });
@@ -418,32 +412,25 @@ export function usePipelineFlow({
 
   const getTrafficLightStatus = useCallback(
     (sourceId: string, enabled: boolean): TrafficLightStatus => {
-      if (!enabled) return "grey";
-      if (!sourceStatusCounts) return "grey";
-      const counts = sourceStatusCounts.filter(
-        (c) => c.source_id === sourceId
-      );
-      if (counts.length === 0) return "grey";
+      if (!enabled) return 'grey';
+      if (!sourceStatusCounts) return 'grey';
+      const counts = sourceStatusCounts.filter((c) => c.source_id === sourceId);
+      if (counts.length === 0) return 'grey';
       const hasFailed = counts.some(
-        (c) => (c.status === "failed" || c.status === "dlq") && c.count > 0
+        (c) => (c.status === 'failed' || c.status === 'dlq') && c.count > 0,
       );
-      if (hasFailed) return "red";
-      const hasTargetPaused = counts.some(
-        (c) => c.status === "target_paused" && c.count > 0
-      );
-      if (hasTargetPaused) return "orange";
+      if (hasFailed) return 'red';
+      const hasTargetPaused = counts.some((c) => c.status === 'target_paused' && c.count > 0);
+      if (hasTargetPaused) return 'orange';
       const hasPending = counts.some(
-        (c) =>
-          (c.status === "pending" || c.status === "in_flight") && c.count > 0
+        (c) => (c.status === 'pending' || c.status === 'in_flight') && c.count > 0,
       );
-      if (hasPending) return "yellow";
-      const hasDelivered = counts.some(
-        (c) => c.status === "delivered" && c.count > 0
-      );
-      if (hasDelivered) return "green";
-      return "grey";
+      if (hasPending) return 'yellow';
+      const hasDelivered = counts.some((c) => c.status === 'delivered' && c.count > 0);
+      if (hasDelivered) return 'green';
+      return 'grey';
     },
-    [sourceStatusCounts]
+    [sourceStatusCounts],
   );
 
   return {

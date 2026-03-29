@@ -9,7 +9,7 @@ export function SparklineChart({
   data,
   width = 80,
   height = 24,
-  color = "var(--color-accent)",
+  color = 'var(--color-accent)',
 }: SparklineChartProps) {
   if (data.length < 2) return null;
 
@@ -23,7 +23,7 @@ export function SparklineChart({
     return `${x},${y}`;
   });
 
-  const linePath = `M${points.join(" L")}`;
+  const linePath = `M${points.join(' L')}`;
   const areaPath = `${linePath} L${width},${height} L0,${height} Z`;
 
   return (

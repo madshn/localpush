@@ -45,20 +45,13 @@ export function PipelineConnector({
             )}
             <polygon
               points={`94,${midY - 4} 100,${midY} 94,${midY + 4}`}
-              fill={active ? "var(--color-accent)" : "var(--color-border)"}
+              fill={active ? 'var(--color-accent)' : 'var(--color-border)'}
             />
           </>
         ) : (
           <>
             {/* Fan-out: single line from left to center, then branch to each target */}
-            <line
-              x1="0"
-              y1={midY}
-              x2="50"
-              y2={midY}
-              stroke="var(--color-border)"
-              strokeWidth="2"
-            />
+            <line x1="0" y1={midY} x2="50" y2={midY} stroke="var(--color-border)" strokeWidth="2" />
             {active && (
               <line
                 x1="0"
@@ -71,11 +64,8 @@ export function PipelineConnector({
               />
             )}
             {Array.from({ length: targetCount }).map((_, i) => {
-              const targetY =
-                midY + (i - (targetCount - 1) / 2) * 44;
-              const lineColor = active
-                ? "var(--color-accent)"
-                : "var(--color-border)";
+              const targetY = midY + (i - (targetCount - 1) / 2) * 44;
+              const lineColor = active ? 'var(--color-accent)' : 'var(--color-border)';
               return (
                 <g key={i}>
                   <path

@@ -1,4 +1,4 @@
-import { DeliveryStatus } from '../api/hooks/useDeliveryStatus';
+import type { DeliveryStatus } from '../api/hooks/useDeliveryStatus';
 
 /**
  * Mock DeliveryStatus - all delivered
@@ -126,11 +126,7 @@ export const mockSource = {
   path: '/Users/dev/project',
   webhookUrl: 'https://example.com/webhook',
   enabled: true,
-  patterns: [
-    '**/*.ts',
-    '**/*.tsx',
-    '!node_modules/**',
-  ],
+  patterns: ['**/*.ts', '**/*.tsx', '!node_modules/**'],
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff } from 'lucide-react';
+import { useState } from 'react';
 
 interface PreviewField {
   label: string;
@@ -44,22 +44,22 @@ export function TransparencyPreview({
   };
 
   const maskValue = (value: string): string => {
-    if (value.length <= 8) return "\u2022".repeat(value.length);
+    if (value.length <= 8) return '\u2022'.repeat(value.length);
     // Cap bullets at 12 so long values (paths, titles) don't overflow the container
-    return value.slice(0, 4) + "\u2022".repeat(Math.min(value.length - 8, 12)) + value.slice(-4);
+    return value.slice(0, 4) + '\u2022'.repeat(Math.min(value.length - 8, 12)) + value.slice(-4);
   };
 
   const parseTrend = (
-    summary: string
-  ): { metric: string; trend: string; direction: "up" | "down" | null } | null => {
+    summary: string,
+  ): { metric: string; trend: string; direction: 'up' | 'down' | null } | null => {
     const match = summary.match(/([+-]\d+%)\s*(\u2191|\u2193)?/);
     if (!match) return null;
     const trend = match[1];
-    const isPositive = trend.startsWith("+");
+    const isPositive = trend.startsWith('+');
     return {
       metric: summary.split(/[+-]\d+%/)[0].trim(),
       trend,
-      direction: isPositive ? "up" : "down",
+      direction: isPositive ? 'up' : 'down',
     };
   };
 
@@ -77,12 +77,12 @@ export function TransparencyPreview({
         </div>
         {preview.lastUpdated && (
           <p className="text-xs text-text-secondary">
-            Last updated:{" "}
-            {new Date(preview.lastUpdated).toLocaleString("en-US", {
-              month: "short",
-              day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
+            Last updated:{' '}
+            {new Date(preview.lastUpdated).toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
             })}
           </p>
         )}
@@ -96,12 +96,10 @@ export function TransparencyPreview({
         {trendInfo && (
           <span
             className={`text-sm font-semibold px-2 py-0.5 rounded ${
-              trendInfo.direction === "up"
-                ? "text-success bg-success-bg"
-                : "text-error bg-error-bg"
+              trendInfo.direction === 'up' ? 'text-success bg-success-bg' : 'text-error bg-error-bg'
             }`}
           >
-            {trendInfo.trend} {trendInfo.direction === "up" ? "\u2191" : "\u2193"}
+            {trendInfo.trend} {trendInfo.direction === 'up' ? '\u2191' : '\u2193'}
           </span>
         )}
       </div>
@@ -109,13 +107,8 @@ export function TransparencyPreview({
       {/* Fields */}
       <div className="flex flex-col gap-2 mb-3">
         {preview.fields.map((field, index) => (
-          <div
-            key={index}
-            className="flex items-center justify-between py-1.5 gap-3"
-          >
-            <span className="text-xs text-text-secondary min-w-[100px]">
-              {field.label}
-            </span>
+          <div key={index} className="flex items-center justify-between py-1.5 gap-3">
+            <span className="text-xs text-text-secondary min-w-[100px]">{field.label}</span>
             <div className="flex items-center gap-1.5 flex-1 justify-end">
               {field.sensitive && !revealedFields.has(field.label) ? (
                 <>
@@ -132,9 +125,7 @@ export function TransparencyPreview({
                 </>
               ) : (
                 <>
-                  <span className="text-xs font-mono text-right break-all">
-                    {field.value}
-                  </span>
+                  <span className="text-xs font-mono text-right break-all">{field.value}</span>
                   {field.sensitive && (
                     <button
                       className="p-0.5 opacity-60 hover:opacity-100 transition-opacity"
@@ -171,7 +162,7 @@ export function TransparencyPreview({
           onClick={onRefresh}
           disabled={isLoading}
         >
-          {isLoading ? "Refreshing..." : "Refresh Preview"}
+          {isLoading ? 'Refreshing...' : 'Refresh Preview'}
         </button>
         <button
           className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"

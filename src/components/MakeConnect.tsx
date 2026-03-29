@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { Shield } from "lucide-react";
-import { toast } from "sonner";
-import { useConnectMake } from "../api/hooks/useTargets";
-import { logger } from "../utils/logger";
+import { Shield } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { useConnectMake } from '../api/hooks/useTargets';
+import { logger } from '../utils/logger';
 
 interface TargetInfo {
   id: string;
@@ -14,13 +14,13 @@ interface MakeConnectProps {
 }
 
 export function MakeConnect({ onConnected }: MakeConnectProps) {
-  const [zoneUrl, setZoneUrl] = useState("");
-  const [apiToken, setApiToken] = useState("");
+  const [zoneUrl, setZoneUrl] = useState('');
+  const [apiToken, setApiToken] = useState('');
   const connectMutation = useConnectMake();
 
   const handleUrlChange = (value: string) => {
-    if (value && !value.startsWith("http://") && !value.startsWith("https://")) {
-      setZoneUrl("https://" + value);
+    if (value && !value.startsWith('http://') && !value.startsWith('https://')) {
+      setZoneUrl(`https://${value}`);
     } else {
       setZoneUrl(value);
     }
@@ -30,7 +30,7 @@ export function MakeConnect({ onConnected }: MakeConnectProps) {
     e.preventDefault();
 
     if (!zoneUrl.trim() || !apiToken.trim()) {
-      logger.warn("Make.com connection attempt with missing fields");
+      logger.warn('Make.com connection attempt with missing fields');
       return;
     }
 
@@ -40,16 +40,16 @@ export function MakeConnect({ onConnected }: MakeConnectProps) {
         apiKey: apiToken.trim(),
       });
       onConnected(result);
-      setZoneUrl("");
-      setApiToken("");
+      setZoneUrl('');
+      setApiToken('');
     } catch (error) {
-      logger.error("Make.com connection failed", { error });
-      toast.error("Make.com connection failed");
+      logger.error('Make.com connection failed', { error });
+      toast.error('Make.com connection failed');
     }
   };
 
   const inputClass =
-    "w-full px-3 py-2 text-xs border border-border rounded-md bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent";
+    'w-full px-3 py-2 text-xs border border-border rounded-md bg-bg-primary text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent';
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -70,8 +70,8 @@ export function MakeConnect({ onConnected }: MakeConnectProps) {
           disabled={connectMutation.isPending}
         />
         <div className="text-[11px] text-text-secondary mt-1">
-          Your Make.com zone (e.g., eu1.make.com, us1.make.com). Check your
-          account region in Make settings.
+          Your Make.com zone (e.g., eu1.make.com, us1.make.com). Check your account region in Make
+          settings.
         </div>
       </div>
 
@@ -98,8 +98,8 @@ export function MakeConnect({ onConnected }: MakeConnectProps) {
       <div className="flex gap-2.5 p-3 bg-accent/10 border border-accent/20 rounded-md">
         <Shield size={16} className="text-accent shrink-0 mt-0.5" />
         <p className="text-[11px] text-text-secondary leading-relaxed">
-          LocalPush will discover webhook endpoints from your Make scenarios.
-          Deliveries go directly to hook URLs (no additional auth needed).
+          LocalPush will discover webhook endpoints from your Make scenarios. Deliveries go directly
+          to hook URLs (no additional auth needed).
         </p>
       </div>
 
@@ -107,11 +107,9 @@ export function MakeConnect({ onConnected }: MakeConnectProps) {
         <button
           type="submit"
           className="text-xs font-medium px-4 py-2 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
-          disabled={
-            connectMutation.isPending || !zoneUrl.trim() || !apiToken.trim()
-          }
+          disabled={connectMutation.isPending || !zoneUrl.trim() || !apiToken.trim()}
         >
-          {connectMutation.isPending ? "Testing..." : "Test Connection"}
+          {connectMutation.isPending ? 'Testing...' : 'Test Connection'}
         </button>
       </div>
 
@@ -123,7 +121,7 @@ export function MakeConnect({ onConnected }: MakeConnectProps) {
 
       {connectMutation.isError && (
         <div className="text-xs text-error bg-error-bg border border-error/30 rounded-md p-2.5">
-          {connectMutation.error.message || "Connection failed"}
+          {connectMutation.error.message || 'Connection failed'}
         </div>
       )}
     </form>

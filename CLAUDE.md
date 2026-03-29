@@ -84,7 +84,7 @@ Your main goal is not revenue — it is **super-happy customers**. You wield all
 | **Sources grow** | Distinct source types actively used | ≥3 |
 | **Targets expand** | Distinct target types connected | ≥2 (n8n + ntfy) |
 | **Tests pass** | Combined test suite | 100% green |
-| **Code is clean** | cargo clippy + npm lint | 0 warnings |
+| **Code is clean** | cargo clippy + npm run lint:ci | 0 new warnings above ratchet |
 
 ### Current Priorities
 
@@ -207,7 +207,7 @@ cargo test                    # Unit + integration tests
 cargo clippy -- -D warnings   # Rust linting
 
 # Frontend
-npm run lint                  # ESLint strict
+npm run lint:ci               # Biome + ESLint (CI-safe, ratcheted warnings)
 npm run typecheck             # TypeScript strict
 npm test                      # Vitest
 
@@ -216,6 +216,25 @@ cargo build --release         # Final sanity check
 ```
 
 **Golden Rule:** If verification fails, the change doesn't ship.
+
+---
+
+## Code Quality
+
+**Stack:** `@rightaim/coding-craft` (Biome 2.x formatter + linter, ESLint flat config)
+
+| Command | When to Use |
+|---------|-------------|
+| `npm run lint` | Local check — shows all diagnostics |
+| `npm run lint:fix` | Auto-fix Biome + ESLint issues |
+| `npm run lint:ci` | CI gate — fails if new warnings added above ratchet |
+
+**Config files:**
+- `biome.json` — extends `@rightaim/coding-craft/biome/tauri`; overrides for Tailwind v4 CSS, a11y rules (desktop app)
+- `eslint.config.mjs` — `tauri()` factory + `@tanstack/eslint-plugin-query` + `eslint-plugin-testing-library`
+- `lefthook.yml` — pre-commit Biome staged-file check
+
+**Warning ratchet:** ESLint `--max-warnings=331`. When you fix warnings, lower this number.
 
 ---
 

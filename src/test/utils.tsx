@@ -1,11 +1,11 @@
-import { ReactNode } from 'react';
-import {
-  render as rtlRender,
-  RenderOptions,
-  renderHook as rtlRenderHook,
-  RenderHookOptions,
-} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  type RenderHookOptions,
+  type RenderOptions,
+  render as rtlRender,
+  renderHook as rtlRenderHook,
+} from '@testing-library/react';
+import type { ReactNode } from 'react';
 
 /**
  * Create a test QueryClient with sensible test defaults
@@ -33,16 +33,12 @@ export function render(
     ...renderOptions
   }: RenderOptions & {
     initialState?: unknown;
-  } = {}
+  } = {},
 ) {
   const queryClient = createTestQueryClient();
 
   function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <QueryClientProvider client={queryClient}>
-        {children}
-      </QueryClientProvider>
-    );
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   }
 
   return rtlRender(ui, { wrapper: Wrapper, ...renderOptions });
@@ -53,16 +49,12 @@ export function render(
  */
 export function renderHook<TProps, TResult>(
   hook: (props: TProps) => TResult,
-  options?: Omit<RenderHookOptions<TProps>, 'wrapper'>
+  options?: Omit<RenderHookOptions<TProps>, 'wrapper'>,
 ) {
   const queryClient = createTestQueryClient();
 
   function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <QueryClientProvider client={queryClient}>
-        {children}
-      </QueryClientProvider>
-    );
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   }
 
   return rtlRenderHook(hook, { wrapper: Wrapper, ...options });
@@ -70,9 +62,9 @@ export function renderHook<TProps, TResult>(
 
 // Re-export common utilities from React Testing Library
 export {
+  act,
+  fireEvent,
   screen,
   waitFor,
-  fireEvent,
   within,
-  act,
 } from '@testing-library/react';

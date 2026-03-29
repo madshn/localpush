@@ -1,5 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface PropertyDef {
   key: string;
@@ -24,9 +24,9 @@ export interface WindowSetting {
  */
 export function useSourceProperties(sourceId: string) {
   return useQuery<PropertyDef[]>({
-    queryKey: ["source-properties", sourceId],
+    queryKey: ['source-properties', sourceId],
     queryFn: async () => {
-      return await invoke<PropertyDef[]>("get_source_properties", {
+      return await invoke<PropertyDef[]>('get_source_properties', {
         sourceId,
       });
     },
@@ -36,9 +36,9 @@ export function useSourceProperties(sourceId: string) {
 
 export function useSourceWindowSetting(sourceId: string) {
   return useQuery<WindowSetting | null>({
-    queryKey: ["source-window", sourceId],
+    queryKey: ['source-window', sourceId],
     queryFn: async () => {
-      return await invoke<WindowSetting | null>("get_source_window_setting", {
+      return await invoke<WindowSetting | null>('get_source_window_setting', {
         sourceId,
       });
     },
@@ -62,7 +62,7 @@ export function useSetSourceProperty() {
       property: string;
       enabled: boolean;
     }) => {
-      await invoke("set_source_property", {
+      await invoke('set_source_property', {
         sourceId,
         property,
         enabled,
@@ -71,7 +71,7 @@ export function useSetSourceProperty() {
     onSuccess: (_data, variables) => {
       // Invalidate the specific source's properties to refetch
       queryClient.invalidateQueries({
-        queryKey: ["source-properties", variables.sourceId],
+        queryKey: ['source-properties', variables.sourceId],
       });
     },
   });
@@ -81,27 +81,21 @@ export function useSetSourceWindowDays() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({
-      sourceId,
-      days,
-    }: {
-      sourceId: string;
-      days: number;
-    }) => {
-      await invoke("set_source_window_days", {
+    mutationFn: async ({ sourceId, days }: { sourceId: string; days: number }) => {
+      await invoke('set_source_window_days', {
         sourceId,
         days,
       });
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({
-        queryKey: ["source-window", variables.sourceId],
+        queryKey: ['source-window', variables.sourceId],
       });
       queryClient.invalidateQueries({
-        queryKey: ["source-preview", variables.sourceId],
+        queryKey: ['source-preview', variables.sourceId],
       });
       queryClient.invalidateQueries({
-        queryKey: ["sources"],
+        queryKey: ['sources'],
       });
     },
   });
