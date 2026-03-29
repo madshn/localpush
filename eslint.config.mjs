@@ -1,9 +1,8 @@
-import tanstackQuery from '@tanstack/eslint-plugin-query';
-import testingLibrary from 'eslint-plugin-testing-library';
-import reactHooks from 'eslint-plugin-react-hooks';
-import tseslint from 'typescript-eslint';
 import { tauri } from '@rightaim/coding-craft/eslint';
-
+import tanstackQuery from '@tanstack/eslint-plugin-query';
+import reactHooks from 'eslint-plugin-react-hooks';
+import testingLibrary from 'eslint-plugin-testing-library';
+import tseslint from 'typescript-eslint';
 
 export default [
   { ignores: ['node_modules/', 'dist/', 'src-tauri/'] },

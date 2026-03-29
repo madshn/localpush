@@ -2,13 +2,7 @@
   "$schema": "https://biomejs.dev/schemas/latest/schema.json",
   "extends": ["@rightaim/coding-craft/biome/tauri"],
   "files": {
-    "includes": [
-      "**",
-      "!**/node_modules/**",
-      "!**/dist/**",
-      "!**/src-tauri/**",
-      "!src/styles.css"
-    ]
+    "includes": ["!**/node_modules", "!**/dist", "!**/src-tauri", "!src/styles.css"]
   },
   "linter": {
     "rules": {
