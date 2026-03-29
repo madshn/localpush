@@ -48,3 +48,6 @@ src-tauri/icons/
 tmp/
 temp/
 *.tmp
+
+# Codex local state
+.codex/state/

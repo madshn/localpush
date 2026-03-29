@@ -1,0 +1,6 @@
+[core]
+model = "codex-mini-latest"
+
+[history]
+persistence = "save-all"
+max_turns = 50
