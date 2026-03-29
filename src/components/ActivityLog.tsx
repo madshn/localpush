@@ -40,7 +40,7 @@ function groupIntoHourlyBuckets(entries: ActivityEntry[]): ActivityItem[] {
       groups.set(key, {
         key,
         source: entry.source,
-        targetType: entry.deliveredTo?.target_type,
+        targetType: entry.deliveredTo!.target_type,
         targetUrl: entry.deliveredTo?.target_url,
         entries: [entry],
         latestTime: entry.timestamp,

@@ -187,9 +187,9 @@ export function DashboardView() {
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                  {categorized?.paused.length > 0 && categorized?.available.length > 0
+                  {categorized!.paused.length > 0 && categorized!.available.length > 0
                     ? 'Unbound Sources'
-                    : categorized?.paused.length > 0
+                    : categorized!.paused.length > 0
                       ? 'Paused'
                       : 'Available Sources'}
                 </h2>
