@@ -1,3 +1,5 @@
+# To install hooks: npx lefthook install
+# (run once after cloning, or if you see "Can't find lefthook in PATH")
 pre-commit:
   commands:
     biome:
