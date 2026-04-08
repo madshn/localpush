@@ -841,6 +841,16 @@ pub async fn get_target_health(
         let ep_refs: Vec<&str> = endpoint_ids.iter().map(|s| s.as_str()).collect();
         let queued_count = state.ledger.count_paused_for_target(&ep_refs).unwrap_or(0);
 
+        let persisted_pause_reason = if queued_count > 0 {
+            state
+                .ledger
+                .get_paused_reason_for_target(&ep_refs)
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
+
         let health = if let Some(info) = degradation {
             serde_json::json!({
                 "target_id": target_id,
@@ -849,6 +859,15 @@ pub async fn get_target_health(
                 "status": "degraded",
                 "reason": info.reason,
                 "degraded_at": info.degraded_at,
+                "queued_count": queued_count,
+            })
+        } else if queued_count > 0 {
+            serde_json::json!({
+                "target_id": target_id,
+                "target_name": target_name,
+                "target_type": target_type,
+                "status": "degraded",
+                "reason": persisted_pause_reason.unwrap_or_else(|| "Target degraded".to_string()),
                 "queued_count": queued_count,
             })
         } else {

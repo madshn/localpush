@@ -348,6 +348,8 @@ export function useReconnectTarget() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['target-health'] });
       queryClient.invalidateQueries({ queryKey: ['deliveryStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['sourceStatusCounts'] });
+      queryClient.invalidateQueries({ queryKey: ['deliveryQueue'] });
       toast.success('Target reconnected');
     },
     onError: (error) => {

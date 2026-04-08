@@ -302,7 +302,10 @@ impl DeliveryLedgerTrait for DeliveryLedger {
                         trigger_type, delivered_to
                  FROM delivery_ledger
                  WHERE status IN ('pending', 'failed') AND available_at <= ?1
-                 ORDER BY available_at ASC
+                 ORDER BY
+                     CASE WHEN trigger_type = 'manual' THEN 0 ELSE 1 END ASC,
+                     available_at ASC,
+                     created_at ASC
                  LIMIT ?2",
             )
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
@@ -755,6 +758,44 @@ impl DeliveryLedgerTrait for DeliveryLedger {
         Ok(count as usize)
     }
 
+    fn get_paused_reason_for_target(
+        &self,
+        endpoint_ids: &[&str],
+    ) -> Result<Option<String>, LedgerError> {
+        if endpoint_ids.is_empty() {
+            return Ok(None);
+        }
+
+        let conn = self.reader.lock().unwrap();
+        let placeholders: Vec<String> = endpoint_ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect();
+        let sql = format!(
+            "SELECT last_error FROM delivery_ledger
+             WHERE status = 'target_paused'
+             AND target_endpoint_id IN ({})
+             ORDER BY available_at DESC
+             LIMIT 1",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = endpoint_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+
+        match stmt.query_row(params.as_slice(), |row| row.get::<_, Option<String>>(0)) {
+            Ok(reason) => Ok(reason),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(LedgerError::DatabaseError(e.to_string())),
+        }
+    }
+
     fn get_source_status_counts(&self) -> Result<Vec<SourceStatusCount>, LedgerError> {
         let conn = self.reader.lock().unwrap();
         let mut stmt = conn
@@ -826,6 +867,34 @@ mod tests {
 
         let delivered = ledger.get_by_status(DeliveryStatus::Delivered).unwrap();
         assert_eq!(delivered.len(), 1);
+    }
+
+    #[test]
+    fn test_claim_batch_prioritizes_manual_pushes() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+        let now = chrono::Utc::now().timestamp();
+
+        ledger
+            .enqueue_targeted_at(
+                "backlog.event",
+                serde_json::json!({"kind": "backlog"}),
+                "ep-backlog",
+                now - 60,
+            )
+            .unwrap();
+        let manual_event = ledger
+            .enqueue_manual_targeted(
+                "manual.event",
+                serde_json::json!({"kind": "manual"}),
+                "ep-manual",
+            )
+            .unwrap();
+
+        let batch = ledger.claim_batch(1).unwrap();
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0].event_type, "manual.event");
+        assert_eq!(batch[0].event_id, manual_event);
+        assert_eq!(batch[0].trigger_type.as_deref(), Some("manual"));
     }
 
     #[test]

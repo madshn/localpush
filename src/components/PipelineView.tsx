@@ -8,7 +8,7 @@ import {
   useRemoveBinding,
 } from '../api/hooks/useBindings';
 import { useSources } from '../api/hooks/useSources';
-import { useTargetHealth } from '../api/hooks/useTargets';
+import { useReconnectTarget, useTargetHealth } from '../api/hooks/useTargets';
 import { PipelineCard } from './PipelineCard';
 import { formatNextPushLabel, getNextPushBySource } from './pipeline/scheduling';
 import type { SourceData, SourceWithCategory } from './pipeline/types';
@@ -54,6 +54,7 @@ export function PipelineView() {
   const { data: sources, isLoading: sourcesLoading } = useSources();
   const { data: allBindings, isLoading: bindingsLoading } = useAllBindings();
   const { data: targetHealth } = useTargetHealth();
+  const reconnectTarget = useReconnectTarget();
   const queryClient = useQueryClient();
   const createBinding = useCreateBinding();
   const removeBinding = useRemoveBinding();
@@ -168,7 +169,9 @@ export function PipelineView() {
       onPushNow={flow.handlePushNow}
       onAddTarget={flow.handleAddTarget}
       onEditBinding={flow.handleEditBinding}
+      onReconnectTarget={(targetId) => reconnectTarget.mutate(targetId)}
       isPushing={flow.pushingSource === source.id}
+      reconnectingTargetId={reconnectTarget.isPending ? reconnectTarget.variables ?? null : null}
       isLoading={
         flow.isEnabling === source.id ||
         flow.isDisabling === source.id ||

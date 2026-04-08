@@ -47,7 +47,7 @@ export function TargetSetup() {
 
   const [failedTargets, setFailedTargets] = useState<Record<string, string>>({});
 
-  const handleTestConnection = async (targetId: string) => {
+  const handleTestConnection = async (targetId: string, targetType: string) => {
     setTestingTargetId(targetId);
     setFailedTargets((prev) => {
       const next = { ...prev };
@@ -62,13 +62,17 @@ export function TargetSetup() {
       logger.error('Target test failed', { targetId, error });
       const isAuth =
         msg.includes('Token') || msg.includes('Auth') || msg.includes('401') || msg.includes('403');
+      const authMessage =
+        targetType === 'google-sheets'
+          ? 'Authentication expired. Re-authenticate to restore delivery.'
+          : targetType === 'n8n'
+            ? 'n8n API key rejected. Update the saved n8n management key to restore endpoint discovery and connection tests. Existing webhook delivery auth is configured per binding.'
+            : 'Authentication failed. Update the saved credential to restore delivery.';
       setFailedTargets((prev) => ({
         ...prev,
-        [targetId]: isAuth
-          ? 'Authentication expired. Re-authenticate to restore delivery.'
-          : `Connection failed: ${msg}`,
+        [targetId]: isAuth ? authMessage : `Connection failed: ${msg}`,
       }));
-      toast.error(isAuth ? 'Authentication expired' : 'Connection test failed');
+      toast.error(isAuth ? 'Authentication failed' : 'Connection test failed');
     } finally {
       setTestingTargetId(null);
     }
@@ -188,7 +192,7 @@ export function TargetSetup() {
                   )}
                   <button
                     className="text-xs font-medium px-2.5 py-1 rounded bg-bg-tertiary text-text-secondary border border-border hover:border-border-hover transition-colors disabled:opacity-50"
-                    onClick={() => handleTestConnection(target.id)}
+                    onClick={() => handleTestConnection(target.id, target.target_type)}
                     disabled={testingTargetId === target.id}
                   >
                     {testingTargetId === target.id ? 'Testing...' : 'Test'}

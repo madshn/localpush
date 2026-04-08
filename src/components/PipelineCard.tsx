@@ -96,7 +96,9 @@ interface PipelineCardProps {
   onPushNow: (sourceId: string) => void;
   onAddTarget: (sourceId: string) => void;
   onEditBinding: (sourceId: string, endpointId: string) => void;
+  onReconnectTarget: (targetId: string) => void;
   isPushing: boolean;
+  reconnectingTargetId?: string | null;
   isLoading?: boolean;
 }
 
@@ -173,10 +175,11 @@ function PipelineCardComponent({
   onPushNow,
   onAddTarget,
   onEditBinding,
+  onReconnectTarget,
   isPushing,
+  reconnectingTargetId = null,
   isLoading = false,
 }: PipelineCardProps) {
-  // reconnect navigates to Settings tab via custom event (no mutation needed here)
   const [showInfo, setShowInfo] = useState(false);
   const [showProperties, setShowProperties] = useState(false);
   const [showDisableConfirm, setShowDisableConfirm] = useState(false);
@@ -450,16 +453,11 @@ function PipelineCardComponent({
                         </span>
                         <button
                           className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-warning text-bg-primary hover:bg-warning/90 transition-colors"
-                          onClick={() => {
-                            window.dispatchEvent(
-                              new CustomEvent('localpush:navigate', {
-                                detail: { tab: 'settings' },
-                              }),
-                            );
-                          }}
+                          onClick={() => onReconnectTarget(binding.target_id)}
+                          disabled={reconnectingTargetId === binding.target_id}
                         >
                           <RefreshCw size={9} />
-                          Reconnect
+                          {reconnectingTargetId === binding.target_id ? 'Reconnecting...' : 'Reconnect'}
                         </button>
                       </div>
                     )}

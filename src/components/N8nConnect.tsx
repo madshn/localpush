@@ -143,6 +143,10 @@ export function N8nConnect({
             Enter a fresh API key to replace the saved one for this target.
           </div>
         )}
+        <div className="text-[11px] text-text-secondary mt-1">
+          This key is only used to discover and test n8n webhook endpoints. Delivery auth for each
+          webhook is stored separately on the binding.
+        </div>
       </div>
 
       {/* Security coaching box */}

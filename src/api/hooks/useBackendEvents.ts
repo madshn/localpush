@@ -15,6 +15,7 @@ export function useBackendEvents(): void {
       listen('delivery:status-changed', () => {
         queryClient.invalidateQueries({ queryKey: ['deliveryStatus'] });
         queryClient.invalidateQueries({ queryKey: ['deliveryQueue'] });
+        queryClient.invalidateQueries({ queryKey: ['sourceStatusCounts'] });
       }),
       listen('source:data-updated', () => {
         queryClient.invalidateQueries({ queryKey: ['sources'] });
@@ -27,6 +28,7 @@ export function useBackendEvents(): void {
         // Target degradation pauses deliveries — refresh delivery views too
         queryClient.invalidateQueries({ queryKey: ['deliveryStatus'] });
         queryClient.invalidateQueries({ queryKey: ['deliveryQueue'] });
+        queryClient.invalidateQueries({ queryKey: ['sourceStatusCounts'] });
       }),
     ];
 

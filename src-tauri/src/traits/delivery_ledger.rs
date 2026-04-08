@@ -153,6 +153,12 @@ pub trait DeliveryLedgerTrait: Send + Sync {
     /// Count deliveries paused for any of the given endpoint IDs.
     fn count_paused_for_target(&self, endpoint_ids: &[&str]) -> Result<usize, LedgerError>;
 
+    /// Get the most recent pause reason for any of the given endpoint IDs.
+    fn get_paused_reason_for_target(
+        &self,
+        endpoint_ids: &[&str],
+    ) -> Result<Option<String>, LedgerError>;
+
     /// Get per-source status counts (lightweight — no payload deserialization).
     /// Returns Vec of (event_type, status, count) tuples for recent entries.
     fn get_source_status_counts(&self) -> Result<Vec<SourceStatusCount>, LedgerError>;
