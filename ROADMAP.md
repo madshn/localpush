@@ -51,7 +51,7 @@
 | REQ-007 | UX improvements | [x] | Tailwind v4, Radix tabs, pipeline cards, activity log |
 | REQ-008 | Homebrew Cask distribution | [x] | brew tap madshn/localpush |
 | REQ-009 | Auto-update via GitHub Releases | [x] | tauri-plugin-updater configured |
-| REQ-010 | Proof-of-life instrumentation | [ ] | Passive only: Homebrew tap + GitHub Release download counts. "Feedback" menu item opens GitHub Issues in browser. No telemetry SDK. Self-hosted dogfooding idea deferred to Phase 2 (REQ-034). |
+| REQ-010 | Proof-of-life instrumentation | [~] | Passive only: Homebrew tap + GitHub Release download counts. "Feedback" menu item opens GitHub Issues in browser. No telemetry SDK. Self-hosted dogfooding deferred to Phase 2 (REQ-034). Metrick migration 056 applied (2026-04-12) but n8n route not yet wired (bob#187 open). Phase 1 exit criteria tracked manually — Metrick schema keys are post-activation commercial metrics, not Phase 1 validation signals. |
 | REQ-011 | Scheduled push cadence | [x] | Per-binding on_change/daily/weekly delivery modes |
 | REQ-012 | BUG: Apple Photos source broken | [ ] | Source does not work — needs investigation and fix |
 | REQ-013 | Dashboard kanban view | [ ] | 3-column kanban layout (see Stitch prototype) |
@@ -89,6 +89,7 @@
 | 2026-02-08 | Bob factory adoption | Factory standards applied |
 | 2026-02-10 | UX overhaul + scheduled push cadence | Tailwind v4, Radix UI, pipeline cards, per-binding delivery modes |
 | 2026-02-11 | v0.2.1 bug fix release | 13 bug fixes, DLQ notifications, tray indicator, entitlements research |
+| 2026-04-12 | Metrick migration 056 applied | Schema keys (`signup_count`, `active_users_dau`, etc.) in DB. n8n route in workflow SX8YMfgkgnaj2Qs0 NOT YET WIRED — bob#187 pending Metrick session. Phase 1 exit criteria tracked manually (Homebrew/GitHub download counts) until telemetry ships in Phase 2 (REQ-034). |
 
 ---
 <!-- PHASE_GATE: Do not proceed until Phase 1 exit criteria met -->

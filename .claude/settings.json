@@ -33,10 +33,11 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/madsnissen/builds/localpush/.claude/hooks/register-session.sh"
+            "command": "/Users/madsnissen/test-installs/vps-cah-simulation/bin/hooks/session-start-register.sh"
           }
         ]
       }
