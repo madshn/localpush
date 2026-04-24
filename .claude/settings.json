@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/madsnissen/builds/localpush/.claude/hooks/register-session.sh"
+            "command": "/Users/madsnissen/builds/localpush/.claude/hooks/repotic-session-start.sh"
           }
         ]
       }
