@@ -372,6 +372,7 @@ export function usePipelineFlow({
           if (
             result === 'skipped:no_data' ||
             result === 'skipped:unchanged' ||
+            result === 'skipped:claimed_pending' ||
             result === 'skipped:no_bindings'
           ) {
             logger.debug('Push skipped', { sourceId, result });
@@ -381,6 +382,8 @@ export function usePipelineFlow({
                   ? 'Nothing new to push'
                   : result === 'skipped:unchanged'
                     ? 'No changes since last push'
+                    : result === 'skipped:claimed_pending'
+                      ? 'An older queued item is still blocking this source'
                     : 'No active bindings for this source',
                 { id: toastId },
               );

@@ -171,7 +171,7 @@ export function PipelineView() {
       onEditBinding={flow.handleEditBinding}
       onReconnectTarget={(targetId) => reconnectTarget.mutate(targetId)}
       isPushing={flow.pushingSource === source.id}
-      reconnectingTargetId={reconnectTarget.isPending ? reconnectTarget.variables ?? null : null}
+      reconnectingTargetId={reconnectTarget.isPending ? (reconnectTarget.variables ?? null) : null}
       isLoading={
         flow.isEnabling === source.id ||
         flow.isDisabling === source.id ||

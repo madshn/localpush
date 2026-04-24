@@ -14,6 +14,19 @@ import { logger } from './utils/logger';
 
 const isDashboard = new URLSearchParams(window.location.search).has('view', 'dashboard');
 
+type NavigationDetail = {
+  tab?: string;
+};
+
+function isNavigationDetail(value: unknown): value is NavigationDetail {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const maybeDetail = value as { tab?: unknown };
+  return maybeDetail.tab === undefined || typeof maybeDetail.tab === 'string';
+}
+
 async function handleOpenDashboard() {
   try {
     const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
@@ -34,16 +47,17 @@ async function handleOpenDashboard() {
       decorations: true,
       resizable: true,
     });
-    dashboard.once('tauri://created', () => {
+    void dashboard.once('tauri://created', () => {
       logger.info('Dashboard window created');
     });
-    dashboard.once('tauri://error', (e) => {
+    void dashboard.once('tauri://error', (e) => {
       logger.error('Dashboard window error', { error: e.payload });
       toast.error('Failed to open dashboard window');
     });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error('Failed to open dashboard', { error });
-    toast.error(`Dashboard error: ${error}`);
+    toast.error(`Dashboard error: ${errorMessage}`);
   }
 }
 
@@ -56,8 +70,10 @@ function App() {
   // Listen for cross-component tab navigation events (e.g. Reconnect → Settings)
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.tab) setActiveTab(detail.tab);
+      const detail = e instanceof CustomEvent ? e.detail : null;
+      if (isNavigationDetail(detail) && detail.tab) {
+        setActiveTab(detail.tab);
+      }
     };
     window.addEventListener('localpush:navigate', handler);
     return () => window.removeEventListener('localpush:navigate', handler);
@@ -95,7 +111,8 @@ function App() {
 
       {/* DLQ failure banner */}
       {dlqCount != null && dlqCount > 0 && (
-        <div
+        <button
+          type="button"
           onClick={() => setActiveTab('activity')}
           className="mx-4 mt-3 px-3 py-2 bg-error-bg border border-error/20 rounded-lg cursor-pointer hover:bg-error-bg/80 transition-colors"
         >
@@ -108,7 +125,7 @@ function App() {
             </div>
             <span className="text-[10px] text-error/80 font-medium">View →</span>
           </div>
-        </div>
+        </button>
       )}
 
       <Tabs.Root
@@ -149,7 +166,10 @@ function App() {
 
       {/* Dashboard CTA */}
       <button
-        onClick={handleOpenDashboard}
+        type="button"
+        onClick={() => {
+          void handleOpenDashboard();
+        }}
         className="mx-4 mb-3 mt-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-accent/10 border border-accent/20 text-accent hover:bg-accent/20 transition-colors text-xs font-medium"
       >
         <ExternalLink size={14} />

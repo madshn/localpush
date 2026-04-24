@@ -3,8 +3,10 @@
 /// Both `claude_stats` and `claude_sessions` consume this collector to avoid
 /// duplicating the JSONL traversal logic.
 use chrono::{DateTime, Utc};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 use tracing::debug;
 
@@ -75,6 +77,43 @@ impl ClaudeSession {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileSignature {
+    len: u64,
+    modified_millis: u128,
+}
+
+#[derive(Debug, Clone)]
+struct CachedClaudeSession {
+    signature: FileSignature,
+    session: ClaudeSession,
+}
+
+#[derive(Debug, Default)]
+struct ClaudeCollectorCache {
+    entries: HashMap<std::path::PathBuf, CachedClaudeSession>,
+}
+
+fn claude_collector_cache() -> &'static Mutex<HashMap<std::path::PathBuf, ClaudeCollectorCache>> {
+    static CACHE: OnceLock<Mutex<HashMap<std::path::PathBuf, ClaudeCollectorCache>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn metadata_signature(metadata: &fs::Metadata) -> FileSignature {
+    let modified_millis = metadata
+        .modified()
+        .ok()
+        .and_then(|ts| ts.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+
+    FileSignature {
+        len: metadata.len(),
+        modified_millis,
+    }
+}
+
 /// Scan `projects_dir` for Claude Code JSONL session files.
 ///
 /// Each sub-directory of `projects_dir` (e.g. `-Users-name-dev-myproject/`)
@@ -96,6 +135,11 @@ pub fn collect_claude_sessions(
     };
 
     let mut results = Vec::new();
+    let root_key = projects_dir.to_path_buf();
+    let cache = claude_collector_cache();
+    let mut caches = cache.lock().unwrap();
+    let root_cache = caches.entry(root_key.clone()).or_default();
+    let mut seen_paths = HashSet::new();
 
     for project_entry in read_dir.flatten() {
         let project_path = project_entry.path();
@@ -118,12 +162,16 @@ pub fn collect_claude_sessions(
                 continue;
             }
 
+            seen_paths.insert(path.clone());
+
+            let metadata = match file_entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            let signature = metadata_signature(&metadata);
+
             // Fast mtime pre-filter (avoids reading old files).
             if let Some(cutoff) = mtime_cutoff {
-                let metadata = match fs::metadata(&path) {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
                 let modified_time = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                 let modified_dt: DateTime<Utc> = modified_time.into();
                 if modified_dt < cutoff {
@@ -131,11 +179,28 @@ pub fn collect_claude_sessions(
                 }
             }
 
-            let session_id = name.trim_end_matches(".jsonl").to_string();
-            let session = parse_jsonl_session(&session_id, &path, &project_dir_name);
+            let session = match root_cache.entries.get(&path) {
+                Some(cached) if cached.signature == signature => cached.session.clone(),
+                _ => {
+                    let session_id = name.trim_end_matches(".jsonl").to_string();
+                    let session = parse_jsonl_session(&session_id, &path, &project_dir_name);
+                    root_cache.entries.insert(
+                        path.clone(),
+                        CachedClaudeSession {
+                            signature,
+                            session: session.clone(),
+                        },
+                    );
+                    session
+                }
+            };
             results.push(session);
         }
     }
+
+    root_cache
+        .entries
+        .retain(|path, _| seen_paths.contains(path));
 
     debug!(
         "collect_claude_sessions: found {} sessions under {}",
@@ -420,6 +485,76 @@ mod tests {
         let totals = sessions[0].total_tokens();
         assert_eq!(totals.input, 300);
         assert_eq!(totals.output, 150);
+    }
+
+    #[test]
+    fn test_collect_reuses_cache_but_refreshes_changed_file() {
+        let tmp = TempDir::new().unwrap();
+        let now = Utc::now();
+        let ts = now.to_rfc3339();
+
+        write_session(
+            tmp.path(),
+            "refresh-me",
+            &format!(
+                r#"{{"type":"assistant","timestamp":"{ts}","message":{{"model":"claude-opus-4-6","usage":{{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#,
+                ts = ts
+            ),
+        );
+
+        let first = collect_claude_sessions(tmp.path(), None);
+        assert_eq!(first[0].total_tokens().input, 10);
+
+        write_session(
+            tmp.path(),
+            "refresh-me",
+            &format!(
+                concat!(
+                    r#"{{"type":"assistant","timestamp":"{ts}","message":{{"model":"claude-opus-4-6","usage":{{"input_tokens":20,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#,
+                    "\n",
+                    r#"{{"type":"assistant","timestamp":"{ts}","message":{{"model":"claude-opus-4-6","usage":{{"input_tokens":30,"output_tokens":15,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#
+                ),
+                ts = ts
+            ),
+        );
+
+        let second = collect_claude_sessions(tmp.path(), None);
+        let totals = second[0].total_tokens();
+        assert_eq!(totals.input, 50);
+        assert_eq!(totals.output, 25);
+    }
+
+    #[test]
+    fn test_collect_prunes_deleted_file_from_cache() {
+        let tmp = TempDir::new().unwrap();
+        let now = Utc::now();
+        let ts = now.to_rfc3339();
+
+        write_session(
+            tmp.path(),
+            "keep",
+            &format!(
+                r#"{{"type":"assistant","timestamp":"{ts}","message":{{"model":"claude-opus-4-6","usage":{{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#,
+                ts = ts
+            ),
+        );
+        write_session(
+            tmp.path(),
+            "delete",
+            &format!(
+                r#"{{"type":"assistant","timestamp":"{ts}","message":{{"model":"claude-opus-4-6","usage":{{"input_tokens":2,"output_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#,
+                ts = ts
+            ),
+        );
+
+        assert_eq!(collect_claude_sessions(tmp.path(), None).len(), 2);
+
+        let deleted_path = tmp.path().join("-Users-test-proj").join("delete.jsonl");
+        fs::remove_file(deleted_path).unwrap();
+
+        let remaining = collect_claude_sessions(tmp.path(), None);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].session_id, "keep");
     }
 
     #[test]

@@ -1,14 +1,18 @@
 {
   "name": "localpush",
-  "version": "0.5.1",
+  "version": "0.7.0",
   "description": "Push local file changes to webhooks with guaranteed delivery",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
+    "tauri": "node scripts/run-tauri.mjs",
     "bump:version": "node scripts/bump-version.mjs",
+    "cargo:check": "node scripts/run-cargo.mjs check --manifest-path src-tauri/Cargo.toml --all-targets",
+    "cargo:test": "node scripts/run-cargo.mjs test --manifest-path src-tauri/Cargo.toml",
+    "cargo:clippy": "node scripts/run-cargo.mjs clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "cargo:build:release": "node scripts/run-cargo.mjs build --manifest-path src-tauri/Cargo.toml --release",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -16,7 +20,7 @@
     "lint:fix": "npx biome check --write src/ && eslint --fix src/",
     "lint:ci": "npx biome ci src/ && eslint src/ --max-warnings=331",
     "typecheck": "tsc --noEmit",
-    "check": "npm run lint:ci && npm run typecheck && npm test && cargo test --manifest-path src-tauri/Cargo.toml"
+    "check": "npm run lint:ci && npm run typecheck && npm test && npm run cargo:test"
   },
   "dependencies": {
     "@choochmeque/tauri-plugin-google-auth-api": "^0.5",

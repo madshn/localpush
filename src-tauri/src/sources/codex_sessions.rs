@@ -3,10 +3,10 @@ use crate::config::AppConfig;
 use crate::source_config::{window_setting_for_source, PropertyDef, SourceConfigStore};
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Debug, Clone, Default)]
 pub struct CodexTokenUsage {
@@ -111,6 +111,42 @@ fn walk_jsonl_files(root: &Path, out: &mut Vec<PathBuf>) {
         if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
             out.push(path);
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileSignature {
+    len: u64,
+    modified_millis: u128,
+}
+
+#[derive(Debug, Clone)]
+struct CachedCodexSession {
+    signature: FileSignature,
+    session: CodexSessionRecord,
+}
+
+#[derive(Debug, Default)]
+struct CodexCollectorCache {
+    entries: HashMap<PathBuf, CachedCodexSession>,
+}
+
+fn codex_collector_cache() -> &'static Mutex<HashMap<PathBuf, CodexCollectorCache>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, CodexCollectorCache>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn metadata_signature(metadata: &fs::Metadata) -> FileSignature {
+    let modified_millis = metadata
+        .modified()
+        .ok()
+        .and_then(|ts| ts.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+
+    FileSignature {
+        len: metadata.len(),
+        modified_millis,
     }
 }
 
@@ -422,26 +458,56 @@ pub(crate) fn collect_codex_sessions(
     files.sort();
 
     let cutoff = recent_within_days.map(|days| Utc::now() - Duration::days(days));
+    let root_key = root.to_path_buf();
+    let cache = codex_collector_cache();
+    let mut caches = cache.lock().unwrap();
+    let root_cache = caches.entry(root_key.clone()).or_default();
+    let seen_paths: HashSet<PathBuf> = files.iter().cloned().collect();
     let mut sessions = Vec::new();
 
     for path in files {
-        match parse_codex_session_file(&path) {
-            Ok(session) => {
-                if let Some(cutoff) = cutoff {
-                    let modified = session
-                        .end_time
-                        .as_deref()
-                        .and_then(parse_ts)
-                        .or(session.latest_event_ts);
-                    if modified.is_some_and(|ts| ts < cutoff) {
-                        continue;
-                    }
-                }
-                sessions.push(session);
-            }
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => metadata,
             Err(_) => continue,
+        };
+        let signature = metadata_signature(&metadata);
+
+        let session = match root_cache.entries.get(&path) {
+            Some(cached) if cached.signature == signature => cached.session.clone(),
+            _ => {
+                let session = match parse_codex_session_file(&path) {
+                    Ok(session) => session,
+                    Err(_) => continue,
+                };
+                root_cache.entries.insert(
+                    path.clone(),
+                    CachedCodexSession {
+                        signature,
+                        session: session.clone(),
+                    },
+                );
+                session
+            }
+        };
+
+        {
+            if let Some(cutoff) = cutoff {
+                let modified = session
+                    .end_time
+                    .as_deref()
+                    .and_then(parse_ts)
+                    .or(session.latest_event_ts);
+                if modified.is_some_and(|ts| ts < cutoff) {
+                    continue;
+                }
+            }
+            sessions.push(session);
         }
     }
+
+    root_cache
+        .entries
+        .retain(|path, _| seen_paths.contains(path));
 
     sessions.sort_by(|a, b| b.end_time.cmp(&a.end_time));
     sessions
@@ -684,6 +750,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     fn fixture_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -736,5 +803,80 @@ mod tests {
         assert!(!record.token_snapshots.is_empty());
         assert!(record.token_totals.total > 0);
         assert!(record.message_count > 0);
+    }
+
+    #[test]
+    fn test_collect_codex_sessions_refreshes_changed_file() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp
+            .path()
+            .join("2026")
+            .join("04")
+            .join("24")
+            .join("rollout-2026-04-24T12-00-00-session-a.jsonl");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(
+            &file,
+            concat!(
+                r#"{"timestamp":"2026-04-24T12:00:00Z","type":"session_meta","payload":{"id":"session-a","cwd":"/tmp/project","timestamp":"2026-04-24T12:00:00Z"}}"#,
+                "\n",
+                r#"{"timestamp":"2026-04-24T12:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0,"total_tokens":15}}}}"#
+            ),
+        )
+        .unwrap();
+
+        let first = collect_codex_sessions(tmp.path(), None);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].token_totals.total, 15);
+
+        fs::write(
+            &file,
+            concat!(
+                r#"{"timestamp":"2026-04-24T12:00:00Z","type":"session_meta","payload":{"id":"session-a","cwd":"/tmp/project","timestamp":"2026-04-24T12:00:00Z"}}"#,
+                "\n",
+                r#"{"timestamp":"2026-04-24T12:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":20,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":30}}}}"#
+            ),
+        )
+        .unwrap();
+
+        let second = collect_codex_sessions(tmp.path(), None);
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].token_totals.total, 30);
+    }
+
+    #[test]
+    fn test_collect_codex_sessions_prunes_deleted_file() {
+        let tmp = TempDir::new().unwrap();
+        let day_dir = tmp.path().join("2026").join("04").join("24");
+        fs::create_dir_all(&day_dir).unwrap();
+        let keep = day_dir.join("rollout-2026-04-24T12-00-00-session-a.jsonl");
+        let delete = day_dir.join("rollout-2026-04-24T12-00-00-session-b.jsonl");
+
+        fs::write(
+            &keep,
+            concat!(
+                r#"{"timestamp":"2026-04-24T12:00:00Z","type":"session_meta","payload":{"id":"session-a","cwd":"/tmp/project-a","timestamp":"2026-04-24T12:00:00Z"}}"#,
+                "\n",
+                r#"{"timestamp":"2026-04-24T12:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0,"total_tokens":15}}}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            &delete,
+            concat!(
+                r#"{"timestamp":"2026-04-24T12:01:00Z","type":"session_meta","payload":{"id":"session-b","cwd":"/tmp/project-b","timestamp":"2026-04-24T12:01:00Z"}}"#,
+                "\n",
+                r#"{"timestamp":"2026-04-24T12:01:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0,"total_tokens":2}}}}"#
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(collect_codex_sessions(tmp.path(), None).len(), 2);
+
+        fs::remove_file(delete).unwrap();
+
+        let remaining = collect_codex_sessions(tmp.path(), None);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, "session-a");
     }
 }

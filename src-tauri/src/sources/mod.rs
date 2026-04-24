@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
 use thiserror::Error;
 
@@ -97,25 +99,63 @@ fn metadata_modified_millis(metadata: &fs::Metadata) -> u128 {
         .unwrap_or(0)
 }
 
-pub(crate) fn file_change_hint(path: &Path) -> Result<Option<String>, SourceError> {
-    let metadata = match fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(SourceError::IoError(err)),
-    };
-
-    Ok(Some(format!(
-        "file:{}:{}:{}",
-        path.display(),
-        metadata.len(),
-        metadata_modified_millis(&metadata)
-    )))
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RecursivePathHintKey {
+    root: PathBuf,
+    extension: Option<String>,
 }
 
-pub(crate) fn recursive_path_change_hint(
+#[derive(Debug, Clone)]
+struct RecursivePathHintState {
+    count: u64,
+    total_size: u64,
+    latest_modified: u128,
+    latest_path: String,
+    revision: u64,
+}
+
+fn recursive_path_hint_cache(
+) -> &'static Mutex<HashMap<RecursivePathHintKey, RecursivePathHintState>> {
+    static CACHE: OnceLock<Mutex<HashMap<RecursivePathHintKey, RecursivePathHintState>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn recursive_path_hint_key(root: &Path, extension: Option<&str>) -> RecursivePathHintKey {
+    RecursivePathHintKey {
+        root: root.to_path_buf(),
+        extension: extension.map(str::to_owned),
+    }
+}
+
+fn path_matches_extension(path: &Path, extension: Option<&str>) -> bool {
+    extension.is_none_or(|wanted| path.extension().and_then(|ext| ext.to_str()) == Some(wanted))
+}
+
+fn format_recursive_path_hint(
     root: &Path,
     extension: Option<&str>,
-) -> Result<Option<String>, SourceError> {
+    state: &RecursivePathHintState,
+) -> String {
+    format!(
+        "tree:{}:{}:{}:{}:{}:{}",
+        root.display(),
+        extension.unwrap_or("*"),
+        state.count,
+        state.total_size,
+        state.revision,
+        if state.latest_path.is_empty() {
+            state.latest_modified.to_string()
+        } else {
+            format!("{}:{}", state.latest_modified, state.latest_path)
+        }
+    )
+}
+
+fn scan_recursive_path_hint(
+    root: &Path,
+    extension: Option<&str>,
+) -> Result<RecursivePathHintState, SourceError> {
     fn visit(
         dir: &Path,
         extension: Option<&str>,
@@ -141,13 +181,7 @@ pub(crate) fn recursive_path_change_hint(
                 continue;
             }
 
-            if !file_type.is_file() {
-                continue;
-            }
-
-            if extension
-                .is_some_and(|wanted| path.extension().and_then(|ext| ext.to_str()) != Some(wanted))
-            {
+            if !file_type.is_file() || !path_matches_extension(&path, extension) {
                 continue;
             }
 
@@ -164,35 +198,77 @@ pub(crate) fn recursive_path_change_hint(
         Ok(())
     }
 
-    if !root.exists() {
-        return Ok(None);
-    }
+    let mut state = RecursivePathHintState {
+        count: 0,
+        total_size: 0,
+        latest_modified: 0,
+        latest_path: String::new(),
+        revision: 0,
+    };
 
-    let mut count = 0_u64;
-    let mut total_size = 0_u64;
-    let mut latest_modified = 0_u128;
-    let mut latest_path = String::new();
     visit(
         root,
         extension,
-        &mut count,
-        &mut total_size,
-        &mut latest_modified,
-        &mut latest_path,
+        &mut state.count,
+        &mut state.total_size,
+        &mut state.latest_modified,
+        &mut state.latest_path,
     )?;
 
-    Ok(Some(format!(
-        "tree:{}:{}:{}:{}:{}",
-        root.display(),
-        extension.unwrap_or("*"),
-        count,
-        total_size,
-        if latest_path.is_empty() {
-            latest_modified.to_string()
-        } else {
-            format!("{latest_modified}:{latest_path}")
+    Ok(state)
+}
+
+pub(crate) fn invalidate_recursive_path_change_hint(root: &Path) {
+    recursive_path_hint_cache()
+        .lock()
+        .unwrap()
+        .retain(|key, _| key.root != root);
+}
+
+pub(crate) fn note_recursive_path_event(root: &Path, path: &Path) {
+    if !path.starts_with(root) {
+        return;
+    }
+
+    for (key, state) in recursive_path_hint_cache().lock().unwrap().iter_mut() {
+        if key.root == root && path_matches_extension(path, key.extension.as_deref()) {
+            state.revision = state.revision.wrapping_add(1);
         }
+    }
+}
+
+pub(crate) fn file_change_hint(path: &Path) -> Result<Option<String>, SourceError> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(SourceError::IoError(err)),
+    };
+
+    Ok(Some(format!(
+        "file:{}:{}:{}",
+        path.display(),
+        metadata.len(),
+        metadata_modified_millis(&metadata)
     )))
+}
+
+pub(crate) fn recursive_path_change_hint(
+    root: &Path,
+    extension: Option<&str>,
+) -> Result<Option<String>, SourceError> {
+    if !root.exists() {
+        invalidate_recursive_path_change_hint(root);
+        return Ok(None);
+    }
+
+    let key = recursive_path_hint_key(root, extension);
+    let mut cache = recursive_path_hint_cache().lock().unwrap();
+    let state = cache
+        .entry(key)
+        .or_insert(scan_recursive_path_hint(root, extension)?)
+        .clone();
+
+    Ok(Some(format_recursive_path_hint(root, extension, &state)))
 }
 
 /// Trait that all sources must implement

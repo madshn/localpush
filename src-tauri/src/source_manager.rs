@@ -11,7 +11,10 @@ use std::sync::{Arc, Mutex};
 use crate::bindings::BindingStore;
 use crate::config::AppConfig;
 use crate::source_config::SourceConfigStore;
-use crate::sources::{PostDeliveryAction, Source, SourceError};
+use crate::sources::{
+    invalidate_recursive_path_change_hint, note_recursive_path_event, PostDeliveryAction, Source,
+    SourceError,
+};
 use crate::traits::{DeliveryLedgerTrait, FileWatcher, FileWatcherError, LedgerError};
 
 /// Error types for SourceManager operations
@@ -42,6 +45,7 @@ pub struct SourceInfo {
 pub enum DeliverySkipReason {
     NoData,
     Unchanged,
+    ClaimedPending,
 }
 
 impl DeliverySkipReason {
@@ -49,6 +53,7 @@ impl DeliverySkipReason {
         match self {
             Self::NoData => "no_data",
             Self::Unchanged => "unchanged",
+            Self::ClaimedPending => "claimed_pending",
         }
     }
 }
@@ -145,6 +150,9 @@ impl SourceManager {
 
         if let Some(path) = source.watch_path() {
             if source.watch_recursive() {
+                invalidate_recursive_path_change_hint(&path);
+            }
+            if source.watch_recursive() {
                 self.file_watcher.watch_recursive(path)?;
             } else {
                 self.file_watcher.watch(path)?;
@@ -172,6 +180,9 @@ impl SourceManager {
             .ok_or_else(|| SourceManagerError::SourceNotFound(source_id.to_string()))?;
 
         if let Some(path) = source.watch_path() {
+            if source.watch_recursive() {
+                invalidate_recursive_path_change_hint(&path);
+            }
             self.file_watcher.unwatch(path)?;
         }
 
@@ -278,6 +289,14 @@ impl SourceManager {
             .map_err(|e| SourceManagerError::SourceError(SourceError::JsonError(e)))
     }
 
+    fn payload_has_claimed_path(source: &Arc<dyn Source>, payload: &serde_json::Value) -> bool {
+        source
+            .fingerprint_payload(payload)
+            .get("claimed_path")
+            .and_then(|value| value.as_str())
+            .is_some()
+    }
+
     fn last_payload_fingerprint(
         &self,
         source_id: &str,
@@ -363,6 +382,12 @@ impl SourceManager {
                 "Ignoring unrelated file event"
             );
             return Ok(());
+        }
+
+        if source.watch_recursive() {
+            if let Some(root) = source.watch_path() {
+                note_recursive_path_event(&root, path);
+            }
         }
 
         // Record event for coalescing (resets the 90s window)
@@ -585,6 +610,9 @@ impl SourceManager {
 
         let fingerprint = Self::fingerprint_for_payload(&source, &filtered)?;
         if self.last_payload_fingerprint(source_id)? == Some(fingerprint) {
+            if Self::payload_has_claimed_path(&source, &filtered) {
+                return Ok(PreparedPayload::Skip(DeliverySkipReason::ClaimedPending));
+            }
             return Ok(PreparedPayload::Skip(DeliverySkipReason::Unchanged));
         }
 
@@ -653,9 +681,10 @@ impl SourceManager {
 mod tests {
     use super::*;
     use crate::mocks::ManualFileWatcher;
-    use crate::sources::ClaudeStatsSource;
+    use crate::sources::{recursive_path_change_hint, ClaudeStatsSource};
     use crate::DeliveryLedger;
     use serde_json::json;
+    use std::fs;
     use tempfile::TempDir;
 
     fn test_manager() -> (SourceManager, Arc<ManualFileWatcher>) {
@@ -820,6 +849,49 @@ mod tests {
         }
     }
 
+    struct RecursiveHintedSource {
+        root: PathBuf,
+        parse_calls: Mutex<u64>,
+    }
+
+    impl Source for RecursiveHintedSource {
+        fn id(&self) -> &str {
+            "recursive-hinted-source"
+        }
+
+        fn name(&self) -> &str {
+            "Recursive Hinted Source"
+        }
+
+        fn watch_path(&self) -> Option<PathBuf> {
+            Some(self.root.clone())
+        }
+
+        fn watch_recursive(&self) -> bool {
+            true
+        }
+
+        fn parse(&self) -> Result<serde_json::Value, SourceError> {
+            let mut parse_calls = self.parse_calls.lock().unwrap();
+            *parse_calls += 1;
+            Ok(json!({
+                "count": 1,
+                "metadata": {
+                    "source": "localpush",
+                    "source_id": "recursive-hinted-source",
+                }
+            }))
+        }
+
+        fn preview(&self) -> Result<crate::sources::SourcePreview, SourceError> {
+            unimplemented!()
+        }
+
+        fn delivery_change_hint(&self) -> Result<Option<String>, SourceError> {
+            recursive_path_change_hint(&self.root, None)
+        }
+    }
+
     #[test]
     fn test_register_source() {
         let (mgr, _) = test_manager();
@@ -952,6 +1024,66 @@ mod tests {
 
         let stats = ledger.get_stats().unwrap();
         assert_eq!(stats.pending, 2);
+    }
+
+    #[test]
+    fn test_recursive_file_event_invalidates_cached_change_hint() {
+        let root = TempDir::new().unwrap();
+        let nested = root.path().join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("one.jsonl"), "{}\n").unwrap();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config, binding_store);
+
+        let source = Arc::new(RecursiveHintedSource {
+            root: root.path().to_path_buf(),
+            parse_calls: Mutex::new(0),
+        });
+        mgr.register(source.clone());
+        mgr.enable("recursive-hinted-source").unwrap();
+
+        let first_payload = match mgr
+            .prepare_payload_for_delivery("recursive-hinted-source")
+            .unwrap()
+        {
+            PreparedPayload::Deliver(payload) => payload,
+            other => panic!("expected initial delivery, got {other:?}"),
+        };
+        mgr.remember_payload_fingerprint("recursive-hinted-source", &first_payload)
+            .unwrap();
+        assert_eq!(*source.parse_calls.lock().unwrap(), 1);
+
+        assert!(matches!(
+            mgr.prepare_payload_for_delivery("recursive-hinted-source")
+                .unwrap(),
+            PreparedPayload::Skip(DeliverySkipReason::Unchanged)
+        ));
+        assert_eq!(
+            *source.parse_calls.lock().unwrap(),
+            1,
+            "cached recursive hint should skip reparsing unchanged trees"
+        );
+
+        let new_file = nested.join("two.jsonl");
+        fs::write(&new_file, "{}\n").unwrap();
+        mgr.handle_file_event(&new_file).unwrap();
+
+        let prepared = mgr
+            .prepare_payload_for_delivery("recursive-hinted-source")
+            .unwrap();
+        assert!(
+            matches!(prepared, PreparedPayload::Skip(DeliverySkipReason::Unchanged)),
+            "the fingerprint can still match after a reparse; this assertion just guards the control flow"
+        );
+        assert_eq!(
+            *source.parse_calls.lock().unwrap(),
+            2,
+            "file events should force one fresh parse for recursive sources"
+        );
     }
 
     #[test]
@@ -1151,6 +1283,50 @@ mod tests {
         }
 
         assert_eq!(*source.parse_calls.lock().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_prepare_payload_reports_claimed_pending_when_new_file_arrives_behind_claimed_file() {
+        let temp = TempDir::new().unwrap();
+        let downloads = temp.path().join("Downloads");
+        let archive = downloads.join(".claude-task-archive");
+        std::fs::create_dir_all(&downloads).unwrap();
+
+        let first = downloads.join("claude-task-alpha-2026-03-24T08-00-00Z.json");
+        let second = downloads.join("claude-task-beta-2026-03-24T09-00-00Z.json");
+        std::fs::write(
+            &first,
+            serde_json::to_vec(&serde_json::json!({"slug": "alpha"})).unwrap(),
+        )
+        .unwrap();
+
+        let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
+        let watcher = Arc::new(ManualFileWatcher::new());
+        let config = Arc::new(AppConfig::open_in_memory().unwrap());
+        let binding_store = Arc::new(crate::bindings::BindingStore::new(config.clone()));
+        let mgr = SourceManager::new(ledger, watcher, config.clone(), binding_store);
+
+        mgr.register(Arc::new(
+            crate::sources::CicTaskOutputSource::new_with_paths(&downloads, &archive, config),
+        ));
+
+        let first_payload = match mgr.prepare_payload_for_delivery("cic-task-output").unwrap() {
+            PreparedPayload::Deliver(payload) => payload,
+            other => panic!("expected deliverable payload, got {other:?}"),
+        };
+        mgr.remember_payload_fingerprint("cic-task-output", &first_payload)
+            .unwrap();
+
+        std::fs::write(
+            &second,
+            serde_json::to_vec(&serde_json::json!({"slug": "beta"})).unwrap(),
+        )
+        .unwrap();
+
+        match mgr.prepare_payload_for_delivery("cic-task-output").unwrap() {
+            PreparedPayload::Skip(DeliverySkipReason::ClaimedPending) => {}
+            other => panic!("expected claimed-pending skip, got {other:?}"),
+        }
     }
 
     #[test]

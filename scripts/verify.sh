@@ -8,9 +8,11 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CARGO_MANIFEST="$PROJECT_ROOT/src-tauri/Cargo.toml"
+CARGO_TARGET_DIR="$(node "$PROJECT_ROOT/scripts/cargo-target-dir.mjs" --mkdir)"
 
 # Ensure tools are available
 export PATH="$HOME/.cargo/bin:$PATH"
+export CARGO_TARGET_DIR
 
 # Color codes for output
 RED='\033[0;31m'
@@ -122,6 +124,7 @@ main() {
     fi
 
     echo "Project root: $PROJECT_ROOT"
+    echo "Cargo target dir: $CARGO_TARGET_DIR"
     echo ""
 
     # Gate 1: Cargo check

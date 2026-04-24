@@ -2,9 +2,9 @@
 //!
 //! Tests the full flow: Source → File Event → Parse → Enqueue → Deliver
 
-use std::io::Write;
+use std::fs;
 use std::sync::Arc;
-use tempfile::NamedTempFile;
+use tempfile::TempDir;
 
 use localpush_lib::bindings::{BindingStore, SourceBinding};
 use localpush_lib::config::AppConfig;
@@ -15,38 +15,31 @@ use localpush_lib::sources::ClaudeStatsSource;
 use localpush_lib::traits::{DeliveryLedgerTrait, DeliveryStatus, FileWatcher};
 use localpush_lib::DeliveryLedger;
 
-/// Create a temporary stats file with valid JSON
-fn create_stats_file() -> NamedTempFile {
-    let mut file = NamedTempFile::new().unwrap();
-    write!(
-        file,
-        r#"{{
-        "version": 2,
-        "lastComputedDate": "2026-02-04",
-        "dailyActivity": [
-            {{"date": "2026-02-04", "messageCount": 42, "sessionCount": 3, "toolCallCount": 15}}
-        ],
-        "dailyModelTokens": [
-            {{"date": "2026-02-04", "tokensByModel": {{"claude-opus-4-5-20251101": 5000}}}}
-        ],
-        "modelUsage": {{
-            "claude-opus-4-5-20251101": {{
-                "inputTokens": 10000,
-                "outputTokens": 8000,
-                "cacheReadInputTokens": 50000,
-                "cacheCreationInputTokens": 20000,
-                "webSearchRequests": 0,
-                "costUsd": 1.50
-            }}
-        }},
-        "totalSessions": 50,
-        "totalMessages": 500,
-        "hourCounts": {{"14": 100, "15": 200}}
-    }}"#
+/// Create a temporary Claude projects directory with one valid JSONL session.
+fn create_stats_fixture() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().unwrap();
+    let project_dir = dir.path().join("-Users-test-project");
+    let session_path = project_dir.join("test-session-1.jsonl");
+    let now = chrono::Utc::now();
+    let created = (now - chrono::Duration::hours(1)).to_rfc3339();
+    let modified = now.to_rfc3339();
+
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::write(
+        &session_path,
+        format!(
+            concat!(
+                r#"{{"type":"user","sessionId":"test-session-1","timestamp":"{created}","cwd":"/Users/test/project","gitBranch":"main","message":{{"role":"user","content":"test prompt"}}}}"#,
+                "\n",
+                r#"{{"type":"assistant","timestamp":"{modified}","message":{{"model":"claude-opus-4-6","usage":{{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":500,"cache_creation_input_tokens":200}}}}}}"#
+            ),
+            created = created,
+            modified = modified,
+        ),
     )
     .unwrap();
-    file.flush().unwrap();
-    file
+
+    (dir, session_path)
 }
 
 /// Build test components
@@ -56,9 +49,10 @@ fn setup() -> (
     Arc<RecordedWebhookClient>,
     Arc<AppConfig>,
     SourceManager,
-    NamedTempFile,
+    TempDir,
+    std::path::PathBuf,
 ) {
-    let stats_file = create_stats_file();
+    let (stats_dir, session_path) = create_stats_fixture();
     let ledger = Arc::new(DeliveryLedger::open_in_memory().unwrap());
     let watcher = Arc::new(ManualFileWatcher::new());
     let webhook = Arc::new(RecordedWebhookClient::success());
@@ -71,10 +65,18 @@ fn setup() -> (
         config.clone(),
         binding_store,
     );
-    let source = Arc::new(ClaudeStatsSource::new_with_path(stats_file.path()));
+    let source = Arc::new(ClaudeStatsSource::new_with_path(stats_dir.path()));
     mgr.register(source);
 
-    (ledger, watcher, webhook, config, mgr, stats_file)
+    (
+        ledger,
+        watcher,
+        webhook,
+        config,
+        mgr,
+        stats_dir,
+        session_path,
+    )
 }
 
 fn add_on_change_binding(config: &Arc<AppConfig>, source_id: &str, url: &str) {
@@ -101,17 +103,18 @@ fn add_on_change_binding(config: &Arc<AppConfig>, source_id: &str, url: &str) {
 #[test]
 fn test_full_pipeline_enable_event_deliver() {
     // Setup
-    let (ledger, watcher, webhook, config, mgr, stats_file) = setup();
-    let path = stats_file.path().to_path_buf();
+    let (ledger, watcher, webhook, config, mgr, stats_dir, session_path) = setup();
 
     add_on_change_binding(&config, "claude-stats", "https://example.com/hook");
 
     // 1. Enable source → watcher should be tracking the path
     mgr.enable("claude-stats").unwrap();
-    assert!(watcher.watched_paths().contains(&path));
+    assert!(watcher
+        .watched_paths()
+        .contains(&stats_dir.path().to_path_buf()));
 
     // 2. Simulate file change → event is coalesced (buffered)
-    mgr.handle_file_event(&path).unwrap();
+    mgr.handle_file_event(&session_path).unwrap();
 
     // 3. Flush coalesced event → parse and enqueue
     let count = mgr.flush_source("claude-stats").unwrap();
@@ -162,8 +165,7 @@ fn test_full_pipeline_enable_event_deliver() {
 
 #[test]
 fn test_pipeline_retry_on_webhook_failure() {
-    let (ledger, _watcher, _webhook_success, config, mgr, stats_file) = setup();
-    let path = stats_file.path().to_path_buf();
+    let (ledger, _watcher, _webhook_success, config, mgr, _stats_dir, session_path) = setup();
     add_on_change_binding(&config, "claude-stats", "https://example.com/hook");
 
     // Use a failing webhook instead
@@ -173,7 +175,7 @@ fn test_pipeline_retry_on_webhook_failure() {
 
     // Enable, trigger, and flush coalesced event
     mgr.enable("claude-stats").unwrap();
-    mgr.handle_file_event(&path).unwrap();
+    mgr.handle_file_event(&session_path).unwrap();
     mgr.flush_source("claude-stats").unwrap();
 
     // Run delivery → should fail
@@ -205,12 +207,11 @@ fn test_pipeline_retry_on_webhook_failure() {
 
 #[test]
 fn test_pipeline_disabled_source_ignores_events() {
-    let (ledger, _watcher, _webhook, _config, mgr, stats_file) = setup();
-    let path = stats_file.path().to_path_buf();
+    let (ledger, _watcher, _webhook, _config, mgr, _stats_dir, session_path) = setup();
 
     // DON'T enable the source
     // Simulate file event → should be ignored (or error, depending on impl)
-    let result = mgr.handle_file_event(&path);
+    let result = mgr.handle_file_event(&session_path);
 
     // Based on source_manager.rs line 139-141, disabled sources are silently ignored
     assert!(
@@ -228,16 +229,15 @@ fn test_pipeline_disabled_source_ignores_events() {
 
 #[test]
 fn test_pipeline_multiple_events_coalesce_to_single_delivery() {
-    let (ledger, _watcher, webhook, config, mgr, stats_file) = setup();
-    let path = stats_file.path().to_path_buf();
+    let (ledger, _watcher, webhook, config, mgr, _stats_dir, session_path) = setup();
     add_on_change_binding(&config, "claude-stats", "https://example.com/hook");
 
     mgr.enable("claude-stats").unwrap();
 
     // Simulate 3 file changes — these coalesce into a single pending event
-    mgr.handle_file_event(&path).unwrap();
-    mgr.handle_file_event(&path).unwrap();
-    mgr.handle_file_event(&path).unwrap();
+    mgr.handle_file_event(&session_path).unwrap();
+    mgr.handle_file_event(&session_path).unwrap();
+    mgr.handle_file_event(&session_path).unwrap();
 
     // Nothing enqueued yet (coalescing buffers events)
     let stats = ledger.get_stats().unwrap();

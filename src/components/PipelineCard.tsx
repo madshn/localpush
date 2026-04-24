@@ -457,7 +457,9 @@ function PipelineCardComponent({
                           disabled={reconnectingTargetId === binding.target_id}
                         >
                           <RefreshCw size={9} />
-                          {reconnectingTargetId === binding.target_id ? 'Reconnecting...' : 'Reconnect'}
+                          {reconnectingTargetId === binding.target_id
+                            ? 'Reconnecting...'
+                            : 'Reconnect'}
                         </button>
                       </div>
                     )}
