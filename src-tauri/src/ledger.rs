@@ -53,7 +53,14 @@ fn create_schema(conn: &Connection) -> Result<(), LedgerError> {
 
         CREATE INDEX IF NOT EXISTS idx_ledger_delivered
             ON delivery_ledger (delivered_at)
-            WHERE status = 'delivered';",
+            WHERE status = 'delivered';
+
+        CREATE INDEX IF NOT EXISTS idx_ledger_status_delivered_at
+            ON delivery_ledger (status, delivered_at)
+            WHERE status = 'delivered';
+
+        CREATE INDEX IF NOT EXISTS idx_ledger_status_event_times
+            ON delivery_ledger (status, event_type, delivered_at, created_at);",
     )
     .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
@@ -139,7 +146,21 @@ impl DeliveryLedger {
                 retry_log TEXT DEFAULT '[]',
                 trigger_type TEXT DEFAULT 'file_change',
                 delivered_to TEXT DEFAULT NULL
-            );",
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ledger_status
+                ON delivery_ledger (status, available_at);
+
+            CREATE INDEX IF NOT EXISTS idx_ledger_delivered
+                ON delivery_ledger (delivered_at)
+                WHERE status = 'delivered';
+
+            CREATE INDEX IF NOT EXISTS idx_ledger_status_delivered_at
+                ON delivery_ledger (status, delivered_at)
+                WHERE status = 'delivered';
+
+            CREATE INDEX IF NOT EXISTS idx_ledger_status_event_times
+                ON delivery_ledger (status, event_type, delivered_at, created_at);",
             )
             .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
 
@@ -508,27 +529,35 @@ impl DeliveryLedgerTrait for DeliveryLedger {
             .timestamp();
 
         let conn = self.reader.lock().unwrap();
-        let stats: LedgerStats = conn.query_row(
-            "SELECT
-                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-                SUM(CASE WHEN status = 'in_flight' THEN 1 ELSE 0 END) as in_flight,
-                SUM(CASE WHEN status = 'delivered' AND delivered_at >= ?1 THEN 1 ELSE 0 END) as delivered_today,
-                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-                SUM(CASE WHEN status = 'dlq' THEN 1 ELSE 0 END) as dlq,
-                SUM(CASE WHEN status = 'target_paused' THEN 1 ELSE 0 END) as target_paused
-             FROM delivery_ledger",
-            params![today_start],
-            |row| {
-                Ok(LedgerStats {
-                    pending: row.get::<_, i64>(0).unwrap_or(0) as usize,
-                    in_flight: row.get::<_, i64>(1).unwrap_or(0) as usize,
-                    delivered_today: row.get::<_, i64>(2).unwrap_or(0) as usize,
-                    failed: row.get::<_, i64>(3).unwrap_or(0) as usize,
-                    dlq: row.get::<_, i64>(4).unwrap_or(0) as usize,
-                    target_paused: row.get::<_, i64>(5).unwrap_or(0) as usize,
-                })
-            }
-        ).map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+        let count_status = |status: &str| -> Result<usize, LedgerError> {
+            conn.query_row(
+                "SELECT COUNT(*) FROM delivery_ledger WHERE status = ?1",
+                params![status],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count as usize)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))
+        };
+
+        let delivered_today = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM delivery_ledger
+                 WHERE status = 'delivered' AND delivered_at >= ?1",
+                params![today_start],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count as usize)
+            .map_err(|e| LedgerError::DatabaseError(e.to_string()))?;
+
+        let stats = LedgerStats {
+            pending: count_status("pending")?,
+            in_flight: count_status("in_flight")?,
+            delivered_today,
+            failed: count_status("failed")?,
+            dlq: count_status("dlq")?,
+            target_paused: count_status("target_paused")?,
+        };
 
         Ok(stats)
     }
@@ -867,6 +896,69 @@ mod tests {
 
         let delivered = ledger.get_by_status(DeliveryStatus::Delivered).unwrap();
         assert_eq!(delivered.len(), 1);
+    }
+
+    #[test]
+    fn test_schema_creates_covering_status_indexes() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+        let conn = ledger.reader.lock().unwrap();
+
+        let mut stmt = conn
+            .prepare("PRAGMA index_list('delivery_ledger')")
+            .unwrap();
+        let indexes: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+
+        assert!(indexes.iter().any(|name| name == "idx_ledger_status"));
+        assert!(indexes.iter().any(|name| name == "idx_ledger_delivered"));
+        assert!(indexes
+            .iter()
+            .any(|name| name == "idx_ledger_status_delivered_at"));
+        assert!(indexes
+            .iter()
+            .any(|name| name == "idx_ledger_status_event_times"));
+    }
+
+    #[test]
+    fn test_get_stats_counts_statuses_without_missing_empty_groups() {
+        let ledger = DeliveryLedger::open_in_memory().unwrap();
+        let now = chrono::Utc::now().timestamp();
+
+        for (event_type, status, delivered_at) in [
+            ("pending.event", "pending", None),
+            ("inflight.event", "in_flight", None),
+            ("failed.event", "failed", None),
+            ("dlq.event", "dlq", None),
+            ("paused.event", "target_paused", None),
+            ("delivered.today", "delivered", Some(now)),
+            ("delivered.old", "delivered", Some(now - 172_800)),
+        ] {
+            let event_id = ledger
+                .enqueue(event_type, serde_json::json!({"status": status}))
+                .unwrap();
+            ledger
+                .writer
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE delivery_ledger
+                     SET status = ?1, delivered_at = ?2
+                     WHERE event_id = ?3",
+                    params![status, delivered_at, event_id],
+                )
+                .unwrap();
+        }
+
+        let stats = ledger.get_stats().unwrap();
+        assert_eq!(stats.pending, 1);
+        assert_eq!(stats.in_flight, 1);
+        assert_eq!(stats.failed, 1);
+        assert_eq!(stats.dlq, 1);
+        assert_eq!(stats.target_paused, 1);
+        assert_eq!(stats.delivered_today, 1);
     }
 
     #[test]

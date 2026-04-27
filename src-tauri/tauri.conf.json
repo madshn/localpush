@@ -45,7 +45,7 @@
     ],
     "createUpdaterArtifacts": false,
     "macOS": {
-      "bundleVersion": "4",
+      "bundleVersion": "5",
       "entitlements": null,
       "minimumSystemVersion": "12.0"
     }
