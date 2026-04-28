@@ -40,6 +40,16 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/madsnissen/builds/localpush/.claude/hooks/repotic-session-stop.sh"
+          }
+        ]
+      }
     ]
   }
 }

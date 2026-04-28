@@ -10,6 +10,28 @@
             "timeoutSec": 10
           }
         ]
+      },
+      {
+        "matcher": null,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/madsnissen/builds/localpush/.codex/hooks/repotic-session-stop.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/madsnissen/builds/localpush/.codex/hooks/repotic-session-start.sh",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
